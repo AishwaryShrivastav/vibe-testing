@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "vibe-test": {
+      "command": "npx",
+      "args": ["-y", "vibe-test@latest", "--mcp"],
+      "env": {}
+    }
+  }
+}

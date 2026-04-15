@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.vibe/
+*.tsbuildinfo
+
+# IDE
+.claude/
+.cursor/projects/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+test/
+*.log
+
+# Env
+.env
+.env.*

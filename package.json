@@ -1,0 +1,67 @@
+{
+  "name": "vibe-test",
+  "version": "0.2.0",
+  "description": "Code-aware browser testing agent — reads your codebase, understands functionality, tests every element, reports with screenshots. Works as MCP server for Cursor/Claude Code or standalone CLI.",
+  "type": "module",
+  "bin": {
+    "vibe-test": "./dist/cli.js",
+    "vibe-test-mcp": "./dist/mcp-server.js"
+  },
+  "main": "./dist/engine/index.js",
+  "exports": {
+    ".": "./dist/engine/index.js",
+    "./mcp": "./dist/mcp-server.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "VIBE.example.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "mcp": "tsx src/mcp-server.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AishwaryShrivastav/vibe-testing.git"
+  },
+  "homepage": "https://github.com/AishwaryShrivastav/vibe-testing#readme",
+  "bugs": {
+    "url": "https://github.com/AishwaryShrivastav/vibe-testing/issues"
+  },
+  "author": "Aishwary Shrivastav",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.44.0",
+    "commander": "^12.0.0",
+    "glob": "^11.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0"
+  },
+  "keywords": [
+    "testing",
+    "browser-testing",
+    "ai-testing",
+    "playwright",
+    "mcp",
+    "mcp-server",
+    "cursor",
+    "claude-code",
+    "qa",
+    "e2e",
+    "vibe-coding",
+    "code-aware"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
