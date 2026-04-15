@@ -46,40 +46,34 @@ Your Codebase ──→ Context Engine ──→ Browser Engine ──→ Report
 
 ## Quick Start (One Command)
 
-### Cursor
-
 ```bash
 cd /path/to/your/project
 npx vibe-test@latest init
 ```
 
-**That's it.** This single command:
-- Registers the MCP server in `.cursor/mcp.json`
-- Installs Cursor rules (`.cursor/rules/vibe-testing.mdc`) so Cursor knows all 11 tools
-- Creates a `VIBE.md` template for your project-specific test guidance
-- Creates `vibe.config.json` with sensible defaults
+**That's it.** This single command auto-detects your editors and configures all of them:
 
-Now open Cursor and ask:
+| Editor | What gets created |
+|--------|-------------------|
+| **Cursor** | `.cursor/mcp.json` + `.cursor/rules/vibe-testing.mdc` (tool instructions) |
+| **Claude Code** | `.mcp.json` + `CLAUDE.md` (agent instructions) |
+| **VS Code (Copilot)** | `.vscode/mcp.json` (uses `servers` key) |
+| **Windsurf** | Global config at `~/.codeium/windsurf/mcp_config.json` (with `--global`) |
+| **Roo Code** | `.roo/mcp.json` |
+| **Codex / Devin / Zed** | `AGENTS.md` (universal agent convention) |
+| **All** | `VIBE.md` (test guidance) + `vibe.config.json` |
 
-> "Scan the codebase and test it against https://staging.myapp.com — log in with test@example.com / pass123, explore the dashboard, and tell me what's broken"
+Now open your editor and ask:
 
-Cursor will use the MCP tools autonomously. Optional: pass `--cursor-global` to also register the MCP server globally for all projects.
+> "Scan this codebase and test it against https://staging.myapp.com — log in with test@example.com / pass123, explore the dashboard, and tell me what's broken"
 
-### Claude Code
+### Options
 
 ```bash
-# Add to Claude Code MCP config (~/.claude/mcp.json)
-```
-
-```json
-{
-  "mcpServers": {
-    "vibe-test": {
-      "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
-    }
-  }
-}
+npx vibe-test init                       # auto-detect and configure project-level
+npx vibe-test init --global              # also register in global/user-level configs
+npx vibe-test init --editor cursor       # only configure Cursor
+npx vibe-test init --editor vscode windsurf  # only VS Code + Windsurf
 ```
 
 ### Standalone CLI

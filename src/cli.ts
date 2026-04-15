@@ -167,6 +167,134 @@ const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
 - Add any project-specific testing notes here
 `
 
+const AGENTS_MD_CONTENT = `# AGENTS.md — Vibe Test Integration
+
+This project uses **Vibe Test**, a code-aware browser testing agent available as an MCP server.
+
+## Testing
+
+To test this application, use the \`vibe-test\` MCP tools:
+
+1. \`scan_codebase\` — Analyze the project (call first, always)
+2. \`login\` — Authenticate if the app requires login
+3. \`explore_page\` — Interactively test a page (clicks every element)
+4. \`suggest_tests\` — Find test coverage gaps and get executable scenarios
+5. \`execute_scenario\` — Run a specific test flow
+6. \`generate_report\` — HTML report with screenshots (auto-opens)
+7. \`cleanup\` — Close browsers when done
+
+### Quick test command
+\`\`\`
+Scan this codebase with vibe-test and test it against <URL>. Log in, explore pages, and generate a report.
+\`\`\`
+
+### Setup
+If vibe-test MCP is not configured, run:
+\`\`\`bash
+npx vibe-test@latest init
+\`\`\`
+
+See \`VIBE.md\` for project-specific test credentials and guidance.
+`
+
+const MCP_SERVER_ENTRY = {
+  command: 'npx',
+  args: ['-y', 'vibe-test@latest', '--mcp'],
+}
+
+// ─── Editor detection and configuration ─────────────────────────────────────
+
+interface EditorTarget {
+  name: string
+  /** Project-level config paths (relative to cwd) */
+  projectConfigs: { path: string; rootKey: string; format: 'mcpServers' | 'servers' | 'context_servers' }[]
+  /** Global config paths (absolute, resolved at runtime) */
+  globalConfigs: { path: () => string; rootKey: string; format: 'mcpServers' | 'servers' | 'context_servers' }[]
+  /** Project-level rules/instructions files */
+  rulesFiles: { path: string; content: string }[]
+  /** How to detect if this editor is installed */
+  detect: () => Promise<boolean>
+}
+
+function homeDir(): string {
+  return process.env.HOME ?? process.env.USERPROFILE ?? ''
+}
+
+const EDITORS: EditorTarget[] = [
+  {
+    name: 'Cursor',
+    projectConfigs: [{ path: '.cursor/mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
+    globalConfigs: [{ path: () => path.join(homeDir(), '.cursor', 'mcp.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    rulesFiles: [{ path: '.cursor/rules/vibe-testing.mdc', content: CURSOR_RULE_CONTENT }],
+    detect: async () => {
+      const dirs = [path.join(homeDir(), '.cursor'), path.join(process.cwd(), '.cursor')]
+      for (const d of dirs) { try { await fs.access(d); return true } catch {} }
+      return false
+    },
+  },
+  {
+    name: 'Claude Code',
+    projectConfigs: [{ path: '.mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
+    globalConfigs: [{ path: () => path.join(homeDir(), '.claude.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    rulesFiles: [{ path: 'CLAUDE.md', content: AGENTS_MD_CONTENT }],
+    detect: async () => {
+      const paths = [path.join(homeDir(), '.claude'), path.join(homeDir(), '.claude.json')]
+      for (const p of paths) { try { await fs.access(p); return true } catch {} }
+      return false
+    },
+  },
+  {
+    name: 'Windsurf',
+    projectConfigs: [],
+    globalConfigs: [{ path: () => path.join(homeDir(), '.codeium', 'windsurf', 'mcp_config.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    rulesFiles: [],
+    detect: async () => {
+      try { await fs.access(path.join(homeDir(), '.codeium', 'windsurf')); return true } catch { return false }
+    },
+  },
+  {
+    name: 'VS Code (Copilot)',
+    projectConfigs: [{ path: '.vscode/mcp.json', rootKey: 'servers', format: 'servers' }],
+    globalConfigs: [],
+    rulesFiles: [],
+    detect: async () => {
+      try { await fs.access(path.join(process.cwd(), '.vscode')); return true } catch { return false }
+    },
+  },
+  {
+    name: 'Roo Code',
+    projectConfigs: [{ path: '.roo/mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
+    globalConfigs: [],
+    rulesFiles: [],
+    detect: async () => {
+      try { await fs.access(path.join(process.cwd(), '.roo')); return true } catch { return false }
+    },
+  },
+]
+
+async function upsertMcpConfig(filePath: string, rootKey: string): Promise<'created' | 'updated' | 'skipped'> {
+  let config: any = {}
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8')
+    config = JSON.parse(raw)
+  } catch { /* file doesn't exist */ }
+
+  if (!config[rootKey]) config[rootKey] = {}
+  if (config[rootKey]['vibe-test']) return 'skipped'
+
+  config[rootKey]['vibe-test'] = { ...MCP_SERVER_ENTRY }
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.writeFile(filePath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+  return Object.keys(config[rootKey]).length === 1 ? 'created' : 'updated'
+}
+
+async function writeIfMissing(filePath: string, content: string): Promise<boolean> {
+  if (await fileExists(filePath)) return false
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.writeFile(filePath, content, 'utf-8')
+  return true
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 // If invoked with --mcp flag, start the MCP server directly
@@ -228,95 +356,128 @@ program
 
 program
   .command('init')
-  .description('Set up Vibe Test in this project — configures MCP server, Cursor rules, VIBE.md, and config')
-  .option('--cursor-global', 'Also register MCP server in global Cursor settings (~/.cursor/mcp.json)')
-  .action(async (opts: { cursorGlobal?: boolean }) => {
+  .description('Set up Vibe Test — auto-detects editors (Cursor, Claude Code, Windsurf, VS Code, Roo Code) and configures all of them')
+  .option('--global', 'Also register MCP server in global/user-level editor configs')
+  .option('--editor <names...>', 'Only configure specific editors (cursor, claude-code, windsurf, vscode, roo)')
+  .action(async (opts: { global?: boolean; editor?: string[] }) => {
     const cwd = process.cwd()
     const projectName = path.basename(cwd)
-    let filesCreated = 0
-    let filesSkipped = 0
+    let created = 0
+    let skipped = 0
 
     logger.section(`Setting up Vibe Test in ${projectName}`)
 
-    // 1. Cursor rules — teach Cursor how to use the tools
-    const rulesDir = path.join(cwd, '.cursor', 'rules')
-    const rulePath = path.join(rulesDir, 'vibe-testing.mdc')
-    if (await fileExists(rulePath)) {
-      logger.dim('  .cursor/rules/vibe-testing.mdc already exists — skipped')
-      filesSkipped++
-    } else {
-      await fs.mkdir(rulesDir, { recursive: true })
-      await fs.writeFile(rulePath, CURSOR_RULE_CONTENT, 'utf-8')
-      logger.success('  Created .cursor/rules/vibe-testing.mdc')
-      filesCreated++
-    }
+    // Detect which editors are installed
+    const detected: EditorTarget[] = []
+    const filterNames = opts.editor?.map(e => e.toLowerCase())
 
-    // 2. Project-level MCP config for Cursor
-    const mcpConfigPath = path.join(cwd, '.cursor', 'mcp.json')
-    if (await fileExists(mcpConfigPath)) {
-      logger.dim('  .cursor/mcp.json already exists — skipped')
-      filesSkipped++
-    } else {
-      const mcpConfig = {
-        mcpServers: {
-          'vibe-test': {
-            command: 'npx',
-            args: ['-y', 'vibe-test@latest', '--mcp'],
-          },
-        },
+    for (const editor of EDITORS) {
+      const aliases: Record<string, string[]> = {
+        'Cursor': ['cursor'],
+        'Claude Code': ['claude-code', 'claude', 'claudecode'],
+        'Windsurf': ['windsurf', 'cascade'],
+        'VS Code (Copilot)': ['vscode', 'vs-code', 'copilot', 'github-copilot'],
+        'Roo Code': ['roo', 'roo-code', 'roocode', 'roo-cline'],
       }
-      await fs.mkdir(path.join(cwd, '.cursor'), { recursive: true })
-      await fs.writeFile(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + '\n', 'utf-8')
-      logger.success('  Created .cursor/mcp.json (MCP server registered)')
-      filesCreated++
+      if (filterNames && !filterNames.some(f =>
+        editor.name.toLowerCase().includes(f) ||
+        (aliases[editor.name] ?? []).includes(f)
+      )) continue
+
+      const found = await editor.detect()
+      if (found || filterNames) {
+        detected.push(editor)
+      }
     }
 
-    // 3. Global Cursor MCP config (optional)
-    if (opts.cursorGlobal) {
-      const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? ''
-      const globalMcpPath = path.join(homeDir, '.cursor', 'mcp.json')
-      try {
-        let globalConfig: any = {}
-        try {
-          const existing = await fs.readFile(globalMcpPath, 'utf-8')
-          globalConfig = JSON.parse(existing)
-        } catch { /* file doesn't exist yet */ }
+    if (detected.length === 0) {
+      // No editors detected — set up for all common ones
+      logger.dim('  No specific editors detected — configuring for Cursor + Claude Code + VS Code')
+      detected.push(EDITORS[0], EDITORS[1], EDITORS[3])
+    }
 
-        if (!globalConfig.mcpServers) globalConfig.mcpServers = {}
-        if (globalConfig.mcpServers['vibe-test']) {
-          logger.dim('  ~/.cursor/mcp.json already has vibe-test — skipped')
-          filesSkipped++
+    const editorNames = detected.map(e => e.name).join(', ')
+    logger.info(`  Detected editors: ${editorNames}`)
+    console.log('')
+
+    // Configure each editor
+    for (const editor of detected) {
+      logger.info(`  ${editor.name}:`)
+
+      // Project-level MCP configs
+      for (const pc of editor.projectConfigs) {
+        const fullPath = path.join(cwd, pc.path)
+        const result = await upsertMcpConfig(fullPath, pc.rootKey)
+        if (result === 'skipped') {
+          logger.dim(`    ${pc.path} — vibe-test already registered`)
+          skipped++
         } else {
-          globalConfig.mcpServers['vibe-test'] = {
-            command: 'npx',
-            args: ['-y', 'vibe-test@latest', '--mcp'],
-          }
-          await fs.mkdir(path.join(homeDir, '.cursor'), { recursive: true })
-          await fs.writeFile(globalMcpPath, JSON.stringify(globalConfig, null, 2) + '\n', 'utf-8')
-          logger.success('  Updated ~/.cursor/mcp.json (global MCP registration)')
-          filesCreated++
+          logger.success(`    ${result === 'created' ? 'Created' : 'Updated'} ${pc.path}`)
+          created++
         }
-      } catch (e) {
-        logger.warn(`  Could not update global Cursor config: ${e}`)
+      }
+
+      // Global configs (only if --global)
+      if (opts.global) {
+        for (const gc of editor.globalConfigs) {
+          try {
+            const fullPath = gc.path()
+            const result = await upsertMcpConfig(fullPath, gc.rootKey)
+            const shortPath = fullPath.replace(homeDir(), '~')
+            if (result === 'skipped') {
+              logger.dim(`    ${shortPath} — vibe-test already registered`)
+              skipped++
+            } else {
+              logger.success(`    ${result === 'created' ? 'Created' : 'Updated'} ${shortPath}`)
+              created++
+            }
+          } catch (e) {
+            logger.warn(`    Could not update global config: ${e}`)
+          }
+        }
+      }
+
+      // Rules/instruction files
+      for (const rf of editor.rulesFiles) {
+        const fullPath = path.join(cwd, rf.path)
+        const wrote = await writeIfMissing(fullPath, rf.content)
+        if (wrote) {
+          logger.success(`    Created ${rf.path}`)
+          created++
+        } else {
+          logger.dim(`    ${rf.path} already exists`)
+          skipped++
+        }
       }
     }
 
-    // 4. VIBE.md template
-    const vibeMdPath = path.join(cwd, 'VIBE.md')
-    if (await fileExists(vibeMdPath)) {
-      logger.dim('  VIBE.md already exists — skipped')
-      filesSkipped++
+    // AGENTS.md — universal agent instruction file (Codex, Devin, Copilot, Zed, etc.)
+    console.log('')
+    logger.info('  Universal:')
+    const agentsMdPath = path.join(cwd, 'AGENTS.md')
+    if (await writeIfMissing(agentsMdPath, AGENTS_MD_CONTENT)) {
+      logger.success('    Created AGENTS.md (Codex, Devin, Copilot, Zed, Windsurf)')
+      created++
     } else {
-      await fs.writeFile(vibeMdPath, VIBE_MD_TEMPLATE, 'utf-8')
-      logger.success('  Created VIBE.md (edit with your project details)')
-      filesCreated++
+      logger.dim('    AGENTS.md already exists')
+      skipped++
     }
 
-    // 5. vibe.config.json
+    // VIBE.md
+    const vibeMdPath = path.join(cwd, 'VIBE.md')
+    if (await writeIfMissing(vibeMdPath, VIBE_MD_TEMPLATE)) {
+      logger.success('    Created VIBE.md (edit with your test credentials)')
+      created++
+    } else {
+      logger.dim('    VIBE.md already exists')
+      skipped++
+    }
+
+    // vibe.config.json
     const configPath = path.join(cwd, 'vibe.config.json')
     if (await fileExists(configPath)) {
-      logger.dim('  vibe.config.json already exists — skipped')
-      filesSkipped++
+      logger.dim('    vibe.config.json already exists')
+      skipped++
     } else {
       const defaultConfig = {
         url: 'http://localhost:3000',
@@ -327,27 +488,30 @@ program
         browser: { headed: true, slowMo: 40 },
       }
       await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2) + '\n', 'utf-8')
-      logger.success('  Created vibe.config.json')
-      filesCreated++
+      logger.success('    Created vibe.config.json')
+      created++
     }
 
     // Summary
     console.log('')
-    if (filesCreated > 0) {
-      logger.success(`Done! ${filesCreated} file(s) created${filesSkipped > 0 ? `, ${filesSkipped} skipped (already exist)` : ''}.`)
+    if (created > 0) {
+      logger.success(`Done! ${created} file(s) created${skipped > 0 ? `, ${skipped} skipped` : ''}.`)
     } else {
       logger.info('Everything is already set up.')
     }
 
     console.log('')
     logger.info('Next steps:')
-    logger.dim('  1. Edit VIBE.md with your login URL, credentials, and blocklist')
+    logger.dim('  1. Edit VIBE.md with your login URL and test credentials')
     logger.dim('  2. Edit vibe.config.json to set your app URL')
-    logger.dim('  3. Open Cursor and ask:')
+    logger.dim('  3. Open your editor and ask:')
     console.log('')
-    console.log('     "Scan the codebase and test it against <your-url>."')
+    console.log('     "Scan this codebase and test it against <your-url>."')
     console.log('')
-    logger.dim('  Cursor will use vibe-test MCP tools automatically.')
+    logger.dim('  Your editor will discover vibe-test tools automatically.')
+    if (!opts.global) {
+      logger.dim('  Tip: run with --global to also register in your user-level editor configs.')
+    }
     console.log('')
   })
 
