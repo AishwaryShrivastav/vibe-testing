@@ -644,8 +644,13 @@ function makeScenario(
 function selectorForField(field: FormField): string {
   // Prefer placeholder — works universally including JSX components without id/name
   if (field.placeholder) return `placeholder=${field.placeholder}`
-  // Labels work well with Playwright's getByLabel
-  if (field.label) return `label=${field.label}`
+  // Labels work with getByLabel — but short single-word labels often collide with
+  // dialog titles / section headers (Radix, shadcn). Prefer id/name for those.
+  if (field.label) {
+    const t = field.label.trim()
+    const tokens = t.split(/\s+/).length
+    if (tokens >= 2 || t.length >= 12) return `label=${field.label}`
+  }
   if (field.id) return `#${field.id}`
   if (field.name && field.name !== 'unknown' && !/^[_\d]/.test(field.name)) return `[name="${field.name}"]`
   if (field.type && field.type !== 'text' && field.type !== 'unknown') return `[type="${field.type}"]`

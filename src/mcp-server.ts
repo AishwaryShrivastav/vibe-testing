@@ -1288,6 +1288,11 @@ async function executeStepOnPage(page: Page, step: TestScenario['steps'][0], bas
   return undefined
 }
 
+function mcpFillableByLabel(page: Page, text: string, exact: boolean) {
+  const base = exact ? page.getByLabel(text, { exact: true }) : page.getByLabel(text, { exact: false })
+  return base.locator('input, textarea, select, [contenteditable="true"]').first()
+}
+
 async function resolveLocatorForStep(page: Page, step: TestScenario['steps'][0], _timeout: number) {
   const selector = step.selector ?? ''
   const strategies: Array<{ locator: ReturnType<Page['locator']>; name: string }> = []
@@ -1297,8 +1302,17 @@ async function resolveLocatorForStep(page: Page, step: TestScenario['steps'][0],
   }
 
   if (step.action === 'fill') {
+    const labelFromSel = selector.match(/^label=(.+)$/)?.[1]?.trim()
+    if (labelFromSel) {
+      strategies.push({ locator: mcpFillableByLabel(page, labelFromSel, true), name: `getByLabel("${labelFromSel}")→input` })
+      strategies.push({ locator: mcpFillableByLabel(page, labelFromSel, false), name: `getByLabel("${labelFromSel}", fuzzy)→input` })
+    }
+    const phFromSel = selector.match(/^placeholder=(.+)$/)?.[1]?.trim()
+    if (phFromSel) {
+      strategies.push({ locator: page.getByPlaceholder(phFromSel, { exact: false }), name: `getByPlaceholder("${phFromSel}")` })
+    }
     const labelHint = step.description.match(/Fill\s+(\w+)/i)?.[1]
-    if (labelHint) strategies.push({ locator: page.getByLabel(labelHint, { exact: false }), name: `getByLabel("${labelHint}")` })
+    if (labelHint) strategies.push({ locator: mcpFillableByLabel(page, labelHint, false), name: `getByLabel("${labelHint}")→input` })
     const desc = step.description.toLowerCase()
     if (desc.includes('email')) strategies.push({ locator: page.getByPlaceholder('email', { exact: false }), name: 'getByPlaceholder("email")' })
     if (desc.includes('password')) strategies.push({ locator: page.getByPlaceholder('password', { exact: false }), name: 'getByPlaceholder("password")' })
@@ -1321,6 +1335,14 @@ async function resolveLocatorForStep(page: Page, step: TestScenario['steps'][0],
     } catch { continue }
   }
 
+  if (selector.startsWith('label=')) {
+    const lt = selector.slice(6).trim()
+    return { locator: mcpFillableByLabel(page, lt, false), name: `fallback: getByLabel("${lt}")→input` }
+  }
+  if (selector.startsWith('placeholder=')) {
+    const ph = selector.slice(12)
+    return { locator: page.getByPlaceholder(ph, { exact: false }), name: `fallback: getByPlaceholder("${ph}")` }
+  }
   if (selector) return { locator: page.locator(selector).first(), name: `fallback: ${selector}` }
   throw new Error(`No valid selector for step: ${step.description}`)
 }

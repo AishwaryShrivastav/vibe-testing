@@ -516,6 +516,19 @@ program
   })
 
 program
+  .command('reset')
+  .description('Delete .vibe in the current project (memory, intel, screenshots) for a fresh test run')
+  .action(async () => {
+    const dir = path.join(process.cwd(), '.vibe')
+    try {
+      await fs.rm(dir, { recursive: true, force: true })
+      logger.success(`Removed ${dir} — next run starts clean`)
+    } catch (e) {
+      logger.warn(`Could not remove .vibe: ${e}`)
+    }
+  })
+
+program
   .command('report')
   .description('Open the last test report in your browser')
   .action(async () => {

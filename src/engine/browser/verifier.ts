@@ -190,6 +190,16 @@ async function heuristicVerification(
     if (currentPath.includes('login') || currentPath.includes('signin')) {
       return { passed: true, explanation: `Correctly redirected to login page (${currentPath})` }
     }
+    // SPAs often keep the URL on the protected route while showing an auth gate in-page
+    const pwdVisible = await page.locator('input[type="password"]:visible').count().then(n => n > 0).catch(() => false)
+    const authHeading = await page.getByRole('heading', { name: /sign in|log in|welcome back|authenticate/i }).first().isVisible().catch(() => false)
+    const signInLink = await page.getByRole('link', { name: /sign in|log in/i }).first().isVisible().catch(() => false)
+    if (pwdVisible || authHeading || signInLink) {
+      return {
+        passed: true,
+        explanation: `Auth gate visible on page (SPA pattern) while URL remains ${currentPath}`,
+      }
+    }
     if (currentPath === scenario.route) {
       return { passed: false, explanation: `Expected redirect to login but stayed on ${currentPath}` }
     }

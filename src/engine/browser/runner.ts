@@ -504,8 +504,8 @@ async function resolveLocator(
     const labelHint = extractLabelHint(step)
     if (labelHint) {
       strategies.push({
-        locator: page.getByLabel(labelHint, { exact: false }),
-        name: `getByLabel("${labelHint}")`,
+        locator: fillableByLabel(page, labelHint),
+        name: `getByLabel("${labelHint}")→input`,
       })
     }
 
@@ -575,9 +575,14 @@ async function resolveLocator(
 
   const labelSel = selector.match(/^label=(.+)$/)
   if (labelSel) {
+    const lt = labelSel[1].trim()
     strategies.push({
-      locator: page.getByLabel(labelSel[1], { exact: false }),
-      name: `getByLabel("${labelSel[1]}")`,
+      locator: fillableByLabel(page, lt, true),
+      name: `getByLabel("${lt}")→input`,
+    })
+    strategies.push({
+      locator: fillableByLabel(page, lt, false),
+      name: `getByLabel("${lt}", fuzzy)→input`,
     })
   }
 
@@ -616,13 +621,27 @@ async function resolveLocator(
     }
   }
 
-  // Final fallback
+  // Final fallback — never pass label=/placeholder= to page.locator (invalid CSS)
   if (selector) {
     const firstSeg = selector.split(',')[0].trim()
+    const lbl = firstSeg.match(/^label=(.+)$/)
+    if (lbl) {
+      return { locator: fillableByLabel(page, lbl[1].trim(), false), resolved: `fallback: getByLabel("${lbl[1]}")→input` }
+    }
+    const ph = firstSeg.match(/^placeholder=(.+)$/)
+    if (ph) {
+      return { locator: page.getByPlaceholder(ph[1], { exact: false }), resolved: `fallback: getByPlaceholder("${ph[1]}")` }
+    }
     return { locator: page.locator(firstSeg), resolved: `fallback: ${firstSeg}` }
   }
 
   throw new Error(`No valid selector for step: ${step.description}`)
+}
+
+/** Prefer real controls — getByLabel can match dialogs / sections titled like the field. */
+function fillableByLabel(page: Page, text: string, exact?: boolean): Locator {
+  const base = exact ? page.getByLabel(text, { exact: true }) : page.getByLabel(text, { exact: false })
+  return base.locator('input, textarea, select, [contenteditable="true"]').first()
 }
 
 /**

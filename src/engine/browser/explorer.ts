@@ -211,6 +211,16 @@ async function capturePageState(page: Page): Promise<PageState> {
 // ─── Element Interaction Testers ──────────────────────────────────────────────
 
 async function resolveAndClick(page: Page, element: DiscoveredElement, timeout = 3000): Promise<void> {
+  // Common nav actions: role+name avoids ambiguous getByText matches (sidebar vs header)
+  const t = element.text.trim()
+  if (element.type === 'button' && /^(log\s*out|sign\s*out)$/i.test(t)) {
+    const roleBtn = page.getByRole('button', { name: /log\s*out|sign\s*out/i }).first()
+    if (await roleBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await roleBtn.click({ timeout })
+      return
+    }
+  }
+
   // For links, strongly prefer href-based selector — text matching is ambiguous
   if (element.type === 'link' && element.href) {
     try {
