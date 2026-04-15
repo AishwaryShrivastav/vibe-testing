@@ -46,7 +46,10 @@ npx vibe-test init --editor cursor  # only configure Cursor
 
 ```bash
 npx vibe-test run https://your-app.com --codebase /path/to/project
+npx vibe-test converge https://your-app.com --codebase /path/to/project
 ```
+
+`converge` runs baseline tests then automatically runs follow-up rounds from coverage gaps and failures until pass-rate / gap thresholds or max rounds.
 
 ## MCP Tools (11 tools)
 

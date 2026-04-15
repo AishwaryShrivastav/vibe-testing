@@ -250,6 +250,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'run_converge',
+      description: `Iterative coverage: runs the full baseline suite, then automatically runs follow-up rounds from coverage gaps and failed scenarios until pass rate and gap thresholds are met (or max rounds). Use for "keep testing until coverage is good". Opens the final HTML report.`,
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          url: { type: 'string', description: 'URL to test.' },
+          codebase_path: { type: 'string', description: 'Absolute path to codebase root. Defaults to cwd.' },
+          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep' },
+          headed: { type: 'boolean', default: true },
+          max_followup_rounds: { type: 'number', description: 'Max extra rounds after baseline (default 4).', default: 4 },
+          target_pass_rate: { type: 'number', description: 'Stop when last batch pass rate reaches this 0–1 (default 0.92).', default: 0.92 },
+          max_high_severity_gaps: { type: 'number', description: 'Stop when critical+important gaps <= this (default 2).', default: 2 },
+        },
+        required: ['url'],
+      },
+    },
+    {
       name: 'cleanup',
       description: `Close all open browsers and reset the session state. Call when done testing.`,
       inputSchema: {
@@ -279,6 +296,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'generate_report': return await handleGenerateReport(args)
       case 'take_screenshot': return await handleTakeScreenshot(args)
       case 'run_full_test': return await handleRunFullTest(args)
+      case 'run_converge': return await handleRunConverge(args)
       case 'cleanup': return await handleCleanup()
       default: throw new Error(`Unknown tool: ${name}`)
     }
@@ -792,7 +810,7 @@ async function handleGenerateReport(args: Record<string, unknown>) {
 
   const recs = session.memory?.getRecommendations()
 
-  const { generateCoverageGaps } = await import('./engine/index.js')
+  const { generateCoverageGaps } = await import('./engine/coverage-gaps.js')
   const coverageGaps = generateCoverageGaps(session.productModel.behaviours, session.explorations)
 
   const report = await generateHtmlReport(
@@ -1127,6 +1145,39 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Report: ${result.report_path} (opened in browser)`
 
   return { content: [{ type: 'text', text: summary }] }
+}
+
+// ─── run_converge ─────────────────────────────────────────────────────────────
+
+async function handleRunConverge(args: Record<string, unknown>) {
+  const tester = new VibeTester({
+    url: args.url as string,
+    codebase_path: args.codebase_path as string | undefined,
+    mode: (args.mode as 'fast' | 'deep') ?? 'deep',
+    browser: { headed: (args.headed as boolean) ?? true },
+  })
+
+  const result = await tester.converge({
+    max_followup_rounds: (args.max_followup_rounds as number) ?? 4,
+    target_pass_rate: (args.target_pass_rate as number) ?? 0.92,
+    max_high_severity_gaps: (args.max_high_severity_gaps as number) ?? 2,
+  })
+
+  openInBrowser(result.report_path)
+
+  const rounds = result.summary.converge_rounds ?? 1
+  const roundsLine = `**Vibe Converge Complete**
+- Rounds (baseline + follow-ups): ${rounds}
+- Total scenario executions: ${result.summary.total}
+- Passed: ${result.summary.passed}
+- Failed: ${result.summary.failed}
+- Errors: ${result.summary.errors}
+- Elements explored: ${result.summary.elements_explored}
+- Remaining gaps (items): ${result.coverage_gaps.length}
+- Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
+- Report: ${result.report_path} (opened in browser)`
+
+  return { content: [{ type: 'text', text: roundsLine }] }
 }
 
 // ─── cleanup ──────────────────────────────────────────────────────────────────

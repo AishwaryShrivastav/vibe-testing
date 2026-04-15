@@ -109,6 +109,19 @@ All-in-one: scan → generate → execute → explore → report. Use for comple
 { "url": "https://staging.myapp.com", "codebase_path": "/path/to/project" }
 ```
 
+### `run_converge`
+**Iterative coverage expansion:** runs the full baseline suite, then automatically runs follow-up rounds built from **coverage gaps** and **failed scenarios** until pass rate and gap-count thresholds are met (or `max_followup_rounds` is reached). Use when you want the tool to keep testing deeper without manual scenario writing.
+
+```json
+{
+  "url": "https://staging.myapp.com",
+  "codebase_path": "/path/to/project",
+  "max_followup_rounds": 4,
+  "target_pass_rate": 0.92,
+  "max_high_severity_gaps": 2
+}
+```
+
 ### `cleanup`
 Close all browsers and reset session state.
 

@@ -120,6 +120,13 @@ All-in-one: scan → generate → execute → explore → report. Use for comple
 { "url": "https://staging.myapp.com", "codebase_path": "/path/to/project" }
 \`\`\`
 
+### \`run_converge\`
+Iterative coverage: baseline run, then follow-up rounds from coverage gaps + failed scenarios until pass rate / gap thresholds or max rounds. Opens final HTML report.
+
+\`\`\`json
+{ "url": "https://staging.myapp.com", "max_followup_rounds": 4, "target_pass_rate": 0.92 }
+\`\`\`
+
 ### \`cleanup\`
 Close all browsers and reset session state.
 
@@ -129,6 +136,7 @@ Close all browsers and reset session state.
 - Use \`scan_page_elements\` to understand a page before writing custom scenarios
 - Use \`explore_page\` for broad "does everything work?" testing
 - Use \`suggest_tests\` to find gaps and get ready-to-run scenarios
+- Use \`run_converge\` to automatically run baseline + follow-up rounds until coverage thresholds
 - Use \`execute_scenario\` for targeted, specific test flows
 - Screenshots are returned as images — use them to visually verify results
 - After making code changes, re-run relevant scenarios to verify fixes
@@ -181,7 +189,8 @@ To test this application, use the \`vibe-test\` MCP tools:
 4. \`suggest_tests\` — Find test coverage gaps and get executable scenarios
 5. \`execute_scenario\` — Run a specific test flow
 6. \`generate_report\` — HTML report with screenshots (auto-opens)
-7. \`cleanup\` — Close browsers when done
+7. \`run_converge\` — Baseline run, then automatic follow-up rounds from coverage gaps until thresholds
+8. \`cleanup\` — Close browsers when done
 
 ### Quick test command
 \`\`\`
@@ -348,6 +357,59 @@ program
 
     const tester = new VibeTester(config)
     const result = await tester.run()
+
+    if (result.summary.failed > 0 || result.summary.errors > 0) {
+      process.exit(1)
+    }
+  })
+
+program
+  .command('converge [url]')
+  .description('Iterative coverage: baseline run, then follow-up rounds from gaps + failures until thresholds (or max rounds)')
+  .option('-m, --mode <mode>', 'fast or deep (default: deep)', 'deep')
+  .option('--no-headed', 'run browser headless')
+  .option('-c, --config <path>', 'path to vibe.config.json')
+  .option('--codebase <path>', 'path to codebase root (default: cwd)')
+  .option('--max-rounds <n>', 'max follow-up rounds after baseline', '4')
+  .option('--target-pass-rate <r>', 'stop when last batch pass rate reaches this (0-1)', '0.92')
+  .option('--max-gaps <n>', 'stop when critical+important gaps <= this', '2')
+  .action(async (urlArg: string | undefined, opts: {
+    mode: string
+    headed: boolean
+    config?: string
+    codebase?: string
+    maxRounds: string
+    targetPassRate: string
+    maxGaps: string
+  }) => {
+    const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
+    const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
+
+    const url = urlArg ?? fileConfig.url
+    if (!url) {
+      logger.error('URL required — pass as argument or set in vibe.config.json')
+      process.exit(1)
+    }
+
+    const config = {
+      ...fileConfig,
+      url,
+      mode: opts.mode as 'fast' | 'deep',
+      codebase_path: opts.codebase ?? fileConfig.codebase_path,
+      browser: {
+        ...fileConfig.browser,
+        headed: opts.headed !== false,
+      },
+    }
+
+    const tester = new VibeTester(config)
+    const result = await tester.converge({
+      max_followup_rounds: parseInt(opts.maxRounds, 10) || 4,
+      target_pass_rate: parseFloat(opts.targetPassRate) || 0.92,
+      max_high_severity_gaps: parseInt(opts.maxGaps, 10) || 2,
+    })
+
+    logger.info(`Converge finished: ${result.summary.converge_rounds ?? 1} round(s), ${result.coverage_gaps.length} gaps remaining`)
 
     if (result.summary.failed > 0 || result.summary.errors > 0) {
       process.exit(1)

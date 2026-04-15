@@ -235,5 +235,7 @@ export interface VibeRunResult {
     duration_ms: number
     elements_explored: number
     api_calls_observed: number
+    /** Set by `converge`: baseline + follow-up rounds executed */
+    converge_rounds?: number
   }
 }

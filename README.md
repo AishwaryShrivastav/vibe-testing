@@ -82,8 +82,13 @@ npx vibe-test init --editor vscode windsurf  # only VS Code + Windsurf
 npx vibe-test@latest init                          # set up config
 npx vibe-test run https://staging.myapp.com        # run against a URL
 npx vibe-test run http://localhost:3000 --mode deep # run against localhost
+npx vibe-test converge https://staging.app.com     # baseline + auto follow-ups until coverage thresholds
+npx vibe-test converge --max-rounds 6 --target-pass-rate 0.95 -c vibe.config.json
+npx vibe-test reset                                # wipe .vibe for a clean run
 npx vibe-test report                               # open last report
 ```
+
+**`converge`** runs the full test suite, analyzes gaps (CRUD, broken elements, API errors), converts them into executable scenarios, re-runs failures, and repeats until the last batch hits **~92% pass rate** and **≤2 critical/important gaps** (configurable), or `max_followup_rounds` is exhausted.
 
 ### From Source
 
@@ -113,6 +118,7 @@ When used as an MCP server, the editor LLM gets these 11 tools:
 | `take_screenshot` | Quick visual verification of any page | Screenshot |
 | `generate_report` | Build HTML report (auto-opens in browser) | Report path + summary |
 | `run_full_test` | All-in-one: scan → execute → explore → report | Full results |
+| `run_converge` | Baseline + iterative follow-ups from gaps until thresholds | Summary + report |
 | `cleanup` | Close browsers and reset session | — |
 
 ### Typical Workflow

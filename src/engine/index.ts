@@ -1,9 +1,11 @@
-import { VibeRunResult, CoverageGapSuggestion, RouteBehaviour } from '../types/index.js'
+import type { VibeRunResult } from '../types/index.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
 import { MemoryManager } from './memory/index.js'
 import { generateHtmlReport } from './reporter/html.js'
+import { generateCoverageGaps } from './coverage-gaps.js'
+import { runConverge, type ConvergeOptions } from './converge.js'
 import { logger } from '../utils/logger.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
@@ -98,172 +100,69 @@ export class VibeTester {
       summary: { total: results.length, passed, failed, errors, duration_ms: duration, elements_explored: elementsExplored, api_calls_observed: apiCallsObserved },
     }
   }
-}
 
-// ─── Coverage Gap Analysis ────────────────────────────────────────────────────
+  /**
+   * Iterative coverage: run baseline scenarios, then follow-up rounds from
+   * coverage gaps + failed retests until thresholds or max rounds.
+   */
+  async converge(opts?: ConvergeOptions): Promise<VibeRunResult> {
+    const startTime = Date.now()
+    logger.section(`Vibe Converge — ${this.config.url}`)
 
-function generateCoverageGaps(
-  behaviours: RouteBehaviour[],
-  explorations: PageExploration[]
-): CoverageGapSuggestion[] {
-  const gaps: CoverageGapSuggestion[] = []
+    const memory = new MemoryManager(this.projectRoot)
+    await memory.load()
 
-  for (const behaviour of behaviours) {
-    const route = behaviour.route.path
-    const func = behaviour.functionality
-    if (!func) continue
+    const cr = await runConverge(this.config, opts)
+    const recommendations = memory.getRecommendations()
+    const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
 
-    const exploration = explorations.find(e => e.route === route)
+    const passed = cr.total_results.filter(r => r.status === 'pass').length
+    const failed = cr.total_results.filter(r => r.status === 'fail').length
+    const errors = cr.total_results.filter(r => r.status === 'error').length
+    const elementsExplored = cr.explorations.reduce((sum, e) => sum + e.elements_discovered, 0)
+    const apiCallsObserved = cr.explorations.reduce((sum, e) => sum + e.api_calls.length, 0)
 
-    // Check CRUD operations: if code has a create mutation but no test created an item
-    for (const feature of func.features) {
-      if (feature.type === 'crud_create') {
-        const dialog = func.dialogs[0]
-        if (dialog && dialog.fields.length > 0) {
-          gaps.push({
-            route,
-            missing: `No end-to-end test for creating ${feature.name.replace('Create ', '')} via "${dialog.title || dialog.trigger}" dialog`,
-            severity: 'critical',
-            suggested_test: {
-              name: `Create ${feature.name.replace('Create ', '')} on ${route}`,
-              steps: [
-                `Navigate to ${route}`,
-                `Click "${dialog.trigger}" to open dialog`,
-                ...dialog.fields.map(f => `Fill "${f.placeholder || f.name}" with test data`),
-                `Click "${dialog.submit_text || 'Submit'}"`,
-                `Verify new item appears in list or success toast shown`,
-              ],
-            },
-          })
-        }
-      }
+    const report = await generateHtmlReport(
+      cr.total_results,
+      productModel,
+      this.config,
+      cr.explorations,
+      cr.final_gaps,
+      recommendations
+    )
+    const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
+    await fs.mkdir(path.dirname(reportPath), { recursive: true })
+    await fs.writeFile(reportPath, report, 'utf-8')
 
-      if (feature.type === 'crud_update') {
-        gaps.push({
-          route,
-          missing: `No test for updating ${feature.name.replace('Update ', '')}`,
-          severity: 'important',
-          suggested_test: {
-            name: `Update ${feature.name.replace('Update ', '')} on ${route}`,
-            steps: [
-              `Navigate to ${route}`,
-              `Click an existing item to select it`,
-              `Modify fields with new data`,
-              `Save changes`,
-              `Verify updated values persist`,
-            ],
-          },
-        })
-      }
+    logger.section('Converge report')
+    logger.success(`Rounds: ${cr.rounds}, final gaps: ${cr.final_gaps.length}, total executions: ${cr.total_results.length}`)
+    logger.dim(`Report: ${reportPath}`)
 
-      if (feature.type === 'crud_delete') {
-        gaps.push({
-          route,
-          missing: `No test for deleting ${feature.name.replace('Delete ', '')}`,
-          severity: 'important',
-          suggested_test: {
-            name: `Delete ${feature.name.replace('Delete ', '')} on ${route}`,
-            steps: [
-              `Navigate to ${route}`,
-              `Click delete on an item`,
-              `Confirm deletion in dialog`,
-              `Verify item removed from list`,
-            ],
-          },
-        })
-      }
+    const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
+    exec(`${openCmd} "${reportPath}"`, () => {})
 
-      if (feature.type === 'pagination') {
-        gaps.push({
-          route,
-          missing: `No test for pagination on ${route}`,
-          severity: 'nice_to_have',
-          suggested_test: {
-            name: `Pagination on ${route}`,
-            steps: [
-              `Navigate to ${route}`,
-              `Verify page 1 content displayed`,
-              `Click "Next" or page 2`,
-              `Verify different content loaded`,
-              `Click "Previous" or page 1`,
-              `Verify original content restored`,
-            ],
-          },
-        })
-      }
-
-      if (feature.type === 'upload') {
-        gaps.push({
-          route,
-          missing: `No test for file upload on ${route}`,
-          severity: 'important',
-          suggested_test: {
-            name: `File upload on ${route}`,
-            steps: [
-              `Navigate to ${route}`,
-              `Select file via upload input`,
-              `Verify file preview or upload progress`,
-              `Submit the upload`,
-              `Verify file saved or processing started`,
-            ],
-          },
-        })
-      }
-    }
-
-    // Check for buttons that weren't successfully tested during exploration
-    if (exploration) {
-      const brokenElements = exploration.interactions.filter(i => i.result === 'error')
-      for (const broken of brokenElements) {
-        gaps.push({
-          route,
-          missing: `Element "${broken.element}" failed during testing: ${broken.details}`,
-          severity: 'important',
-          suggested_test: {
-            name: `Fix "${broken.element}" on ${route}`,
-            steps: [
-              `Navigate to ${route}`,
-              `Locate element "${broken.element}"`,
-              `Verify it is visible and clickable`,
-              `Test interaction: ${broken.action}`,
-              `Verify expected response`,
-            ],
-          },
-        })
-      }
-
-      // API errors found during exploration
-      const apiErrors = exploration.api_calls.filter(a => a.isError)
-      for (const err of apiErrors) {
-        gaps.push({
-          route,
-          missing: `API error: ${err.method} ${err.path} returned ${err.status}`,
-          severity: err.status >= 500 ? 'critical' : 'important',
-          suggested_test: {
-            name: `Fix API ${err.method} ${err.path}`,
-            steps: [
-              `Navigate to ${route}`,
-              `Trigger the action that calls ${err.method} ${err.path}`,
-              `Verify API returns 2xx status`,
-              `Verify UI handles response correctly`,
-            ],
-          },
-        })
-      }
+    return {
+      product_model: productModel,
+      results: cr.total_results,
+      report,
+      report_path: reportPath,
+      coverage_gaps: cr.final_gaps,
+      summary: {
+        total: cr.total_results.length,
+        passed,
+        failed,
+        errors,
+        duration_ms: Date.now() - startTime,
+        elements_explored: elementsExplored,
+        api_calls_observed: apiCallsObserved,
+        converge_rounds: cr.rounds,
+      },
     }
   }
-
-  // Deduplicate by route + missing description
-  const seen = new Set<string>()
-  return gaps.filter(g => {
-    const key = `${g.route}:${g.missing.slice(0, 80)}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
 }
 
-export { generateCoverageGaps }
+export { generateCoverageGaps } from './coverage-gaps.js'
+export type { ConvergeOptions } from './converge.js'
 export { buildProductModel } from './context/index.js'
 export { executeScenarios } from './browser/index.js'
 export { MemoryManager } from './memory/index.js'
