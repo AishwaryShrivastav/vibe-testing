@@ -15,7 +15,9 @@
   "files": [
     "dist",
     "README.md",
-    "VIBE.example.md"
+    "VIBE.example.md",
+    "llms.txt",
+    "llms-full.txt"
   ],
   "scripts": {
     "build": "tsc",
@@ -50,15 +52,35 @@
     "testing",
     "browser-testing",
     "ai-testing",
+    "automated-testing",
     "playwright",
     "mcp",
     "mcp-server",
+    "model-context-protocol",
     "cursor",
+    "cursor-mcp",
     "claude-code",
+    "windsurf",
     "qa",
+    "qa-automation",
     "e2e",
+    "e2e-testing",
+    "end-to-end-testing",
     "vibe-coding",
-    "code-aware"
+    "vibe-testing",
+    "vibe-test",
+    "code-aware",
+    "test-automation",
+    "test-coverage",
+    "test-generation",
+    "screenshot-testing",
+    "visual-testing",
+    "ai-agent",
+    "llm-tools",
+    "npx",
+    "react-testing",
+    "nextjs-testing",
+    "web-testing"
   ],
   "license": "MIT",
   "engines": {

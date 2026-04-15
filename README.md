@@ -1,8 +1,22 @@
 # Vibe Test
 
-**Code-aware browser testing agent.** Reads your codebase, understands every route and form, explores every element in a real browser, and reports what works and what breaks — with screenshots.
+[![npm version](https://img.shields.io/npm/v/vibe-test.svg)](https://www.npmjs.com/package/vibe-test)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Works as an **MCP server** for [Cursor](https://cursor.sh) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (the editor LLM becomes the brain), or as a **standalone CLI**.
+**Code-aware browser testing agent for vibe coding.** Reads your codebase, understands every route and form, explores every element in a real Playwright browser, and reports what works and what breaks — with screenshots.
+
+Works as an **MCP server** for [Cursor](https://cursor.sh) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Windsurf](https://codeium.com/windsurf) (the editor LLM becomes the brain), or as a **standalone CLI**.
+
+**One command to add testing superpowers to your AI editor:**
+
+```bash
+# Add to your editor's MCP config — that's it
+npx vibe-test@latest --mcp
+```
+
+> **Built for vibe coding** — stop writing test cases manually. Let your AI editor scan the code, explore the app, find bugs, and generate coverage reports autonomously.
 
 ---
 
@@ -291,6 +305,51 @@ When it calls `suggest_tests`, it gets prioritized, executable scenarios:
   ]
 }
 ```
+
+---
+
+## Why Vibe Test?
+
+| Problem | Vibe Test Solution |
+|---------|--------------------|
+| Writing test cases is tedious | Auto-generates scenarios from your source code |
+| Tests break when UI changes | Learns working selectors and adapts across runs |
+| Hard to know what's untested | Maps code features → test coverage, shows gaps |
+| AI editors can't test the browser | MCP server gives your editor 11 browser testing tools |
+| Manual QA is slow | Explores every element automatically, like a senior tester |
+| No visibility into test results | Interactive HTML report with step-level screenshots |
+
+## FAQ
+
+**Q: Does Vibe Test use its own AI/LLM?**
+No. Vibe Test uses heuristic verification. When used as an MCP server, your editor's LLM (Cursor, Claude Code, etc.) acts as the brain — it sees screenshots and decides what to do next.
+
+**Q: What frameworks does it support?**
+React, Next.js, Vue, Nuxt, Angular, Svelte, SvelteKit, Remix, Gatsby, and any SPA or SSR framework with file-based or code-defined routes.
+
+**Q: Can I use it with Cursor?**
+Yes — add one JSON block to `.cursor/mcp.json` and Cursor gets 11 testing tools. See [Quick Start](#cursor-recommended).
+
+**Q: Can I use it with Claude Code?**
+Yes — add the same JSON block to `~/.claude/mcp.json`. See [Quick Start](#claude-code).
+
+**Q: Can I use it without an AI editor?**
+Yes — run `vibe-test run https://your-app.com` as a standalone CLI. It scans, tests, and generates a report.
+
+**Q: Does it handle login/authentication?**
+Yes — the `login` tool fills credentials in a real browser, captures tokens, and creates an authenticated session for subsequent tests. Credentials are persisted across runs.
+
+**Q: Will it click "Delete Account" or other destructive buttons?**
+No — configure `never_interact` patterns in `vibe.config.json` or `VIBE.md` to blocklist destructive actions.
+
+---
+
+## Related
+
+- [Model Context Protocol (MCP)](https://modelcontextprotocol.io) — the protocol Vibe Test uses for editor integration
+- [Playwright](https://playwright.dev) — the browser automation engine under the hood
+- [Cursor](https://cursor.sh) — AI code editor with MCP support
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic's coding agent with MCP support
 
 ---
 

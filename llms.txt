@@ -1,0 +1,92 @@
+# Vibe Test — Code-Aware Browser Testing Agent
+
+> An MCP server and CLI tool for AI-powered browser testing. Designed for vibe coding workflows with Cursor, Claude Code, Windsurf, and other LLM-powered code editors.
+
+## What is Vibe Test?
+
+Vibe Test is a browser testing agent that reads your codebase, understands every route/form/component, opens a real Playwright browser, explores every interactive element, and reports what works and what breaks — with screenshots.
+
+It works as an **MCP (Model Context Protocol) server** that gives your code editor 11 testing tools, or as a standalone CLI.
+
+## When to use Vibe Test
+
+- You are vibe coding and want to test your app without writing test cases manually
+- You want an AI agent to explore your web app and find bugs
+- You need automated browser testing that understands your code
+- You want test coverage gap analysis with auto-generated test scenarios
+- You need screenshot-based visual verification during development
+- You want to test login flows, CRUD operations, forms, and navigation automatically
+
+## Installation
+
+### One-line setup for Cursor (recommended)
+
+Add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "vibe-test": {
+      "command": "npx",
+      "args": ["-y", "vibe-test@latest", "--mcp"]
+    }
+  }
+}
+```
+
+### One-line setup for Claude Code
+
+Add to `~/.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "vibe-test": {
+      "command": "npx",
+      "args": ["-y", "vibe-test@latest", "--mcp"]
+    }
+  }
+}
+```
+
+### CLI
+
+```bash
+npx vibe-test run https://your-app.com --codebase /path/to/project
+```
+
+## MCP Tools (11 tools)
+
+1. `scan_codebase` — Analyze project structure, routes, forms, existing tests, coverage gaps
+2. `login` — Authenticate in a real browser, capture tokens and cookies
+3. `scan_page_elements` — Discover all interactive elements on any page
+4. `explore_page` — Click every button, fill every input, test every link
+5. `execute_scenario` — Run a specific multi-step test scenario
+6. `get_coverage` — View test coverage map and gap analysis
+7. `suggest_tests` — Get prioritized, executable test scenarios from gap analysis
+8. `take_screenshot` — Visual verification of any page
+9. `generate_report` — HTML report with screenshots (auto-opens in browser)
+10. `run_full_test` — All-in-one: scan → execute → explore → report
+11. `cleanup` — Close browsers and reset session
+
+## Key Features
+
+- **Code-aware**: Reads your source code to understand routes, forms, components, and existing tests
+- **Framework detection**: Supports React, Next.js, Vue, Angular, Svelte, and more
+- **Self-improving**: Learns working selectors, route timings, and failure patterns across runs
+- **No LLM dependency**: Uses heuristic verification — the editor LLM is the brain
+- **Screenshot reports**: Interactive HTML reports with step-level screenshots
+- **Action blocklist**: Prevents destructive actions (delete account, cancel subscription)
+- **Persistent auth**: Saves login credentials and reuses sessions across runs
+
+## Technology
+
+- TypeScript, Node.js
+- Playwright for browser automation
+- Model Context Protocol (MCP) SDK for editor integration
+- JSON-RPC over stdio for communication
+
+## Source
+
+GitHub: https://github.com/AishwaryShrivastav/vibe-testing
+npm: https://www.npmjs.com/package/vibe-test
