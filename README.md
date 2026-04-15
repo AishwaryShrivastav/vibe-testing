@@ -44,34 +44,32 @@ Your Codebase ──→ Context Engine ──→ Browser Engine ──→ Report
 
 ---
 
-## Quick Start
+## Quick Start (One Command)
 
-### Cursor (Recommended)
+### Cursor
 
-**1.** Add to your MCP settings — open Cursor Settings → MCP → Add Server, or edit `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "vibe-test": {
-      "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
-    }
-  }
-}
+```bash
+cd /path/to/your/project
+npx vibe-test@latest init
 ```
 
-**2.** Copy `.cursor/rules/vibe-testing.mdc` from this repo into your project's `.cursor/rules/` so Cursor knows how to use the tools.
+**That's it.** This single command:
+- Registers the MCP server in `.cursor/mcp.json`
+- Installs Cursor rules (`.cursor/rules/vibe-testing.mdc`) so Cursor knows all 11 tools
+- Creates a `VIBE.md` template for your project-specific test guidance
+- Creates `vibe.config.json` with sensible defaults
 
-**3.** Ask Cursor:
+Now open Cursor and ask:
 
 > "Scan the codebase and test it against https://staging.myapp.com — log in with test@example.com / pass123, explore the dashboard, and tell me what's broken"
 
-That's it. Cursor now has 11 testing tools and will use them autonomously.
+Cursor will use the MCP tools autonomously. Optional: pass `--cursor-global` to also register the MCP server globally for all projects.
 
 ### Claude Code
 
-Add to your MCP config (`~/.claude/mcp.json`):
+```bash
+# Add to Claude Code MCP config (~/.claude/mcp.json)
+```
 
 ```json
 {
@@ -87,14 +85,10 @@ Add to your MCP config (`~/.claude/mcp.json`):
 ### Standalone CLI
 
 ```bash
-npm install -g vibe-test
-npx playwright install chromium
-
-cd /path/to/your/project
-vibe-test init                                    # create vibe.config.json
-vibe-test run https://staging.myapp.com           # run against a URL
-vibe-test run http://localhost:3000 --mode deep   # run against localhost
-vibe-test report                                  # open last report
+npx vibe-test@latest init                          # set up config
+npx vibe-test run https://staging.myapp.com        # run against a URL
+npx vibe-test run http://localhost:3000 --mode deep # run against localhost
+npx vibe-test report                               # open last report
 ```
 
 ### From Source
@@ -102,15 +96,9 @@ vibe-test report                                  # open last report
 ```bash
 git clone https://github.com/AishwaryShrivastav/vibe-testing.git
 cd vibe-testing
-npm install
-npx playwright install chromium
-npm run build
+npm install && npx playwright install chromium && npm run build
 
-# CLI
 node dist/cli.js run https://staging.myapp.com --codebase /path/to/project
-
-# MCP server (for editor integration)
-node dist/mcp-server.js
 ```
 
 ---

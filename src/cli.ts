@@ -7,6 +7,168 @@ import { logger } from './utils/logger.js'
 import path from 'path'
 import fs from 'fs/promises'
 
+// ─── Embedded content for init command ──────────────────────────────────────
+
+const CURSOR_RULE_CONTENT = `---
+description: How to use the vibe-test MCP server for browser testing
+globs: 
+alwaysApply: true
+---
+
+# Vibe Testing — MCP Server for Browser Testing
+
+You have access to the \`vibe-test\` MCP server which provides code-aware browser testing tools. Use these tools to test web applications by understanding their codebase, exploring pages, and executing test scenarios.
+
+## Quick Start Workflow
+
+1. **Scan the codebase** → understand routes, forms, coverage gaps
+2. **Login** (if app requires auth) → establish an authenticated browser session
+3. **Explore pages** → discover elements, click everything, observe what works/breaks
+4. **Execute scenarios** → run specific test flows (generated or custom)
+5. **Generate report** → HTML report with screenshots and coverage analysis
+6. **Cleanup** → close browsers when done
+
+## Available MCP Tools
+
+### \`scan_codebase\`
+**Call first.** Analyzes the project source code to build a ProductModel:
+- Detects framework (Next.js, React SPA, etc.)
+- Parses all routes (pages + API endpoints)
+- Extracts forms, buttons, dialogs, features per route
+- Reads existing test files for coverage mapping
+- Identifies gaps and generates test scenarios
+
+\`\`\`json
+{ "codebase_path": "/path/to/project", "url": "https://staging.myapp.com" }
+\`\`\`
+
+### \`login\`
+Establish an authenticated browser session. Uses saved credentials from previous runs or accepts new ones.
+
+\`\`\`json
+{ "email": "user@example.com", "password": "pass123", "login_url": "/login" }
+\`\`\`
+
+Returns: post-login screenshot, token state, API calls observed.
+
+### \`scan_page_elements\`
+Navigate to a page and discover all interactive elements without interacting with them. Returns element types, selectors, text, and a page screenshot.
+
+\`\`\`json
+{ "route": "/dashboard", "authenticated": true }
+\`\`\`
+
+### \`explore_page\`
+Full "senior tester" exploration — clicks every button, fills every input, tests every tab, observes API calls. Returns detailed interaction outcomes.
+
+\`\`\`json
+{ "route": "/dashboard", "authenticated": true }
+\`\`\`
+
+### \`execute_scenario\`
+Run a specific test scenario (sequence of steps). You can use scenarios from \`scan_codebase\` output or construct custom ones.
+
+\`\`\`json
+{
+  "scenario": {
+    "id": "test-login",
+    "name": "Login with valid credentials",
+    "route": "/login",
+    "steps": [
+      { "action": "navigate", "url": "/login", "description": "Go to login page" },
+      { "action": "fill", "selector": "[type='email']", "value": "user@test.com", "description": "Fill email" },
+      { "action": "fill", "selector": "[type='password']", "value": "pass123", "description": "Fill password" },
+      { "action": "click", "selector": "button[type='submit']", "description": "Click submit" }
+    ],
+    "expected_outcome": "Redirect to dashboard"
+  }
+}
+\`\`\`
+
+### \`take_screenshot\`
+Quick visual check — navigate to a URL and return a screenshot.
+
+\`\`\`json
+{ "url": "/settings", "authenticated": true }
+\`\`\`
+
+### \`get_coverage\`
+Returns coverage map, gaps, and suggested scenarios from the last \`scan_codebase\` call.
+
+### \`suggest_tests\`
+Analyze codebase features vs test coverage and previous run history. Returns **prioritized, executable scenario objects** you can pass directly to \`execute_scenario\`. Identifies:
+- Untested CRUD operations (critical)
+- Missing form validation tests (high)
+- Broken elements found during exploration (high)
+- Previously failing routes that need retests (high)
+- API errors observed during exploration (critical/high)
+- Untested navigation flows (low)
+
+\`\`\`json
+{ "route": "/dashboard" }
+\`\`\`
+
+Use this after \`scan_codebase\` and \`explore_page\` to understand what tests should be written. Each suggestion includes a ready-to-run scenario with steps.
+
+### \`generate_report\`
+Generate an HTML report from all collected test results and explorations.
+
+### \`run_full_test\`
+All-in-one: scan → generate → execute → explore → report. Use for complete test runs.
+
+\`\`\`json
+{ "url": "https://staging.myapp.com", "codebase_path": "/path/to/project" }
+\`\`\`
+
+### \`cleanup\`
+Close all browsers and reset session state.
+
+## Best Practices
+
+- Always call \`scan_codebase\` first — it initializes the session
+- Use \`scan_page_elements\` to understand a page before writing custom scenarios
+- Use \`explore_page\` for broad "does everything work?" testing
+- Use \`suggest_tests\` to find gaps and get ready-to-run scenarios
+- Use \`execute_scenario\` for targeted, specific test flows
+- Screenshots are returned as images — use them to visually verify results
+- After making code changes, re-run relevant scenarios to verify fixes
+- Call \`cleanup\` when done to free browser resources
+- Vibe Test learns from every run — selectors, timings, and failure patterns are persisted
+
+## VIBE.md Project Guidance
+
+Projects can include a \`VIBE.md\` file in their root to guide testing:
+- Login URLs, test accounts
+- Elements to never interact with (delete buttons, billing, etc.)
+- Known flaky flows to skip
+- Special environment setup notes
+`
+
+const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
+
+> Edit this file with your project's details. Vibe Test reads it automatically.
+
+## Login URL
+/login
+
+## Test Credentials
+- Email: your-test-user@example.com
+- Password: your-test-password
+
+## Never Automate
+- delete account
+- cancel subscription
+- [data-testid="danger-zone"]
+
+## Known Flaky
+- /notifications (if WebSocket dependent)
+
+## Notes
+- Add any project-specific testing notes here
+`
+
+// ─── Entry point ────────────────────────────────────────────────────────────
+
 // If invoked with --mcp flag, start the MCP server directly
 if (process.argv.includes('--mcp')) {
   await import('./mcp-server.js')
@@ -66,38 +228,127 @@ program
 
 program
   .command('init')
-  .description('Create a vibe.config.json in the current directory')
-  .action(async () => {
-    const configPath = path.join(process.cwd(), 'vibe.config.json')
+  .description('Set up Vibe Test in this project — configures MCP server, Cursor rules, VIBE.md, and config')
+  .option('--cursor-global', 'Also register MCP server in global Cursor settings (~/.cursor/mcp.json)')
+  .action(async (opts: { cursorGlobal?: boolean }) => {
+    const cwd = process.cwd()
+    const projectName = path.basename(cwd)
+    let filesCreated = 0
+    let filesSkipped = 0
 
+    logger.section(`Setting up Vibe Test in ${projectName}`)
+
+    // 1. Cursor rules — teach Cursor how to use the tools
+    const rulesDir = path.join(cwd, '.cursor', 'rules')
+    const rulePath = path.join(rulesDir, 'vibe-testing.mdc')
+    if (await fileExists(rulePath)) {
+      logger.dim('  .cursor/rules/vibe-testing.mdc already exists — skipped')
+      filesSkipped++
+    } else {
+      await fs.mkdir(rulesDir, { recursive: true })
+      await fs.writeFile(rulePath, CURSOR_RULE_CONTENT, 'utf-8')
+      logger.success('  Created .cursor/rules/vibe-testing.mdc')
+      filesCreated++
+    }
+
+    // 2. Project-level MCP config for Cursor
+    const mcpConfigPath = path.join(cwd, '.cursor', 'mcp.json')
+    if (await fileExists(mcpConfigPath)) {
+      logger.dim('  .cursor/mcp.json already exists — skipped')
+      filesSkipped++
+    } else {
+      const mcpConfig = {
+        mcpServers: {
+          'vibe-test': {
+            command: 'npx',
+            args: ['-y', 'vibe-test@latest', '--mcp'],
+          },
+        },
+      }
+      await fs.mkdir(path.join(cwd, '.cursor'), { recursive: true })
+      await fs.writeFile(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + '\n', 'utf-8')
+      logger.success('  Created .cursor/mcp.json (MCP server registered)')
+      filesCreated++
+    }
+
+    // 3. Global Cursor MCP config (optional)
+    if (opts.cursorGlobal) {
+      const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? ''
+      const globalMcpPath = path.join(homeDir, '.cursor', 'mcp.json')
+      try {
+        let globalConfig: any = {}
+        try {
+          const existing = await fs.readFile(globalMcpPath, 'utf-8')
+          globalConfig = JSON.parse(existing)
+        } catch { /* file doesn't exist yet */ }
+
+        if (!globalConfig.mcpServers) globalConfig.mcpServers = {}
+        if (globalConfig.mcpServers['vibe-test']) {
+          logger.dim('  ~/.cursor/mcp.json already has vibe-test — skipped')
+          filesSkipped++
+        } else {
+          globalConfig.mcpServers['vibe-test'] = {
+            command: 'npx',
+            args: ['-y', 'vibe-test@latest', '--mcp'],
+          }
+          await fs.mkdir(path.join(homeDir, '.cursor'), { recursive: true })
+          await fs.writeFile(globalMcpPath, JSON.stringify(globalConfig, null, 2) + '\n', 'utf-8')
+          logger.success('  Updated ~/.cursor/mcp.json (global MCP registration)')
+          filesCreated++
+        }
+      } catch (e) {
+        logger.warn(`  Could not update global Cursor config: ${e}`)
+      }
+    }
+
+    // 4. VIBE.md template
+    const vibeMdPath = path.join(cwd, 'VIBE.md')
+    if (await fileExists(vibeMdPath)) {
+      logger.dim('  VIBE.md already exists — skipped')
+      filesSkipped++
+    } else {
+      await fs.writeFile(vibeMdPath, VIBE_MD_TEMPLATE, 'utf-8')
+      logger.success('  Created VIBE.md (edit with your project details)')
+      filesCreated++
+    }
+
+    // 5. vibe.config.json
+    const configPath = path.join(cwd, 'vibe.config.json')
     if (await fileExists(configPath)) {
-      logger.warn('vibe.config.json already exists')
-      return
+      logger.dim('  vibe.config.json already exists — skipped')
+      filesSkipped++
+    } else {
+      const defaultConfig = {
+        url: 'http://localhost:3000',
+        mode: 'deep',
+        auth: { strategy: 'skip' },
+        never_interact: ['delete account', 'cancel subscription'],
+        scope: { include: ['/**'], exclude: [], max_routes: 30 },
+        browser: { headed: true, slowMo: 40 },
+      }
+      await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2) + '\n', 'utf-8')
+      logger.success('  Created vibe.config.json')
+      filesCreated++
     }
 
-    const defaultConfig = {
-      url: 'http://localhost:3000',
-      mode: 'deep',
-      auth: {
-        strategy: 'skip',
-      },
-      scope: {
-        include: ['/**'],
-        exclude: [],
-        max_routes: 30,
-      },
-      browser: {
-        headed: true,
-        slowMo: 40,
-      },
-      memory: {
-        verify_after_n_passes: 3,
-      },
+    // Summary
+    console.log('')
+    if (filesCreated > 0) {
+      logger.success(`Done! ${filesCreated} file(s) created${filesSkipped > 0 ? `, ${filesSkipped} skipped (already exist)` : ''}.`)
+    } else {
+      logger.info('Everything is already set up.')
     }
 
-    await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8')
-    logger.success('Created vibe.config.json')
-    logger.dim('Edit it to set your URL, auth credentials, and scope.')
+    console.log('')
+    logger.info('Next steps:')
+    logger.dim('  1. Edit VIBE.md with your login URL, credentials, and blocklist')
+    logger.dim('  2. Edit vibe.config.json to set your app URL')
+    logger.dim('  3. Open Cursor and ask:')
+    console.log('')
+    console.log('     "Scan the codebase and test it against <your-url>."')
+    console.log('')
+    logger.dim('  Cursor will use vibe-test MCP tools automatically.')
+    console.log('')
   })
 
 program

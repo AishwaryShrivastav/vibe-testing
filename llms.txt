@@ -19,20 +19,14 @@ It works as an **MCP (Model Context Protocol) server** that gives your code edit
 
 ## Installation
 
-### One-line setup for Cursor (recommended)
+### One-command setup for Cursor (recommended)
 
-Add to `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "vibe-test": {
-      "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
-    }
-  }
-}
+```bash
+cd /path/to/your/project
+npx vibe-test@latest init
 ```
+
+This single command registers the MCP server, installs Cursor rules, and creates config files. Open Cursor and start asking it to test your app.
 
 ### One-line setup for Claude Code
 
