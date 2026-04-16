@@ -55,7 +55,7 @@ npx vibe-test@latest init
 
 | Editor | What gets created |
 |--------|-------------------|
-| **Cursor** | `.cursor/mcp.json` + `.cursor/rules/vibe-testing.mdc` (tool instructions) |
+| **Cursor** | `.cursor/mcp.json` + `.cursor/rules/vibe-test.mdc` (tool instructions) |
 | **Claude Code** | `.mcp.json` + `CLAUDE.md` (agent instructions) |
 | **VS Code (Copilot)** | `.vscode/mcp.json` (uses `servers` key) |
 | **Windsurf** | Global config at `~/.codeium/windsurf/mcp_config.json` (with `--global`) |

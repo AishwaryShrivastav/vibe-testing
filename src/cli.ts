@@ -234,7 +234,7 @@ const EDITORS: EditorTarget[] = [
     name: 'Cursor',
     projectConfigs: [{ path: '.cursor/mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
     globalConfigs: [{ path: () => path.join(homeDir(), '.cursor', 'mcp.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
-    rulesFiles: [{ path: '.cursor/rules/vibe-testing.mdc', content: CURSOR_RULE_CONTENT }],
+    rulesFiles: [{ path: '.cursor/rules/vibe-test.mdc', content: CURSOR_RULE_CONTENT }],
     detect: async () => {
       const dirs = [path.join(homeDir(), '.cursor'), path.join(process.cwd(), '.cursor')]
       for (const d of dirs) { try { await fs.access(d); return true } catch {} }
