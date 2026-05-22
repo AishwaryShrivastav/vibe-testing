@@ -54,13 +54,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://registry.npmjs.org
           cache: npm
-      - run: npm --version
-      - run: node --version
       - run: npm ci
       - run: npm run build
-      - name: Publish to npm via OIDC
-        run: npm publish --provenance --access public
-        env:
-          NPM_CONFIG_USERCONFIG: /dev/null
-          NPM_CONFIG_LOGLEVEL: http
+      - run: npm publish --provenance --access public
