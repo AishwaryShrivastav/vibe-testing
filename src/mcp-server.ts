@@ -13,7 +13,7 @@ import { readVibeGuidance } from './utils/vibe-md.js'
 import { ActionBlocklist } from './utils/blocklist.js'
 import { VibeConfigSchema, type VibeConfig, type VibeGuidance } from './types/config.js'
 import type { ProductModel, TestScenario, TestResult } from './types/index.js'
-import { ensureDir } from './utils/file.js'
+import { ensureDir, fileExists } from './utils/file.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
@@ -68,7 +68,7 @@ async function screenshotToBase64(filepath: string): Promise<string | null> {
 // ─── MCP Server ───────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'vibe-test', version: '0.2.0' },
+  { name: 'vibe-test', version: '0.3.0' },
   { capabilities: { tools: {} } }
 )
 
@@ -267,6 +267,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'get_context',
+      description: `Retrieve the most relevant source files for a given feature or route. Returns actual source code (budget-capped) so you understand real field names, API endpoints, and component structure before writing test steps. Call this after scan_codebase when you want to write precise test scenarios for a specific feature — it eliminates guesswork about selectors and form fields.`,
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          feature: {
+            type: 'string',
+            description: 'Feature name or route path to retrieve context for (e.g. "login", "checkout", "/dashboard").',
+          },
+          max_files: {
+            type: 'number',
+            description: 'Max source files to return (default 5, max 8).',
+            default: 5,
+          },
+        },
+        required: ['feature'],
+      },
+    },
+    {
       name: 'cleanup',
       description: `Close all open browsers and reset the session state. Call when done testing.`,
       inputSchema: {
@@ -297,6 +316,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'take_screenshot': return await handleTakeScreenshot(args)
       case 'run_full_test': return await handleRunFullTest(args)
       case 'run_converge': return await handleRunConverge(args)
+      case 'get_context': return await handleGetContext(args)
       case 'cleanup': return await handleCleanup()
       default: throw new Error(`Unknown tool: ${name}`)
     }
@@ -1178,6 +1198,121 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Report: ${result.report_path} (opened in browser)`
 
   return { content: [{ type: 'text', text: roundsLine }] }
+}
+
+// ─── get_context ─────────────────────────────────────────────────────────────
+
+async function handleGetContext(args: Record<string, unknown>) {
+  const feature = (args.feature as string).toLowerCase()
+  const maxFiles = Math.min((args.max_files as number) ?? 5, 8)
+  const root = session.projectRoot || process.cwd()
+
+  // Score a file path by how relevant it is to the requested feature
+  function score(filePath: string): number {
+    const rel = filePath.replace(root, '').toLowerCase()
+    const tokens = feature.replace(/[/-]/g, ' ').split(/\s+/).filter(Boolean)
+    let s = 0
+    for (const token of tokens) {
+      if (rel.includes(token)) s += 3
+    }
+    // Prefer component/page/route files
+    if (rel.includes('page') || rel.includes('route') || rel.includes('component')) s += 1
+    if (rel.includes('form') || rel.includes('modal') || rel.includes('dialog')) s += 2
+    if (rel.includes('auth') || rel.includes('login') || rel.includes('api')) s += 2
+    // Avoid noise
+    if (rel.includes('node_modules') || rel.includes('.vibe') || rel.includes('dist')) return -1
+    if (rel.includes('.test.') || rel.includes('.spec.') || rel.includes('__test')) return -1
+    return s
+  }
+
+  // Budget-aware file reader: keeps HEAD + TAIL, marks omitted middle
+  async function readFileBudgeted(filePath: string, headLines = 120, tailLines = 60): Promise<string> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8')
+      const lines = content.split('\n')
+      if (lines.length <= headLines + tailLines) return content
+      const omitted = lines.length - headLines - tailLines
+      return [
+        ...lines.slice(0, headLines),
+        `\n// ... (${omitted} lines omitted) ...\n`,
+        ...lines.slice(lines.length - tailLines),
+      ].join('\n')
+    } catch { return '' }
+  }
+
+  // Walk src directory for relevant source files
+  const srcDir = path.join(root, 'src')
+  const rootFiles: string[] = []
+
+  async function walk(dir: string, depth = 0): Promise<void> {
+    if (depth > 6) return
+    let entries: string[]
+    try {
+      entries = await fs.readdir(dir)
+    } catch { return }
+    for (const entry of entries) {
+      if (entry.startsWith('.') || entry === 'node_modules' || entry === 'dist') continue
+      const full = path.join(dir, entry)
+      const stat = await fs.stat(full).catch(() => null)
+      if (!stat) continue
+      if (stat.isDirectory()) {
+        await walk(full, depth + 1)
+      } else if (/\.(tsx?|jsx?|vue|svelte)$/.test(entry)) {
+        rootFiles.push(full)
+      }
+    }
+  }
+
+  // Walk src/ first, then root if no src
+  const hasSrc = await fileExists(srcDir)
+  await walk(hasSrc ? srcDir : root)
+
+  // Also check common locations if using Next.js app/pages conventions
+  for (const extra of ['app', 'pages', 'components', 'lib', 'utils', 'hooks']) {
+    const extraDir = path.join(root, extra)
+    if (await fileExists(extraDir)) await walk(extraDir)
+  }
+
+  // Score and deduplicate
+  const uniqueFiles = [...new Set(rootFiles)]
+  const scored = uniqueFiles
+    .map(f => ({ file: f, score: score(f) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxFiles)
+
+  if (scored.length === 0) {
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          feature,
+          message: 'No relevant source files found. Make sure scan_codebase has been called, or check the feature name.',
+          tip: 'Try a broader term (e.g. "auth" instead of "two-factor-authentication")',
+        }, null, 2),
+      }],
+    }
+  }
+
+  const files = await Promise.all(
+    scored.map(async ({ file, score: s }) => ({
+      path: file.replace(root, '').replace(/^\//, ''),
+      relevance_score: s,
+      content: await readFileBudgeted(file),
+    }))
+  )
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        feature,
+        files_found: files.length,
+        note: 'Use field names, selectors, and API paths from these files to write precise test steps.',
+        files,
+      }, null, 2),
+    }],
+  }
 }
 
 // ─── cleanup ──────────────────────────────────────────────────────────────────

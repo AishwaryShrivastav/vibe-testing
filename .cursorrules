@@ -1,0 +1,36 @@
+# Vibe Test — Cursor Rules
+
+This is the **vibe-test** source repository (the MCP server + CLI tool for browser testing).
+
+## Project Overview
+
+vibe-test is published as an npm package (`npx vibe-test`) and provides 12 MCP tools for AI-powered browser testing via Playwright. Users run `npx vibe-test init` in their project and then their AI editor can test their app.
+
+## Architecture
+
+- `src/cli.ts` — CLI entry + MCP server launcher (`--mcp` flag)
+- `src/mcp-server.ts` — 12 MCP tools via JSON-RPC stdio
+- `src/engine/context/` — Static code analysis (framework detection, route parsing, scenario generation)
+- `src/engine/browser/` — Playwright execution (runner, explorer, verifier)
+- `src/engine/memory/` — Persistent learning across runs
+- `src/engine/reporter/` — HTML report generation
+
+## When editing this repo
+
+- TypeScript strict mode, ESM modules (`"type": "module"` in package.json)
+- Build: `npm run build` (tsc → dist/)
+- The MCP server communicates over stdio — all output must go to stderr or be MCP JSON-RPC responses
+- Tool handlers are in `mcp-server.ts` — add new tools by: (1) adding to `ListToolsRequestSchema` handler, (2) adding to `CallToolRequestSchema` switch, (3) implementing the handler function
+- `get_context` tool is the most important — it returns source files with relevance scoring so the LLM knows real selectors
+
+## Key patterns
+
+- Session state between MCP tool calls: `session` object in `mcp-server.ts`
+- Framework detection: `detector.ts` — add new frameworks here
+- Port auto-detection: `detectBaseUrl()` in `detector.ts`
+- Monorepo support: `detectMonorepo()` + `findFrontendApp()` in `detector.ts`
+- Init templates: the string constants at the top of `cli.ts` — these get written to user projects
+
+## Publishing
+
+Package name: `vibe-test`. Build → `npm publish`.

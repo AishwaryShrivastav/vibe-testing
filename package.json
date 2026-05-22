@@ -1,6 +1,6 @@
 {
   "name": "vibe-test",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Code-aware browser testing agent — reads your codebase, understands functionality, tests every element, reports with screenshots. Works as MCP server for Cursor/Claude Code or standalone CLI.",
   "type": "module",
   "bin": {
@@ -16,6 +16,7 @@
     "dist",
     "README.md",
     "VIBE.example.md",
+    "CLAUDE.md",
     "llms.txt",
     "llms-full.txt"
   ],

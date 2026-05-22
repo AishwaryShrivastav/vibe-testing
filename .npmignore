@@ -1,0 +1,11 @@
+src/
+test/
+.github/
+.cursorrules
+tsconfig.json
+*.log
+.vibe/
+node_modules/
+mcp-config.*.json
+AUDIT.md
+KNOWLEDGE.md

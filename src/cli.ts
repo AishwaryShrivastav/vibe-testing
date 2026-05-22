@@ -2,6 +2,7 @@
 import { Command } from 'commander'
 import { VibeTester } from './engine/index.js'
 import { readJSON, fileExists } from './utils/file.js'
+import { detectBaseUrl, detectMonorepo, findFrontendApp, detectFramework } from './engine/context/detector.js'
 import type { VibeConfig } from './types/config.js'
 import { logger } from './utils/logger.js'
 import path from 'path'
@@ -10,75 +11,71 @@ import fs from 'fs/promises'
 // ─── Embedded content for init command ──────────────────────────────────────
 
 const CURSOR_RULE_CONTENT = `---
-description: How to use the vibe-test MCP server for browser testing
-globs: 
+description: Browser testing with vibe-test MCP — use these tools whenever testing, verifying, or debugging a web app
+globs:
 alwaysApply: true
 ---
 
-# Vibe Testing — MCP Server for Browser Testing
+# Vibe Test — Browser Testing MCP Server
 
-You have access to the \`vibe-test\` MCP server which provides code-aware browser testing tools. Use these tools to test web applications by understanding their codebase, exploring pages, and executing test scenarios.
+This project has **vibe-test** configured as an MCP server. You MUST use these tools whenever the user asks to test, verify, check, debug, or QA any part of this web application. Do not write Playwright/Cypress test scripts manually when these tools are available.
 
-## Quick Start Workflow
+## Mandatory Usage Pattern
 
-1. **Scan the codebase** → understand routes, forms, coverage gaps
-2. **Login** (if app requires auth) → establish an authenticated browser session
-3. **Explore pages** → discover elements, click everything, observe what works/breaks
-4. **Execute scenarios** → run specific test flows (generated or custom)
-5. **Generate report** → HTML report with screenshots and coverage analysis
-6. **Cleanup** → close browsers when done
+ALWAYS follow this order:
 
-## Available MCP Tools
+1. \`scan_codebase\` — Read the code first. Initializes the session and returns all routes, forms, coverage gaps, and ready-to-run scenarios.
+2. \`get_context\` — Read the actual source files for the feature being tested (real field names, selectors, API paths). Call before writing any test steps.
+3. \`login\` — If the app needs auth, authenticate once and the session persists.
+4. \`scan_page_elements\` or \`explore_page\` — Visually confirm what's on the page.
+5. \`execute_scenario\` — Run precise test flows using real selectors from step 2.
+6. \`suggest_tests\` — Find coverage gaps.
+7. \`generate_report\` — Always generate a report at the end.
+8. \`cleanup\` — Close browsers.
 
-### \`scan_codebase\`
-**Call first.** Analyzes the project source code to build a ProductModel:
-- Detects framework (Next.js, React SPA, etc.)
-- Parses all routes (pages + API endpoints)
-- Extracts forms, buttons, dialogs, features per route
-- Reads existing test files for coverage mapping
-- Identifies gaps and generates test scenarios
+## Tools Quick Reference
 
+### \`scan_codebase\` (CALL FIRST — always)
 \`\`\`json
-{ "codebase_path": "/path/to/project", "url": "https://staging.myapp.com" }
+{ "codebase_path": "/path/to/project", "url": "http://localhost:3000" }
+\`\`\`
+
+### \`get_context\` (CALL BEFORE WRITING TEST STEPS)
+Returns actual source code for a feature — real field names, API endpoints. Eliminates selector guessing.
+\`\`\`json
+{ "feature": "login" }
+{ "feature": "/checkout" }
 \`\`\`
 
 ### \`login\`
-Establish an authenticated browser session. Uses saved credentials from previous runs or accepts new ones.
-
 \`\`\`json
-{ "email": "user@example.com", "password": "pass123", "login_url": "/login" }
+{ "email": "test@example.com", "password": "pass123" }
 \`\`\`
 
-Returns: post-login screenshot, token state, API calls observed.
-
 ### \`scan_page_elements\`
-Navigate to a page and discover all interactive elements without interacting with them. Returns element types, selectors, text, and a page screenshot.
-
 \`\`\`json
 { "route": "/dashboard", "authenticated": true }
 \`\`\`
 
 ### \`explore_page\`
-Full "senior tester" exploration — clicks every button, fills every input, tests every tab, observes API calls. Returns detailed interaction outcomes.
-
+Clicks every button, fills every input, records API calls and what breaks.
 \`\`\`json
 { "route": "/dashboard", "authenticated": true }
 \`\`\`
 
 ### \`execute_scenario\`
-Run a specific test scenario (sequence of steps). You can use scenarios from \`scan_codebase\` output or construct custom ones.
-
+Build steps using real selectors from \`get_context\`:
 \`\`\`json
 {
   "scenario": {
-    "id": "test-login",
+    "id": "login-test",
     "name": "Login with valid credentials",
     "route": "/login",
     "steps": [
-      { "action": "navigate", "url": "/login", "description": "Go to login page" },
-      { "action": "fill", "selector": "[type='email']", "value": "user@test.com", "description": "Fill email" },
+      { "action": "navigate", "url": "/login", "description": "Open login page" },
+      { "action": "fill", "selector": "[name='email']", "value": "user@test.com", "description": "Fill email" },
       { "action": "fill", "selector": "[type='password']", "value": "pass123", "description": "Fill password" },
-      { "action": "click", "selector": "button[type='submit']", "description": "Click submit" }
+      { "action": "click", "selector": "button[type='submit']", "description": "Submit" }
     ],
     "expected_outcome": "Redirect to dashboard"
   }
@@ -86,75 +83,113 @@ Run a specific test scenario (sequence of steps). You can use scenarios from \`s
 \`\`\`
 
 ### \`take_screenshot\`
-Quick visual check — navigate to a URL and return a screenshot.
-
 \`\`\`json
 { "url": "/settings", "authenticated": true }
 \`\`\`
 
-### \`get_coverage\`
-Returns coverage map, gaps, and suggested scenarios from the last \`scan_codebase\` call.
+### \`get_coverage\` / \`suggest_tests\` / \`generate_report\` / \`run_full_test\` / \`run_converge\` / \`cleanup\`
+Self-explanatory. Use \`run_full_test\` for a complete one-shot run. Use \`run_converge\` for iterative testing until thresholds.
 
-### \`suggest_tests\`
-Analyze codebase features vs test coverage and previous run history. Returns **prioritized, executable scenario objects** you can pass directly to \`execute_scenario\`. Identifies:
-- Untested CRUD operations (critical)
-- Missing form validation tests (high)
-- Broken elements found during exploration (high)
-- Previously failing routes that need retests (high)
-- API errors observed during exploration (critical/high)
-- Untested navigation flows (low)
+## Key Rules
 
+- NEVER write manual Playwright/Cypress/Jest browser tests when vibe-test is available
+- ALWAYS call \`scan_codebase\` first, then \`get_context\` before test steps
+- Screenshots returned by tools are images — look at them to confirm browser state
+- VIBE.md contains test credentials, blocklist patterns, and project-specific notes
+- After code changes, re-run the relevant \`execute_scenario\` to verify the fix
+`
+
+const CLAUDE_MD_CONTENT = `# Vibe Test — AI Testing Agent
+
+This project uses **vibe-test** as an MCP server for browser testing. Use these tools automatically whenever testing or verifying any part of this application.
+
+## When to Use (automatic triggers)
+
+Use vibe-test tools whenever:
+- User asks to test, check, verify, or QA anything
+- User reports a bug and wants you to reproduce it
+- User adds a new feature and wants it tested
+- User asks if something is working
+- After any code change that affects the UI or API
+
+## Required Workflow
+
+Always follow this sequence — do not skip steps:
+
+\`\`\`
+1. scan_codebase   → initialize session, understand routes & forms
+2. get_context     → read actual source code for the feature (CRITICAL: use real selectors)
+3. login           → authenticate if app requires it
+4. explore_page    → discover elements and interactions visually
+5. execute_scenario → run targeted test steps with real selectors
+6. generate_report → produce HTML report with screenshots
+7. cleanup         → close browsers
+\`\`\`
+
+## Tool Invocations
+
+**scan_codebase** — call first, always
+\`\`\`json
+{ "codebase_path": ".", "url": "http://localhost:3000" }
+\`\`\`
+
+**get_context** — call before every set of test steps
+\`\`\`json
+{ "feature": "login" }
+\`\`\`
+This returns the actual source files so you know the real \`name\`, \`id\`, placeholder, and API endpoint — write test steps using these, not guesses.
+
+**login**
+\`\`\`json
+{ "email": "test@example.com", "password": "yourpassword" }
+\`\`\`
+
+**explore_page** — broad visual exploration
+\`\`\`json
+{ "route": "/dashboard", "authenticated": true }
+\`\`\`
+
+**execute_scenario** — targeted test with real selectors
+\`\`\`json
+{
+  "scenario": {
+    "id": "my-test",
+    "name": "Create new item",
+    "route": "/items",
+    "steps": [
+      { "action": "navigate", "url": "/items", "description": "Open items page" },
+      { "action": "click", "selector": "text=Add Item", "description": "Click add button" },
+      { "action": "fill", "selector": "[name='title']", "value": "Test Item", "description": "Fill title" },
+      { "action": "click", "selector": "button[type='submit']", "description": "Submit form" }
+    ],
+    "expected_outcome": "New item appears in list"
+  }
+}
+\`\`\`
+
+**suggest_tests** — find untested flows
 \`\`\`json
 { "route": "/dashboard" }
 \`\`\`
 
-Use this after \`scan_codebase\` and \`explore_page\` to understand what tests should be written. Each suggestion includes a ready-to-run scenario with steps.
+**generate_report** — HTML report, opens in browser automatically
 
-### \`generate_report\`
-Generate an HTML report from all collected test results and explorations.
-
-### \`run_full_test\`
-All-in-one: scan → generate → execute → explore → report. Use for complete test runs.
-
+**run_full_test** — one-shot complete run
 \`\`\`json
-{ "url": "https://staging.myapp.com", "codebase_path": "/path/to/project" }
+{ "url": "http://localhost:3000", "codebase_path": "." }
 \`\`\`
 
-### \`run_converge\`
-Iterative coverage: baseline run, then follow-up rounds from coverage gaps + failed scenarios until pass rate / gap thresholds or max rounds. Opens final HTML report.
+## Project-Specific Testing Notes
 
-\`\`\`json
-{ "url": "https://staging.myapp.com", "max_followup_rounds": 4, "target_pass_rate": 0.92 }
-\`\`\`
-
-### \`cleanup\`
-Close all browsers and reset session state.
-
-## Best Practices
-
-- Always call \`scan_codebase\` first — it initializes the session
-- Use \`scan_page_elements\` to understand a page before writing custom scenarios
-- Use \`explore_page\` for broad "does everything work?" testing
-- Use \`suggest_tests\` to find gaps and get ready-to-run scenarios
-- Use \`run_converge\` to automatically run baseline + follow-up rounds until coverage thresholds
-- Use \`execute_scenario\` for targeted, specific test flows
-- Screenshots are returned as images — use them to visually verify results
-- After making code changes, re-run relevant scenarios to verify fixes
-- Call \`cleanup\` when done to free browser resources
-- Vibe Test learns from every run — selectors, timings, and failure patterns are persisted
-
-## VIBE.md Project Guidance
-
-Projects can include a \`VIBE.md\` file in their root to guide testing:
-- Login URLs, test accounts
-- Elements to never interact with (delete buttons, billing, etc.)
-- Known flaky flows to skip
-- Special environment setup notes
+See \`VIBE.md\` for:
+- Login URL and test credentials
+- Elements to never interact with (delete, billing, etc.)
+- Known flaky routes to skip
 `
 
 const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
 
-> Edit this file with your project's details. Vibe Test reads it automatically.
+> Edit this file with your project's details. Vibe Test reads it automatically on every run.
 
 ## Login URL
 /login
@@ -173,37 +208,68 @@ const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
 
 ## Notes
 - Add any project-specific testing notes here
+- e.g. "Admin panel lives at /admin, use admin@example.com / adminpass"
 `
 
 const AGENTS_MD_CONTENT = `# AGENTS.md — Vibe Test Integration
 
-This project uses **Vibe Test**, a code-aware browser testing agent available as an MCP server.
+This project uses **vibe-test**, a code-aware browser testing agent available as an MCP server. All AI coding assistants (Claude Code, Cursor, Copilot, Devin, Codex, Zed) should use these tools automatically for testing.
 
-## Testing
+## When to Use (automatic)
 
-To test this application, use the \`vibe-test\` MCP tools:
+Use vibe-test tools whenever the user asks to:
+- Test, verify, check, or QA any feature
+- Reproduce a bug
+- Confirm a fix works
+- Check if a new feature is working
 
-1. \`scan_codebase\` — Analyze the project (call first, always)
-2. \`login\` — Authenticate if the app requires login
-3. \`explore_page\` — Interactively test a page (clicks every element)
-4. \`suggest_tests\` — Find test coverage gaps and get executable scenarios
-5. \`execute_scenario\` — Run a specific test flow
-6. \`generate_report\` — HTML report with screenshots (auto-opens)
-7. \`run_converge\` — Baseline run, then automatic follow-up rounds from coverage gaps until thresholds
-8. \`cleanup\` — Close browsers when done
+## Testing Workflow
 
-### Quick test command
 \`\`\`
-Scan this codebase with vibe-test and test it against <URL>. Log in, explore pages, and generate a report.
-\`\`\`
-
-### Setup
-If vibe-test MCP is not configured, run:
-\`\`\`bash
-npx vibe-test@latest init
+1. scan_codebase({ codebase_path: ".", url: "http://localhost:3000" })
+2. get_context({ feature: "<feature name or route>" })
+3. login({ email: "...", password: "..." })          # if app needs auth
+4. explore_page({ route: "/target", authenticated: true })
+5. execute_scenario({ scenario: { ... } })           # use real selectors from get_context
+6. generate_report()
+7. cleanup()
 \`\`\`
 
-See \`VIBE.md\` for project-specific test credentials and guidance.
+## Available MCP Tools
+
+| Tool | When to call |
+|------|-------------|
+| \`scan_codebase\` | Always first — initializes session, discovers routes/forms/gaps |
+| \`get_context\` | Before writing test steps — returns real source code with field names |
+| \`login\` | When app requires authentication |
+| \`scan_page_elements\` | To see all interactive elements on a page |
+| \`explore_page\` | Broad exploration — clicks everything, reports what breaks |
+| \`execute_scenario\` | Run specific test flows with precise steps |
+| \`take_screenshot\` | Quick visual verification |
+| \`get_coverage\` | View coverage map and gaps |
+| \`suggest_tests\` | Get prioritized, ready-to-run scenarios |
+| \`generate_report\` | HTML report with screenshots (auto-opens) |
+| \`run_full_test\` | All-in-one: scan → execute → explore → report |
+| \`run_converge\` | Iterative: keep testing until coverage thresholds met |
+| \`cleanup\` | Close browsers when done |
+
+## Quick Commands
+
+\`\`\`
+"Test the login flow"
+→ scan_codebase → get_context("login") → login → execute_scenario → generate_report
+
+"Explore the dashboard and find broken things"
+→ scan_codebase → login → explore_page("/dashboard") → suggest_tests → generate_report
+
+"Run a full test of this app"
+→ run_full_test({ url: "http://localhost:3000", codebase_path: "." })
+\`\`\`
+
+## Project-Specific Notes
+
+See \`VIBE.md\` for test credentials, blocklist patterns, and project notes.
+Setup: run \`npx vibe-test@latest init\` to configure for any editor.
 `
 
 const MCP_SERVER_ENTRY = {
@@ -215,13 +281,9 @@ const MCP_SERVER_ENTRY = {
 
 interface EditorTarget {
   name: string
-  /** Project-level config paths (relative to cwd) */
   projectConfigs: { path: string; rootKey: string; format: 'mcpServers' | 'servers' | 'context_servers' }[]
-  /** Global config paths (absolute, resolved at runtime) */
   globalConfigs: { path: () => string; rootKey: string; format: 'mcpServers' | 'servers' | 'context_servers' }[]
-  /** Project-level rules/instructions files */
   rulesFiles: { path: string; content: string }[]
-  /** How to detect if this editor is installed */
   detect: () => Promise<boolean>
 }
 
@@ -245,7 +307,7 @@ const EDITORS: EditorTarget[] = [
     name: 'Claude Code',
     projectConfigs: [{ path: '.mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
     globalConfigs: [{ path: () => path.join(homeDir(), '.claude.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
-    rulesFiles: [{ path: 'CLAUDE.md', content: AGENTS_MD_CONTENT }],
+    rulesFiles: [{ path: 'CLAUDE.md', content: CLAUDE_MD_CONTENT }],
     detect: async () => {
       const paths = [path.join(homeDir(), '.claude'), path.join(homeDir(), '.claude.json')]
       for (const p of paths) { try { await fs.access(p); return true } catch {} }
@@ -256,7 +318,7 @@ const EDITORS: EditorTarget[] = [
     name: 'Windsurf',
     projectConfigs: [],
     globalConfigs: [{ path: () => path.join(homeDir(), '.codeium', 'windsurf', 'mcp_config.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
-    rulesFiles: [],
+    rulesFiles: [{ path: '.windsurfrules', content: CURSOR_RULE_CONTENT.replace(/^---[\s\S]*?---\n\n/, '') }],
     detect: async () => {
       try { await fs.access(path.join(homeDir(), '.codeium', 'windsurf')); return true } catch { return false }
     },
@@ -265,7 +327,7 @@ const EDITORS: EditorTarget[] = [
     name: 'VS Code (Copilot)',
     projectConfigs: [{ path: '.vscode/mcp.json', rootKey: 'servers', format: 'servers' }],
     globalConfigs: [],
-    rulesFiles: [],
+    rulesFiles: [{ path: '.github/copilot-instructions.md', content: AGENTS_MD_CONTENT }],
     detect: async () => {
       try { await fs.access(path.join(process.cwd(), '.vscode')); return true } catch { return false }
     },
@@ -317,7 +379,7 @@ const program = new Command()
 program
   .name('vibe-test')
   .description('AI-powered browser testing agent — reads your code, tests your product')
-  .version('0.2.0')
+  .version('0.3.0')
 
 program
   .command('run [url]')
@@ -453,7 +515,6 @@ program
     }
 
     if (detected.length === 0) {
-      // No editors detected — set up for all common ones
       logger.dim('  No specific editors detected — configuring for Cursor + Claude Code + VS Code')
       detected.push(EDITORS[0], EDITORS[1], EDITORS[3])
     }
@@ -462,11 +523,9 @@ program
     logger.info(`  Detected editors: ${editorNames}`)
     console.log('')
 
-    // Configure each editor
     for (const editor of detected) {
       logger.info(`  ${editor.name}:`)
 
-      // Project-level MCP configs
       for (const pc of editor.projectConfigs) {
         const fullPath = path.join(cwd, pc.path)
         const result = await upsertMcpConfig(fullPath, pc.rootKey)
@@ -479,7 +538,6 @@ program
         }
       }
 
-      // Global configs (only if --global)
       if (opts.global) {
         for (const gc of editor.globalConfigs) {
           try {
@@ -499,7 +557,6 @@ program
         }
       }
 
-      // Rules/instruction files
       for (const rf of editor.rulesFiles) {
         const fullPath = path.join(cwd, rf.path)
         const wrote = await writeIfMissing(fullPath, rf.content)
@@ -513,7 +570,7 @@ program
       }
     }
 
-    // AGENTS.md — universal agent instruction file (Codex, Devin, Copilot, Zed, etc.)
+    // AGENTS.md — universal agent instruction file
     console.log('')
     logger.info('  Universal:')
     const agentsMdPath = path.join(cwd, 'AGENTS.md')
@@ -535,14 +592,27 @@ program
       skipped++
     }
 
-    // vibe.config.json
+    // vibe.config.json — auto-detect port from .env / vite.config / framework defaults
     const configPath = path.join(cwd, 'vibe.config.json')
     if (await fileExists(configPath)) {
       logger.dim('    vibe.config.json already exists')
       skipped++
     } else {
+      // Auto-detect monorepo and base URL
+      let scanPath = cwd
+      const isMonorepo = await detectMonorepo(cwd)
+      if (isMonorepo) {
+        const frontendApp = await findFrontendApp(cwd)
+        if (frontendApp) {
+          scanPath = frontendApp
+          logger.dim(`    Monorepo detected — scanning frontend app at ${path.relative(cwd, frontendApp)}`)
+        }
+      }
+
+      const framework = await detectFramework(scanPath)
+      const detectedUrl = await detectBaseUrl(scanPath, framework)
       const defaultConfig = {
-        url: 'http://localhost:3000',
+        url: detectedUrl,
         mode: 'deep',
         auth: { strategy: 'skip' },
         never_interact: ['delete account', 'cancel subscription'],
@@ -550,7 +620,7 @@ program
         browser: { headed: true, slowMo: 40 },
       }
       await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2) + '\n', 'utf-8')
-      logger.success('    Created vibe.config.json')
+      logger.success(`    Created vibe.config.json (detected URL: ${detectedUrl})`)
       created++
     }
 
@@ -565,12 +635,12 @@ program
     console.log('')
     logger.info('Next steps:')
     logger.dim('  1. Edit VIBE.md with your login URL and test credentials')
-    logger.dim('  2. Edit vibe.config.json to set your app URL')
+    logger.dim('  2. Confirm the URL in vibe.config.json matches your running app')
     logger.dim('  3. Open your editor and ask:')
     console.log('')
     console.log('     "Scan this codebase and test it against <your-url>."')
     console.log('')
-    logger.dim('  Your editor will discover vibe-test tools automatically.')
+    logger.dim('  Your editor will use vibe-test tools automatically.')
     if (!opts.global) {
       logger.dim('  Tip: run with --global to also register in your user-level editor configs.')
     }
