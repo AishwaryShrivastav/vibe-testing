@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -44,7 +45,9 @@ jobs:
     name: Publish to npm
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,12 +57,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: Publish (dry run on non-tagged commits)
-        run: |
-          if git describe --exact-match --tags HEAD 2>/dev/null; then
-            npm publish
-          else
-            npm publish --dry-run
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --provenance --access public
