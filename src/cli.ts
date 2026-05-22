@@ -306,7 +306,7 @@ const EDITORS: EditorTarget[] = [
   {
     name: 'Claude Code',
     projectConfigs: [{ path: '.mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
-    globalConfigs: [{ path: () => path.join(homeDir(), '.claude.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    globalConfigs: [{ path: () => path.join(homeDir(), '.claude', 'settings.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
     rulesFiles: [{ path: 'CLAUDE.md', content: CLAUDE_MD_CONTENT }],
     detect: async () => {
       const paths = [path.join(homeDir(), '.claude'), path.join(homeDir(), '.claude.json')]
@@ -480,8 +480,8 @@ program
 
 program
   .command('init')
-  .description('Set up Vibe Test — auto-detects editors (Cursor, Claude Code, Windsurf, VS Code, Roo Code) and configures all of them')
-  .option('--global', 'Also register MCP server in global/user-level editor configs')
+  .description('Set up Vibe Test — auto-detects editors (Cursor, Claude Code, Windsurf, VS Code, Roo Code) and configures all of them globally + per-project')
+  .option('--no-global', 'Skip global editor config registration (project-level only)')
   .option('--editor <names...>', 'Only configure specific editors (cursor, claude-code, windsurf, vscode, roo)')
   .action(async (opts: { global?: boolean; editor?: string[] }) => {
     const cwd = process.cwd()
@@ -538,17 +538,18 @@ program
         }
       }
 
-      if (opts.global) {
+      // Global configs — always register unless --no-global passed
+      if (opts.global !== false) {
         for (const gc of editor.globalConfigs) {
           try {
             const fullPath = gc.path()
             const result = await upsertMcpConfig(fullPath, gc.rootKey)
             const shortPath = fullPath.replace(homeDir(), '~')
             if (result === 'skipped') {
-              logger.dim(`    ${shortPath} — vibe-test already registered`)
+              logger.dim(`    ${shortPath} — already registered globally`)
               skipped++
             } else {
-              logger.success(`    ${result === 'created' ? 'Created' : 'Updated'} ${shortPath}`)
+              logger.success(`    ${result === 'created' ? 'Created' : 'Updated'} ${shortPath} (global)`)
               created++
             }
           } catch (e) {
@@ -640,10 +641,7 @@ program
     console.log('')
     console.log('     "Scan this codebase and test it against <your-url>."')
     console.log('')
-    logger.dim('  Your editor will use vibe-test tools automatically.')
-    if (!opts.global) {
-      logger.dim('  Tip: run with --global to also register in your user-level editor configs.')
-    }
+    logger.dim('  Your editor will pick up vibe-test tools automatically in every project.')
     console.log('')
   })
 
