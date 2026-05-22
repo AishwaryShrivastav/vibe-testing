@@ -76,4 +76,4 @@ npm version patch    # or minor/major
 npm publish          # publishes to npm as 'vibe-test'
 ```
 
-Users run: `npx vibe-test@latest init` in their project.
+Users run: `npx @aishwaryshrivastava/vibe-test@latest init` in their project.

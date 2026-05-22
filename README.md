@@ -1,6 +1,6 @@
 # vibe-test
 
-[![npm version](https://img.shields.io/npm/v/vibe-test.svg)](https://www.npmjs.com/package/vibe-test)
+[![npm version](https://img.shields.io/npm/v/%40aishwaryshrivastava%2Fvibe-test.svg)](https://www.npmjs.com/package/@aishwaryshrivastava/vibe-test)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,7 +18,7 @@ Works as an **MCP server** that gives your AI editor (Claude Code, Cursor, Winds
 
 ```bash
 cd /path/to/your/project
-npx vibe-test@latest init
+npx @aishwaryshrivastava/vibe-test@latest init
 ```
 
 This command:
@@ -54,7 +54,7 @@ Your AI will pick up the tools automatically and start testing.
 ## How It Works
 
 ```
-npx vibe-test init
+npx @aishwaryshrivastava/vibe-test init
        ↓
 Registers 13 MCP tools in your editor
        ↓
@@ -74,7 +74,7 @@ HTML report opens in browser with screenshots of every step
 ### Option 1 — Automatic (recommended)
 
 ```bash
-npx vibe-test@latest init
+npx @aishwaryshrivastava/vibe-test@latest init
 ```
 
 Detects and configures all installed editors. Done.
@@ -92,7 +92,7 @@ Add to `~/.claude/settings.json` (global — works in every project):
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
+      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
     }
   }
 }
@@ -105,7 +105,7 @@ Or add to `.mcp.json` in your project root (project-level only):
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
+      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
     }
   }
 }
@@ -120,7 +120,7 @@ Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
+      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
     }
   }
 }
@@ -135,7 +135,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
+      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
     }
   }
 }
@@ -150,7 +150,7 @@ Add to `.vscode/mcp.json` in your project:
   "servers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
+      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
     }
   }
 }
@@ -165,7 +165,7 @@ Add to `.roo/mcp.json`:
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "vibe-test@latest", "--mcp"]
+      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
     }
   }
 }
@@ -346,7 +346,7 @@ The AI will run `explore_page` on every route, collecting API errors, broken ele
 ## init Command
 
 ```bash
-npx vibe-test@latest init [options]
+npx @aishwaryshrivastava/vibe-test@latest init [options]
 ```
 
 **What it creates:**
@@ -371,10 +371,10 @@ npx vibe-test@latest init [options]
 **Options:**
 
 ```bash
-npx vibe-test init                     # auto-detect editors, register globally + project
-npx vibe-test init --no-global         # project-level only, skip global registration
-npx vibe-test init --editor cursor     # only configure Cursor
-npx vibe-test init --editor claude-code windsurf
+npx @aishwaryshrivastava/vibe-test init                     # auto-detect editors, register globally + project
+npx @aishwaryshrivastava/vibe-test init --no-global         # project-level only, skip global registration
+npx @aishwaryshrivastava/vibe-test init --editor cursor     # only configure Cursor
+npx @aishwaryshrivastava/vibe-test init --editor claude-code windsurf
 ```
 
 **After init**, edit `VIBE.md` with your login URL and test credentials.
@@ -385,22 +385,22 @@ npx vibe-test init --editor claude-code windsurf
 
 ```bash
 # Set up in current project
-npx vibe-test init
+npx @aishwaryshrivastava/vibe-test init
 
 # Run tests against a URL
-npx vibe-test run http://localhost:3000
-npx vibe-test run https://staging.myapp.com --mode deep
-npx vibe-test run http://localhost:3000 --codebase /path/to/project --scope /login /dashboard
+npx @aishwaryshrivastava/vibe-test run http://localhost:3000
+npx @aishwaryshrivastava/vibe-test run https://staging.myapp.com --mode deep
+npx @aishwaryshrivastava/vibe-test run http://localhost:3000 --codebase /path/to/project --scope /login /dashboard
 
 # Iterative testing until coverage thresholds
-npx vibe-test converge http://localhost:3000
-npx vibe-test converge http://localhost:3000 --max-rounds 6 --target-pass-rate 0.95
+npx @aishwaryshrivastava/vibe-test converge http://localhost:3000
+npx @aishwaryshrivastava/vibe-test converge http://localhost:3000 --max-rounds 6 --target-pass-rate 0.95
 
 # Open last report in browser
-npx vibe-test report
+npx @aishwaryshrivastava/vibe-test report
 
 # Reset memory and screenshots for a clean run
-npx vibe-test reset
+npx @aishwaryshrivastava/vibe-test reset
 ```
 
 ### `run` options
@@ -538,7 +538,7 @@ Vibe Test learns across runs and stores intelligence in `.vibe/`:
 - **Flaky routes** — tracks high fail-rate routes, marks them for retry
 - **Skip routes** — routes that consistently error (need URL params) are auto-skipped
 
-Reset with `npx vibe-test reset` to start fresh.
+Reset with `npx @aishwaryshrivastava/vibe-test reset` to start fresh.
 
 ---
 
@@ -613,7 +613,7 @@ No. Set `never_interact` in `vibe.config.json` or `VIBE.md` to blocklist dangero
 Yes — `vibe-test run https://your-app.com` runs standalone. It scans, generates scenarios, executes them, and produces an HTML report without needing an editor.
 
 **How do I test a staging environment?**
-Set `url` in `vibe.config.json` to your staging URL, or pass it as a CLI argument: `npx vibe-test run https://staging.myapp.com`.
+Set `url` in `vibe.config.json` to your staging URL, or pass it as a CLI argument: `npx @aishwaryshrivastava/vibe-test run https://staging.myapp.com`.
 
 **Does it work with monorepos?**
 Yes. `init` detects Turborepo/pnpm/yarn workspaces and finds the frontend app automatically.
@@ -655,7 +655,7 @@ MIT — [Aishwary Shrivastav](https://github.com/AishwaryShrivastav)
 
 ## Links
 
-- **npm:** https://www.npmjs.com/package/vibe-test
+- **npm:** https://www.npmjs.com/package/@aishwaryshrivastava/vibe-test
 - **GitHub:** https://github.com/AishwaryShrivastav/vibe-testing
 - **Issues:** https://github.com/AishwaryShrivastav/vibe-testing/issues
 - [Model Context Protocol](https://modelcontextprotocol.io)
