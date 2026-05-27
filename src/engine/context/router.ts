@@ -6,6 +6,8 @@ export async function parseRoutes(framework: Framework, codebasePath: string): P
   switch (framework) {
     case 'nextjs-app':    return parseNextjsAppRoutes(codebasePath)
     case 'nextjs-pages':  return parseNextjsPagesRoutes(codebasePath)
+    case 'sveltekit':     return parseSvelteKitRoutes(codebasePath)
+    case 'nuxt':          return parseNuxtRoutes(codebasePath)
     case 'react-spa':     return parseReactSpaRoutes(codebasePath)
     case 'express':       return parseExpressRoutes(codebasePath)
     case 'unknown':       return []
@@ -15,7 +17,9 @@ export async function parseRoutes(framework: Framework, codebasePath: string): P
 
 function filePathToRoute(filePath: string, _type: 'nextjs-app' | 'nextjs-pages'): string {
   let route = filePath
+    .replace(/^src\/app\//, '/')
     .replace(/^app\//, '/')
+    .replace(/^src\/pages\//, '/')
     .replace(/^pages\//, '/')
     .replace(/\/page\.(tsx|jsx|ts|js)$/, '')
     .replace(/\.(tsx|jsx|ts|js)$/, '')
@@ -27,8 +31,13 @@ function filePathToRoute(filePath: string, _type: 'nextjs-app' | 'nextjs-pages')
 }
 
 async function parseNextjsAppRoutes(codebasePath: string): Promise<Route[]> {
-  const pageFiles = await glob('app/**/page.{tsx,jsx,ts,js}', codebasePath)
-  const apiFiles  = await glob('app/**/route.{ts,js}', codebasePath)
+  const pageFilesApp = await glob('app/**/page.{tsx,jsx,ts,js}', codebasePath)
+  const pageFilesSrc = await glob('src/app/**/page.{tsx,jsx,ts,js}', codebasePath)
+  const pageFiles = [...pageFilesApp, ...pageFilesSrc]
+
+  const apiFilesApp = await glob('app/**/route.{ts,js}', codebasePath)
+  const apiFilesSrc = await glob('src/app/**/route.{ts,js}', codebasePath)
+  const apiFiles = [...apiFilesApp, ...apiFilesSrc]
 
   const pages: Route[] = await Promise.all(pageFiles.map(async (f) => {
     const routePath = filePathToRoute(f, 'nextjs-app')
@@ -82,6 +91,88 @@ async function parseNextjsPagesRoutes(codebasePath: string): Promise<Route[]> {
     dynamic_segments: [],
     file_path: path.join(codebasePath, f),
   }))
+
+  return [...pages, ...apis]
+}
+
+async function parseSvelteKitRoutes(codebasePath: string): Promise<Route[]> {
+  const pageFiles = await glob('src/routes/**/+page.svelte', codebasePath)
+
+  const pages: Route[] = await Promise.all(pageFiles.map(async (f) => {
+    let route = f
+      .replace(/^src\/routes/, '')
+      .replace(/\/\+page\.svelte$/, '')
+      .replace(/\(([^)]+)\)\//g, '') // remove layout groups like (app)/
+    if (route === '') route = '/'
+
+    return {
+      path: route,
+      type: 'page' as const,
+      requires_auth: await inferAuthRequirement(f, codebasePath),
+      dynamic_segments: extractDynamicSegments(route),
+      file_path: path.join(codebasePath, f),
+    }
+  }))
+
+  // SvelteKit server routes (+server.ts/js)
+  const serverFiles = await glob('src/routes/**/+server.{ts,js}', codebasePath)
+  const apis: Route[] = await Promise.all(serverFiles.map(async (f) => {
+    let route = f
+      .replace(/^src\/routes/, '')
+      .replace(/\/\+server\.(ts|js)$/, '')
+      .replace(/\(([^)]+)\)\//g, '')
+    if (route === '') route = '/'
+
+    const methods = await extractApiMethods(path.join(codebasePath, f))
+    return methods.map(method => ({
+      path: route,
+      method,
+      type: 'api' as const,
+      requires_auth: false,
+      dynamic_segments: extractDynamicSegments(route),
+      file_path: path.join(codebasePath, f),
+    }))
+  })).then(r => r.flat())
+
+  return [...pages, ...apis]
+}
+
+async function parseNuxtRoutes(codebasePath: string): Promise<Route[]> {
+  const pageFiles = await glob('pages/**/*.vue', codebasePath)
+
+  const pages: Route[] = await Promise.all(pageFiles.map(async (f) => {
+    let route = f
+      .replace(/^pages\//, '/')
+      .replace(/\.vue$/, '')
+      .replace(/\/index$/, '')
+    if (route === '') route = '/'
+
+    // Nuxt uses [param] for dynamic segments
+    return {
+      path: route,
+      type: 'page' as const,
+      requires_auth: await inferAuthRequirement(f, codebasePath),
+      dynamic_segments: extractDynamicSegments(route),
+      file_path: path.join(codebasePath, f),
+    }
+  }))
+
+  // Nuxt server routes (server/api/**)
+  const apiFiles = await glob('server/api/**/*.{ts,js}', codebasePath)
+  const apis: Route[] = apiFiles.map(f => {
+    let route = '/api' + f
+      .replace(/^server\/api/, '')
+      .replace(/\.(ts|js)$/, '')
+      .replace(/\/index$/, '')
+
+    return {
+      path: route,
+      type: 'api' as const,
+      requires_auth: false,
+      dynamic_segments: extractDynamicSegments(route),
+      file_path: path.join(codebasePath, f),
+    }
+  })
 
   return [...pages, ...apis]
 }

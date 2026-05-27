@@ -1,6 +1,6 @@
 # MCP Setup — Add vibe-test to Any Project
 
-The fastest way: run `npx @aishwaryshrivastava/vibe-test@latest init` in your project root. It auto-detects your editors and writes all configs.
+The fastest way: run `npx vibe-testing@latest init` in your project root. It auto-detects your editors and writes all configs.
 
 Or configure manually:
 
@@ -12,7 +12,7 @@ Add to `.mcp.json` in your project root:
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
+      "args": ["-y", "vibe-testing@latest", "--mcp"]
     }
   }
 }
@@ -24,7 +24,7 @@ Or globally in `~/.claude/settings.json`:
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
+      "args": ["-y", "vibe-testing@latest", "--mcp"]
     }
   }
 }
@@ -38,7 +38,7 @@ Add to `.cursor/mcp.json` in your project:
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
+      "args": ["-y", "vibe-testing@latest", "--mcp"]
     }
   }
 }
@@ -52,7 +52,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "vibe-test": {
       "command": "npx",
-      "args": ["-y", "@aishwaryshrivastava/vibe-test@latest", "--mcp"]
+      "args": ["-y", "vibe-testing@latest", "--mcp"]
     }
   }
 }

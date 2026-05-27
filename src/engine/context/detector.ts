@@ -92,6 +92,8 @@ export async function detectBaseUrl(codebasePath: string, framework: Framework):
   const portMap: Partial<Record<Framework, number>> = {
     'nextjs-app': 3000,
     'nextjs-pages': 3000,
+    'sveltekit': 5173,
+    'nuxt': 3000,
     'react-spa': 5173,
     'express': 3000,
   }
@@ -122,9 +124,9 @@ export async function detectFramework(codebasePath: string): Promise<Framework> 
     return 'nextjs-app'
   }
 
-  if (deps['@sveltejs/kit']) return 'react-spa' // use react-spa as generic SPA type for now
+  if (deps['@sveltejs/kit']) return 'sveltekit'
 
-  if (deps['nuxt'] || deps['nuxt3'] || deps['@nuxt/core']) return 'nextjs-pages' // nuxt is file-based like pages router
+  if (deps['nuxt'] || deps['nuxt3'] || deps['@nuxt/core']) return 'nuxt'
 
   if (deps['react'] && (deps['react-router-dom'] || deps['react-router'])) {
     return 'react-spa'

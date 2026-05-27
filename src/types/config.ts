@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const AuthConfigSchema = z.object({
-  strategy: z.enum(['credentials', 'skip']).default('skip'),
+  strategy: z.enum(['credentials', 'basic', 'skip']).default('skip'),
   login_url: z.string().optional(),
   fields: z.object({
     email: z.string().default('email'),

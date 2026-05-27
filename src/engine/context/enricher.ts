@@ -195,7 +195,7 @@ function findFilterOptions(func: PageFunctionality, intel?: TestIntelligence): s
   const labels = func.data_display.filter(d =>
     /^(All|Active|Inactive|Draft|Completed|Pending)$/i.test(d)
   )
-  return labels.length > 1 ? labels : ['All', 'Active']
+  return labels.length > 1 ? labels : []
 }
 
 function findButtonByText(buttons: PageButton[], text: string): PageButton | undefined {

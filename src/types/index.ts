@@ -1,6 +1,8 @@
 export type Framework =
   | 'nextjs-app'
   | 'nextjs-pages'
+  | 'sveltekit'
+  | 'nuxt'
   | 'react-spa'
   | 'express'
   | 'unknown'

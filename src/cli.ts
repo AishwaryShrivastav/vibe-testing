@@ -269,12 +269,12 @@ Use vibe-test tools whenever the user asks to:
 ## Project-Specific Notes
 
 See \`VIBE.md\` for test credentials, blocklist patterns, and project notes.
-Setup: run \`npx @aishwaryshrivastava/vibe-test@latest init\` to configure for any editor.
+Setup: run \`npx vibe-testing@latest init\` to configure for any editor.
 `
 
 const MCP_SERVER_ENTRY = {
   command: 'npx',
-  args: ['-y', '@aishwaryshrivastava/vibe-test@latest', '--mcp'],
+  args: ['-y', 'vibe-testing@latest', '--mcp'],
 }
 
 // ─── Editor detection and configuration ─────────────────────────────────────
