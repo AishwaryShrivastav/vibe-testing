@@ -1,6 +1,6 @@
 {
   "name": "vibe-testing",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "mcpName": "io.github.AishwaryShrivastav/vibe-testing",
   "description": "Code-aware browser testing agent — reads your codebase, understands functionality, tests every element, reports with screenshots. Works as MCP server for Cursor/Claude Code or standalone CLI.",
   "type": "module",
