@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.aishwaryshrivastav/vibe-testing",
+  "name": "io.github.AishwaryShrivastav/vibe-testing",
   "description": "Code-aware browser testing agent — 13 Playwright tools for AI code editors via MCP",
   "repository": {
     "url": "https://github.com/AishwaryShrivastav/vibe-testing",
