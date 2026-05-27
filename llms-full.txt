@@ -31,13 +31,14 @@ npx vibe-testing@latest converge https://your-app.com
 - Reads existing Playwright/Jest/Cypress/Vitest test files
 - Maps test coverage and identifies gaps
 - Generates test scenarios for uncovered features
+- Writes `.vibe/route-manifest.json` and diffs against the previous scan
 
 Parameters:
 - `codebase_path` (string, optional): Absolute path to project root. Defaults to cwd.
 - `url` (string, optional): App URL to test against.
 - `mode` (string, optional): "fast" or "deep". Default "deep".
 
-Returns: JSON with routes, behaviours, coverage map, gaps, and generated scenarios.
+Returns: JSON with routes, behaviours, coverage map, gaps, generated scenarios, and `route_changes: { new_routes, removed_routes } | null` — `null` on first scan, populated when routes differ from the previous scan. Lets the editor surface "new routes added since last test — want to cover them?"
 
 ### 2. get_context
 **Call before writing test steps.** Returns the most relevant source files for a feature or route with relevance scoring — so the LLM knows real field names, selectors, and API endpoints instead of guessing.
@@ -156,21 +157,22 @@ Parameters:
 Returns: Report path + text summary.
 
 ### 11. run_full_test
-All-in-one orchestration: scan_codebase → generate scenarios → execute all → explore pages → generate report
+All-in-one orchestration: scan_codebase → generate scenarios → execute all → explore pages → generate report. Writes `.vibe/run-snapshot.json` and diffs against the previous run.
 
 Parameters:
 - `url` (string): App URL
 - `codebase_path` (string, optional): Project root path
 - `mode` (string, optional): "fast" or "deep"
-- `headed` (boolean, optional): Show browser. Default true.
+- `headed` (boolean, optional): Show browser. Default `false` when invoked via the MCP server (so editor sessions aren't disrupted), `true` from the CLI.
 
-Returns: Full results + report path.
+Returns: Full results + report path + `snapshot_diff` (see below).
 
 ### 12. run_converge
 Iterative testing until coverage thresholds are met:
 - Runs baseline suite first
 - Automatically runs follow-up rounds from coverage gaps and failed scenarios
 - Stops when pass rate and gap thresholds are met, or max rounds reached
+- Writes `.vibe/run-snapshot.json` and diffs against the previous run
 
 Parameters:
 - `url` (string): App URL
@@ -179,7 +181,7 @@ Parameters:
 - `target_pass_rate` (number, optional): Stop when pass rate >= this (0-1). Default 0.92.
 - `max_high_severity_gaps` (number, optional): Stop when critical+important gaps <= this. Default 2.
 
-Returns: Full results across all rounds + final report.
+Returns: Full results across all rounds + final report + `snapshot_diff` (see below).
 
 ### 13. cleanup
 Closes all open browsers and resets session state. Call when done testing.
@@ -234,8 +236,51 @@ Vibe Test persists intelligence in `.vibe/`:
 - Auth state and credentials (reused across runs)
 - Failure patterns and flaky route tracking
 - Run history with pass rate trends
+- `route-manifest.json` — snapshot of all routes from the last scan, diffed on the next scan
+- `run-snapshot.json` — per-route pass/fail status from the last run, diffed on the next run
 
 Each subsequent run uses this intelligence to be faster and more accurate.
+
+## Snapshot Diff (Regression Detection)
+
+Every call to `run`, `converge`, `run_full_test`, and `run_converge` includes a `snapshot_diff` field (or `null` on the first run):
+
+```json
+{
+  "snapshot_diff": {
+    "previous_run_id": "run-1716000000000",
+    "current_run_id": "run-1716086400000",
+    "newly_passing": ["/login"],
+    "newly_failing": ["/checkout"],
+    "still_failing": ["/admin/billing"],
+    "new_routes": ["/admin/users"],
+    "removed_routes": []
+  }
+}
+```
+
+- `newly_passing` — routes that were failing in the previous run and now pass (regressions fixed)
+- `newly_failing` — routes that were passing in the previous run and now fail (new regressions)
+- `still_failing` — routes failing in both runs (persistent issues)
+- `new_routes` — routes present this run that weren't tested previously
+- `removed_routes` — routes tested previously that weren't tested this run
+
+Editors should highlight `newly_failing` as the highest-priority finding — those are regressions the user just introduced.
+
+## Route Manifest Diff (Scaffold Detection)
+
+`scan_codebase` returns `route_changes` (or `null` on first scan):
+
+```json
+{
+  "route_changes": {
+    "new_routes": ["/admin/users", "/billing/invoices"],
+    "removed_routes": ["/old-dashboard"]
+  }
+}
+```
+
+Use this to proactively suggest tests for routes the user just added.
 
 ## Supported Frameworks
 
@@ -250,6 +295,32 @@ Each subsequent run uses this intelligence to be faster and more accurate.
 | Vue + Vite | Yes | — | Yes |
 | Express / Fastify | — | Yes | Yes |
 | Monorepos | Yes | Yes | Yes |
+
+## Configuration Reference
+
+`vibe.config.json` keys:
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `url` | string | required | App URL |
+| `mode` | `"fast"` \| `"deep"` | `"deep"` | Scan depth |
+| `routes` | `"auto"` \| `"config"` | `"auto"` | `auto` discovers routes from the codebase; `config` uses only routes listed in config |
+| `auth.strategy` | `"credentials"` \| `"basic"` \| `"skip"` | — | Auth mode |
+| `auth.login_url` | string | `/login` | Login page path |
+| `auth.credentials` | `{ email, password }` | — | Persisted across runs |
+| `scope.include` | string[] | `["/**"]` | Route glob include list |
+| `scope.exclude` | string[] | `[]` | Route glob exclude list |
+| `scope.max_routes` | number | `30` | Cap on routes tested per run |
+| `never_interact` | string[] | `[]` | Text or selectors to skip during exploration |
+| `browser.headed` | boolean | CLI `true`, MCP `false` | Visible vs headless browser |
+| `browser.slowMo` | number | `40` | ms between actions |
+| `browser.timeout` | number | `30000` | Default action timeout (ms) |
+
+## Runtime
+
+- **Node.js** ≥ 20 (vitest 4.x requires Node 20+)
+- **Playwright Chromium** (auto-installed on first run if missing)
+- **Dockerfile** — Node 20 + Chromium image included; ENTRYPOINT runs MCP server over stdio
 
 ## Links
 

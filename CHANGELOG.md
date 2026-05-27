@@ -4,6 +4,110 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [0.4.1] — 2026-05-27
+
+### Fixed
+
+- **`converge()` now emits snapshot diff** — `run_converge` and the `converge` CLI now save run snapshots and report newly-passing/newly-failing routes, matching `run()` behaviour. The `snapshot_diff` field is included in the `VibeRunResult` returned by both methods.
+
+---
+
+## [0.4.0] — 2026-05-27
+
+### Added
+
+- **Route manifest diffing** — `scan_codebase` now writes `.vibe/route-manifest.json` and compares against the previous scan. New and removed routes are logged inline and surfaced as `route_changes: { new_routes, removed_routes }` on the returned product model. Lets the AI see "5 new routes since you last tested — should we cover them?" automatically.
+- **Run snapshot regression detection** — Each run writes `.vibe/run-snapshot.json` capturing per-route pass/fail status. The next run diffs against it and emits `snapshot_diff: { newly_passing, newly_failing, still_failing, new_routes, removed_routes }`. Regressions and fixes are now visible without scrolling the report.
+- **`routes` config option** — `vibe.config.json` accepts `routes: 'auto' | 'config'` (default `auto`) to control whether routes are discovered or read from config.
+- **Manifest test suite** — 11 new vitest tests covering route manifest diff and run snapshot diff behaviour.
+
+---
+
+## [0.3.11] — 2026-05-27
+
+### Fixed
+
+- **MCP server defaults to headless browser** — when launched as an MCP server, the browser now runs headless by default (was opening visible windows that disrupted editor sessions). CLI behaviour unchanged (still headed by default).
+
+---
+
+## [0.3.10] — 2026-05-27
+
+### Added
+
+- **Dockerfile** — multi-stage Node 20 + Chromium image for Glama.ai quality scoring. Ships compiled `dist/`, installs Playwright Chromium, runs MCP server over stdio.
+
+### Fixed
+
+- **Improved MCP tool descriptions for Glama TDQS scoring** — each tool now has a more discoverable, intent-rich description so the Glama registry tool-description-quality-score (TDQS) ranks the server higher.
+
+---
+
+## [0.3.9] — 2026-05-27
+
+### Fixed
+
+- **CI: dropped Node 18 from test matrix** — vitest 4.x requires Node 20+. CI now runs on Node 20 and 22 only. Local Node 18 builds may still work for the runtime but `npm test` will fail.
+
+---
+
+## [0.3.8] — 2026-05-27
+
+### Added
+
+- **vitest test suite (44 tests)** — covers config parsing, framework detection, route parsing, gap analysis, scenario enrichment, and memory recommendations. Run with `npm test`.
+- **Automated MCP Registry publishing** — GitHub Actions workflow publishes to the official MCP Registry on git tag, using OIDC trusted publishing.
+
+---
+
+## [0.3.7] — 2026-05-27
+
+### Changed
+
+- **Docs: clarified Vue + Vite requires vue-router** — README and llms-full.txt now note that Vue route detection requires `vue-router` to be installed (no fallback for unrouted SPAs).
+
+---
+
+## [0.3.6] — 2026-05-27
+
+### Fixed
+
+- **Resolved 5 critical gaps from full project audit** — fixes covering selector escaping, scope filter edge cases, memory schema migration, error swallowing in explorer, and report generation when no scenarios are produced.
+
+---
+
+## [0.3.5] — 2026-05-27
+
+### Fixed
+
+- **CLI version reads from package.json** — `vibe-test --version` was hardcoded to an old number. Now reads `package.json` at runtime so the version always matches what npm shipped.
+
+---
+
+## [0.3.4] — 2026-05-27
+
+### Fixed
+
+- **MCP Registry: added `title` field** — improves search discoverability on the official MCP Registry.
+
+---
+
+## [0.3.3] — 2026-05-27
+
+### Fixed
+
+- **`mcpName` case corrected** — `io.github.AishwaryShrivastav/vibe-testing` (was lowercase). Required to match GitHub username casing for trusted publisher OIDC verification.
+
+---
+
+## [0.3.2] — 2026-05-27
+
+### Added
+
+- **MCP Registry support** — added `server.json` and `mcpName` field in `package.json`. vibe-test is now listed in the official Model Context Protocol Registry, discoverable from any MCP-aware editor.
+
+---
+
 ## [0.3.1] — 2026-05-27
 
 ### Fixed

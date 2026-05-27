@@ -42,7 +42,7 @@ npx vibe-testing@latest converge http://localhost:3000
 
 ## MCP Tools (13)
 
-1. `scan_codebase` — Analyze project: routes, forms, existing tests, coverage gaps, generated scenarios. **Call first.**
+1. `scan_codebase` — Analyze project: routes, forms, existing tests, coverage gaps, generated scenarios. Also returns `route_changes` (new/removed routes since last scan). **Call first.**
 2. `get_context` — Return actual source files for a feature (real selectors, field names, API endpoints). **Call before writing test steps.**
 3. `login` — Authenticate in a real browser, capture tokens and cookies
 4. `scan_page_elements` — Discover all interactive elements on a page
@@ -52,8 +52,8 @@ npx vibe-testing@latest converge http://localhost:3000
 8. `suggest_tests` — Get prioritized, executable test scenarios for untested features
 9. `take_screenshot` — Visual verification of any page
 10. `generate_report` — HTML report with screenshots (auto-opens in browser)
-11. `run_full_test` — All-in-one: scan → execute → explore → report
-12. `run_converge` — Iterative testing: keeps running follow-up rounds until coverage thresholds met
+11. `run_full_test` — All-in-one: scan → execute → explore → report. Includes `snapshot_diff` vs the previous run.
+12. `run_converge` — Iterative testing: keeps running follow-up rounds until coverage thresholds met. Includes `snapshot_diff` vs the previous run.
 13. `cleanup` — Close browsers and reset session
 
 ## Supported Frameworks
@@ -65,15 +65,18 @@ Next.js (App Router, Pages Router, src/ variants), React SPA, SvelteKit, Nuxt, V
 - **Code-aware**: Reads source code to understand real routes, forms, selectors — no guessing
 - **Framework detection**: Auto-detects 8+ frameworks and parses their route conventions
 - **Self-improving**: Learns working selectors, route timings, and failure patterns across runs
+- **Route manifest diffing**: Detects new/removed routes between scans (`.vibe/route-manifest.json`)
+- **Run snapshot regression detection**: Detects newly-passing fixes and newly-failing regressions between runs (`.vibe/run-snapshot.json`)
 - **No LLM dependency**: Heuristic pass/fail verification — the editor LLM is the brain
 - **Screenshot reports**: Interactive HTML reports with step-level screenshots
 - **Action blocklist**: Skips destructive actions (delete account, cancel subscription)
 - **Persistent auth**: Saves login credentials and reuses sessions across runs
 - **HTTP Basic Auth**: Supports `basic` auth strategy for preview-gated staging sites
+- **MCP-friendly defaults**: When launched as an MCP server, the browser defaults to headless so editor sessions aren't disrupted
 
 ## Technology
 
-TypeScript, Node.js ≥18, Playwright, Model Context Protocol SDK, JSON-RPC stdio
+TypeScript, Node.js ≥20, Playwright, Model Context Protocol SDK, JSON-RPC stdio. Dockerfile (Node 20 + Chromium) included.
 
 ## Links
 

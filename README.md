@@ -1,7 +1,7 @@
 # vibe-test
 
 [![npm version](https://img.shields.io/npm/v/vibe-testing.svg)](https://www.npmjs.com/package/vibe-testing)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/AishwaryShrivastav/vibe-testing/actions/workflows/ci.yml/badge.svg)](https://github.com/AishwaryShrivastav/vibe-testing/actions)
@@ -192,7 +192,7 @@ Add to `.roo/mcp.json`:
 
 | Tool | When to call | Returns |
 |------|-------------|---------|
-| `scan_codebase` | **Always first.** Reads source code, finds routes/forms/tests/gaps | Routes, forms, coverage map, generated scenarios |
+| `scan_codebase` | **Always first.** Reads source code, finds routes/forms/tests/gaps | Routes, forms, coverage map, generated scenarios, `route_changes` since last scan |
 | `get_context` | **Before writing test steps.** Returns source files for a feature | Actual source code with real field names and selectors |
 | `login` | When app requires authentication | Post-login screenshot, token state, API calls observed |
 | `scan_page_elements` | To see all interactive elements on a page | Element list with selectors + page screenshot |
@@ -202,8 +202,8 @@ Add to `.roo/mcp.json`:
 | `suggest_tests` | Find coverage gaps after exploration | Prioritized, ready-to-run scenarios with steps |
 | `take_screenshot` | Quick visual verification | Screenshot of any URL |
 | `generate_report` | Build HTML report (auto-opens) | Report path + summary |
-| `run_full_test` | One-shot: scan → execute → explore → report | Full results |
-| `run_converge` | Iterative testing until thresholds | Summary across all rounds |
+| `run_full_test` | One-shot: scan → execute → explore → report | Full results + `snapshot_diff` vs last run |
+| `run_converge` | Iterative testing until thresholds | Summary across all rounds + `snapshot_diff` vs last run |
 | `cleanup` | Close browsers, free resources | — |
 
 ### Tool Inputs
@@ -500,8 +500,9 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
 | `scope.exclude` | Route patterns to exclude from testing |
 | `scope.max_routes` | Cap how many routes are tested per run |
-| `browser.headed` | `true` = visible browser (default). `false` = headless |
+| `browser.headed` | `true` = visible browser. CLI default `true`, MCP server default `false` (headless) so editor sessions aren't disrupted by pop-up windows. |
 | `browser.slowMo` | Milliseconds between actions (useful for debugging) |
+| `routes` | `auto` (default) discovers routes from the codebase. `config` uses only routes explicitly listed in config. |
 
 ---
 
@@ -538,8 +539,35 @@ Vibe Test learns across runs and stores intelligence in `.vibe/`:
 - **Auth credentials** — saved after first login, reused automatically
 - **Flaky routes** — tracks high fail-rate routes, marks them for retry
 - **Skip routes** — routes that consistently error (need URL params) are auto-skipped
+- **Route manifest** (`.vibe/route-manifest.json`) — every scan diffs against the previous one; new and removed routes are surfaced as `route_changes` on `scan_codebase` results so the AI can immediately cover them
+- **Run snapshot** (`.vibe/run-snapshot.json`) — every run captures per-route pass/fail status and diffs against the prior run; `snapshot_diff` flags `newly_passing` (fixes), `newly_failing` (regressions), `still_failing`, plus added/removed routes
 
 Reset with `npx vibe-testing@latest reset` to start fresh.
+
+### Regression detection in action
+
+After a second run, the console and `VibeRunResult` include a snapshot diff:
+
+```
+─── Changes since last run ───
+  ✓ Fixed:      /login
+  ✗ Regression: /checkout
+  ℹ New:        /admin/users
+```
+
+```json
+{
+  "snapshot_diff": {
+    "newly_passing": ["/login"],
+    "newly_failing": ["/checkout"],
+    "still_failing": [],
+    "new_routes": ["/admin/users"],
+    "removed_routes": []
+  }
+}
+```
+
+`run_converge` returns the same shape, so iterative runs in your editor highlight what you just broke.
 
 ---
 
@@ -623,12 +651,22 @@ Yes. `init` detects Turborepo/pnpm/yarn workspaces and finds the frontend app au
 
 ## Requirements
 
-- **Node.js** ≥ 18
+- **Node.js** ≥ 20 (the test suite uses vitest 4.x which requires Node 20+)
 - **Playwright Chromium** — install once with:
   ```bash
   npx playwright install chromium
   ```
   (vibe-test will prompt you if it's missing)
+
+### Docker
+
+A Node 20 + Chromium image is included for environments that prefer container-based MCP servers (and for Glama.ai quality scoring):
+
+```bash
+docker build -t vibe-test .
+# wire into your editor's MCP config:
+# { "command": "docker", "args": ["run", "--rm", "-i", "vibe-test"] }
+```
 
 ---
 
