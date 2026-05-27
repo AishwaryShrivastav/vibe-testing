@@ -245,7 +245,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           url: { type: 'string', description: 'Base URL of the running application (e.g. http://localhost:3000 or https://staging.myapp.com).' },
           codebase_path: { type: 'string', description: 'Absolute path to the project root directory. Defaults to the current working directory.' },
           mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
-          headed: { type: 'boolean', default: true, description: 'Show the browser window during testing. Set false for headless CI runs.' },
+          headed: { type: 'boolean', default: false, description: 'Show the browser window during testing. Defaults to headless (false) when used via MCP. Set true to watch the browser.' },
         },
         required: ['url'],
       },
@@ -259,7 +259,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           url: { type: 'string', description: 'Base URL of the running application (e.g. http://localhost:3000).' },
           codebase_path: { type: 'string', description: 'Absolute path to the project root directory. Defaults to the current working directory.' },
           mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
-          headed: { type: 'boolean', default: true, description: 'Show the browser window during testing. Set false for headless CI runs.' },
+          headed: { type: 'boolean', default: false, description: 'Show the browser window during testing. Defaults to headless (false) when used via MCP. Set true to watch the browser.' },
           max_followup_rounds: { type: 'number', description: 'Max extra rounds after baseline (default 4).', default: 4 },
           target_pass_rate: { type: 'number', description: 'Stop when last batch pass rate reaches this 0–1 (default 0.92).', default: 0.92 },
           max_high_severity_gaps: { type: 'number', description: 'Stop when critical+important gaps <= this (default 2).', default: 2 },
@@ -1148,7 +1148,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
     url: args.url as string,
     codebase_path: args.codebase_path as string | undefined,
     mode: (args.mode as 'fast' | 'deep') ?? 'deep',
-    browser: { headed: (args.headed as boolean) ?? true },
+    browser: { headed: (args.headed as boolean) ?? false },
   })
 
   const result = await tester.run()
@@ -1175,7 +1175,7 @@ async function handleRunConverge(args: Record<string, unknown>) {
     url: args.url as string,
     codebase_path: args.codebase_path as string | undefined,
     mode: (args.mode as 'fast' | 'deep') ?? 'deep',
-    browser: { headed: (args.headed as boolean) ?? true },
+    browser: { headed: (args.headed as boolean) ?? false },
   })
 
   const result = await tester.converge({
@@ -1542,7 +1542,7 @@ async function resolveLocatorForStep(page: Page, step: TestScenario['steps'][0],
 async function ensureBrowser(): Promise<void> {
   if (!session.browser || !session.browser.isConnected()) {
     session.browser = await chromium.launch({
-      headless: !(session.config?.browser?.headed ?? true),
+      headless: !(session.config?.browser?.headed ?? false),
       slowMo: session.config?.browser?.slowMo ?? 100,
     })
   }
