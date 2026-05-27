@@ -388,6 +388,7 @@ async function handleScanCodebase(args: Record<string, unknown>) {
       requires_auth: s.requires_auth ?? false,
       steps_count: s.steps.length,
     })),
+    route_changes: model.route_changes ?? null,
     guidance: session.guidance ? {
       has_vibe_md: true,
       login_url: session.guidance.login_url,

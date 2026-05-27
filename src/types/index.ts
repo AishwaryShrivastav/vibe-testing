@@ -174,6 +174,10 @@ export interface ProductModel {
   coverage: CoverageMap
   gaps: Gap[]
   scenarios: TestScenario[]
+  route_changes?: {
+    new_routes: string[]
+    removed_routes: string[]
+  }
 }
 
 export interface Bug {
@@ -230,6 +234,13 @@ export interface VibeRunResult {
   report: string
   report_path: string
   coverage_gaps: CoverageGapSuggestion[]
+  snapshot_diff?: {
+    newly_passing: string[]
+    newly_failing: string[]
+    still_failing: string[]
+    new_routes: string[]
+    removed_routes: string[]
+  }
   summary: {
     total: number
     passed: number

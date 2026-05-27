@@ -97,6 +97,7 @@ export async function buildProductModel(
     coverage,
     gaps,
     scenarios,
+    route_changes: routeDiff ? { new_routes: routeDiff.new_routes, removed_routes: routeDiff.removed_routes } : undefined,
   }
 }
 

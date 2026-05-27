@@ -113,6 +113,13 @@ export class VibeTester {
       report,
       report_path: reportPath,
       coverage_gaps: coverageGaps,
+      snapshot_diff: snapshotDiff ? {
+        newly_passing: snapshotDiff.newly_passing,
+        newly_failing: snapshotDiff.newly_failing,
+        still_failing: snapshotDiff.still_failing,
+        new_routes: snapshotDiff.new_routes,
+        removed_routes: snapshotDiff.removed_routes,
+      } : undefined,
       summary: { total: results.length, passed, failed, errors, duration_ms: duration, elements_explored: elementsExplored, api_calls_observed: apiCallsObserved },
     }
   }
@@ -131,6 +138,21 @@ export class VibeTester {
     const cr = await runConverge(this.config, opts)
     const recommendations = memory.getRecommendations()
     const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
+
+    // Save run snapshot and diff against previous run
+    const convergeVibeDir = path.join(this.projectRoot, '.vibe')
+    const convergeSnapshotDiff = await saveRunSnapshot(convergeVibeDir, cr.total_results)
+    if (convergeSnapshotDiff) {
+      logger.section('Changes since last run')
+      if (convergeSnapshotDiff.newly_passing.length > 0)
+        logger.success(`  Fixed: ${convergeSnapshotDiff.newly_passing.join(', ')}`)
+      if (convergeSnapshotDiff.newly_failing.length > 0)
+        logger.error(`  Regression: ${convergeSnapshotDiff.newly_failing.join(', ')}`)
+      if (convergeSnapshotDiff.new_routes.length > 0)
+        logger.info(`  New: ${convergeSnapshotDiff.new_routes.join(', ')}`)
+      if (convergeSnapshotDiff.removed_routes.length > 0)
+        logger.warn(`  Removed: ${convergeSnapshotDiff.removed_routes.join(', ')}`)
+    }
 
     const passed = cr.total_results.filter(r => r.status === 'pass').length
     const failed = cr.total_results.filter(r => r.status === 'fail').length
@@ -163,6 +185,13 @@ export class VibeTester {
       report,
       report_path: reportPath,
       coverage_gaps: cr.final_gaps,
+      snapshot_diff: convergeSnapshotDiff ? {
+        newly_passing: convergeSnapshotDiff.newly_passing,
+        newly_failing: convergeSnapshotDiff.newly_failing,
+        still_failing: convergeSnapshotDiff.still_failing,
+        new_routes: convergeSnapshotDiff.new_routes,
+        removed_routes: convergeSnapshotDiff.removed_routes,
+      } : undefined,
       summary: {
         total: cr.total_results.length,
         passed,
