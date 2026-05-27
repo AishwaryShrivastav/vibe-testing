@@ -513,7 +513,7 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | Next.js Pages Router | ✅ | ✅ | ✅ |
 | Next.js (src/ variant) | ✅ | ✅ | ✅ |
 | React SPA (react-router) | ✅ | — | ✅ |
-| Vue + Vite | ✅ | — | ✅ |
+| Vue + Vite (vue-router) | ✅ | — | ✅ |
 | Nuxt | ✅ | ✅ | ✅ |
 | SvelteKit | ✅ | ✅ | ✅ |
 | Express / Fastify | — | ✅ | ✅ |
