@@ -379,7 +379,7 @@ const program = new Command()
 program
   .name('vibe-test')
   .description('AI-powered browser testing agent — reads your code, tests your product')
-  .version('0.3.2')
+  .version('0.3.3')
 
 program
   .command('run [url]')
