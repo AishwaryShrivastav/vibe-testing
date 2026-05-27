@@ -94,6 +94,7 @@ export async function detectBaseUrl(codebasePath: string, framework: Framework):
     'nextjs-pages': 3000,
     'sveltekit': 5173,
     'nuxt': 3000,
+    'vue-spa': 5173,
     'react-spa': 5173,
     'express': 3000,
   }
@@ -127,6 +128,8 @@ export async function detectFramework(codebasePath: string): Promise<Framework> 
   if (deps['@sveltejs/kit']) return 'sveltekit'
 
   if (deps['nuxt'] || deps['nuxt3'] || deps['@nuxt/core']) return 'nuxt'
+
+  if (deps['vue'] && (deps['vue-router'] || deps['@vue/router'])) return 'vue-spa'
 
   if (deps['react'] && (deps['react-router-dom'] || deps['react-router'])) {
     return 'react-spa'

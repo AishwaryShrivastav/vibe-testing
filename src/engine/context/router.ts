@@ -8,6 +8,7 @@ export async function parseRoutes(framework: Framework, codebasePath: string): P
     case 'nextjs-pages':  return parseNextjsPagesRoutes(codebasePath)
     case 'sveltekit':     return parseSvelteKitRoutes(codebasePath)
     case 'nuxt':          return parseNuxtRoutes(codebasePath)
+    case 'vue-spa':       return parseVueSpaRoutes(codebasePath)
     case 'react-spa':     return parseReactSpaRoutes(codebasePath)
     case 'express':       return parseExpressRoutes(codebasePath)
     case 'unknown':       return []
@@ -177,11 +178,52 @@ async function parseNuxtRoutes(codebasePath: string): Promise<Route[]> {
   return [...pages, ...apis]
 }
 
+async function parseVueSpaRoutes(codebasePath: string): Promise<Route[]> {
+  const candidates = [
+    'src/router/index.ts', 'src/router/index.js',
+    'src/router.ts', 'src/router.js',
+    'src/routes/index.ts', 'src/routes/index.js',
+    'src/routes.ts', 'src/routes.js',
+  ]
+
+  for (const candidate of candidates) {
+    const filePath = path.join(codebasePath, candidate)
+    try {
+      const content = await readFile(filePath)
+      const routes = extractVueRoutes(content)
+      if (routes.length > 0) return routes
+    } catch { continue }
+  }
+
+  return []
+}
+
+function extractVueRoutes(content: string): Route[] {
+  const routes: Route[] = []
+
+  // Match Vue Router path definitions: { path: '/about', ... }
+  const pathMatches = content.matchAll(/path\s*:\s*['"]([^'"]+)['"]/g)
+  for (const match of pathMatches) {
+    const routePath = match[1]
+    if (routePath !== '*' && routePath !== '/:pathMatch(.*)*') {
+      routes.push({
+        path: routePath,
+        type: 'page',
+        requires_auth: false,
+        dynamic_segments: extractDynamicSegments(routePath),
+      })
+    }
+  }
+
+  return routes
+}
+
 async function parseReactSpaRoutes(codebasePath: string): Promise<Route[]> {
   const candidates = [
     'src/router.tsx', 'src/router.ts',
     'src/routes.tsx', 'src/routes.ts',
     'src/App.tsx', 'src/App.ts',
+    'src/app.tsx', 'src/app.ts',
   ]
 
   for (const candidate of candidates) {

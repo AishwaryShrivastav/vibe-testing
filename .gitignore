@@ -20,3 +20,4 @@ test/
 # Env
 .env
 .env.*
+mcp-publisher

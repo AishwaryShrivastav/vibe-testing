@@ -599,31 +599,31 @@ export async function explorePage(
 
   // ── Phase 1: Tabs (safe, helps reveal content) ──
   const tabs = elements.filter(e => e.type === 'tab' && !e.disabled && !isBlocked(e))
-  for (const tab of tabs.slice(0, 6)) {
+  for (const tab of tabs.slice(0, 12)) {
     interactions.push(await testTab(page, tab))
   }
 
   // ── Phase 2: Inputs (fill with test data) ──
   const inputs = elements.filter(e => e.type === 'input' && !e.disabled && !isBlocked(e))
-  for (const input of inputs.slice(0, 10)) {
+  for (const input of inputs.slice(0, 20)) {
     interactions.push(await testInput(page, input))
   }
 
   // ── Phase 3: Checkboxes / toggles ──
   const checkboxes = elements.filter(e => e.type === 'checkbox' && !e.disabled && !isBlocked(e))
-  for (const cb of checkboxes.slice(0, 5)) {
+  for (const cb of checkboxes.slice(0, 10)) {
     interactions.push(await testCheckbox(page, cb))
   }
 
   // ── Phase 4: Buttons (click each, observe response) ──
   const buttons = elements.filter(e => e.type === 'button' && !e.disabled && !isBlocked(e))
-  for (const btn of buttons.slice(0, 10)) {
+  for (const btn of buttons.slice(0, 20)) {
     interactions.push(await testButton(page, btn, fullUrl))
   }
 
   // ── Phase 5: Links (verify + follow internal ones) ──
   const links = elements.filter(e => e.type === 'link' && !isBlocked(e))
-  for (const link of links.slice(0, 6)) {
+  for (const link of links.slice(0, 12)) {
     interactions.push(await testLink(page, link, fullUrl))
   }
 

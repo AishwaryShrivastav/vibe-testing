@@ -53,7 +53,30 @@ export async function performLogin(
 
     await fillFirstMatch(page, emailSelectors, email)
     await fillFirstMatch(page, passwordSelectors, password)
-    await page.click('[type="submit"], button:has-text("Login"), button:has-text("Sign in"), button:has-text("Log in")')
+    // Try multiple submit button selectors — wrap in try-catch to avoid crashing
+    const submitSelectors = [
+      '[type="submit"]',
+      'button:has-text("Login")',
+      'button:has-text("Sign in")',
+      'button:has-text("Log in")',
+      'button:has-text("Continue")',
+      'button:has-text("Submit")',
+    ]
+    let clicked = false
+    for (const sel of submitSelectors) {
+      try {
+        const btn = page.locator(sel).first()
+        if (await btn.isVisible({ timeout: 500 })) {
+          await btn.click()
+          clicked = true
+          break
+        }
+      } catch { /* try next */ }
+    }
+    if (!clicked) {
+      logger.warn('No submit button found — trying Enter key on password field')
+      await page.keyboard.press('Enter')
+    }
 
     await page.waitForNavigation({ timeout: 10000 }).catch(() => {})
 

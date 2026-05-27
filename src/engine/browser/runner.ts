@@ -464,7 +464,25 @@ async function executeStep(page: Page, step: TestStep, baseUrl: string, apiError
       await page.waitForTimeout(ms)
       return undefined
     }
+    case 'upload': {
+      if (!step.value) break
+      const { locator, resolved } = await resolveLocator(page, step, timeout)
+      await locator.setInputFiles(step.value, { timeout })
+      return resolved
+    }
     case 'assert': {
+      // Check for hard error indicators on the page
+      const errorEl = page.locator('[role="alert"], [data-error], .error-message, .toast-error').first()
+      const hasError = await errorEl.isVisible({ timeout: 500 }).catch(() => false)
+      if (hasError) {
+        const errorText = await errorEl.textContent().catch(() => 'Unknown error')
+        throw new Error(`Assertion failed — error visible on page: ${errorText?.slice(0, 200)}`)
+      }
+      // Check for blank/crashed page
+      const bodyText = await page.locator('body').textContent().catch(() => '') ?? ''
+      if (bodyText.trim().length < 10) {
+        throw new Error('Assertion failed — page appears blank or crashed')
+      }
       return undefined
     }
   }

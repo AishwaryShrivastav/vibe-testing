@@ -3,6 +3,7 @@ export type Framework =
   | 'nextjs-pages'
   | 'sveltekit'
   | 'nuxt'
+  | 'vue-spa'
   | 'react-spa'
   | 'express'
   | 'unknown'

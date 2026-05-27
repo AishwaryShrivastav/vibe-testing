@@ -1203,7 +1203,10 @@ async function handleRunConverge(args: Record<string, unknown>) {
 // ─── get_context ─────────────────────────────────────────────────────────────
 
 async function handleGetContext(args: Record<string, unknown>) {
-  const feature = (args.feature as string).toLowerCase()
+  if (!args.feature || typeof args.feature !== 'string') {
+    throw new Error('feature parameter is required and must be a string')
+  }
+  const feature = args.feature.toLowerCase()
   const maxFiles = Math.min((args.max_files as number) ?? 5, 8)
   const root = session.projectRoot || process.cwd()
 
