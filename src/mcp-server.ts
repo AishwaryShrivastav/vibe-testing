@@ -68,7 +68,7 @@ async function screenshotToBase64(filepath: string): Promise<string | null> {
 // ─── MCP Server ───────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'vibe-test', version: '0.3.0' },
+  { name: 'vibe-test', version: '0.3.9' },
   { capabilities: { tools: {} } }
 )
 
@@ -159,27 +159,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'object',
             description: 'A test scenario object with id, name, route, steps[], and expected_outcome.',
             properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              route: { type: 'string' },
-              priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+              id: { type: 'string', description: 'Unique scenario identifier (e.g. "login-test-01").' },
+              name: { type: 'string', description: 'Human-readable scenario name (e.g. "Login with valid credentials").' },
+              route: { type: 'string', description: 'The primary route this scenario tests (e.g. "/login").' },
+              priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Scenario priority level.' },
               steps: {
                 type: 'array',
+                description: 'Ordered list of test steps to execute sequentially.',
                 items: {
                   type: 'object',
                   properties: {
-                    action: { type: 'string', enum: ['navigate', 'fill', 'click', 'wait', 'assert', 'select', 'upload'] },
-                    selector: { type: 'string' },
-                    value: { type: 'string' },
-                    url: { type: 'string' },
-                    timeout: { type: 'number' },
-                    description: { type: 'string' },
+                    action: { type: 'string', enum: ['navigate', 'fill', 'click', 'wait', 'assert', 'select', 'upload'], description: 'Step action: navigate (go to URL), fill (type into input), click (click element), wait (pause ms), assert (verify page state), select (dropdown), upload (file input).' },
+                    selector: { type: 'string', description: 'CSS selector, text=, placeholder=, or label= locator for the target element.' },
+                    value: { type: 'string', description: 'Value to fill/select, milliseconds for wait, or file path for upload.' },
+                    url: { type: 'string', description: 'URL or route path for navigate action.' },
+                    timeout: { type: 'number', description: 'Step timeout in milliseconds. Default 15000.' },
+                    description: { type: 'string', description: 'Human-readable description of what this step does.' },
                   },
                   required: ['action', 'description'],
                 },
               },
-              expected_outcome: { type: 'string' },
-              requires_auth: { type: 'boolean' },
+              expected_outcome: { type: 'string', description: 'What should happen after all steps complete (e.g. "Redirect to dashboard").' },
+              requires_auth: { type: 'boolean', description: 'Whether this scenario needs an authenticated browser session.' },
             },
             required: ['id', 'name', 'route', 'steps', 'expected_outcome'],
           },
@@ -193,7 +194,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'get_coverage',
-      description: `Return the current test coverage map, identified gaps, and suggested tests. Requires scan_codebase to have been called first. Returns coverage entries per route, gap analysis with priority scores, and concrete test suggestions for missing coverage.`,
+      description: `Return the current test coverage map, identified gaps, and suggested tests. Prerequisite: scan_codebase must have been called first. Returns JSON with: coverage entries per route (tested/untested, test frameworks used), gap analysis with priority scores (high/medium/low), and concrete test suggestions for missing coverage. Use this to understand what has been tested and what still needs testing.`,
       inputSchema: {
         type: 'object' as const,
         properties: {},
@@ -202,7 +203,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'generate_report',
-      description: `Generate a comprehensive HTML test report from all collected results, explorations, and coverage data. Returns the report file path and a text summary. Call this after executing scenarios and explorations.`,
+      description: `Generate a self-contained HTML test report with embedded screenshots from all collected results, explorations, and coverage data. Returns the report file path and a text summary. The report includes: pass/fail results per scenario, step-by-step screenshots, element exploration findings, API error monitoring, and coverage gap suggestions. Call this after executing scenarios and explorations. The report auto-opens in the browser.`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -241,24 +242,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object' as const,
         properties: {
-          url: { type: 'string', description: 'URL to test (e.g. http://localhost:3000 or https://staging.myapp.com).' },
-          codebase_path: { type: 'string', description: 'Absolute path to codebase root. Defaults to cwd.' },
-          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep' },
-          headed: { type: 'boolean', default: true },
+          url: { type: 'string', description: 'Base URL of the running application (e.g. http://localhost:3000 or https://staging.myapp.com).' },
+          codebase_path: { type: 'string', description: 'Absolute path to the project root directory. Defaults to the current working directory.' },
+          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
+          headed: { type: 'boolean', default: true, description: 'Show the browser window during testing. Set false for headless CI runs.' },
         },
         required: ['url'],
       },
     },
     {
       name: 'run_converge',
-      description: `Iterative coverage: runs the full baseline suite, then automatically runs follow-up rounds from coverage gaps and failed scenarios until pass rate and gap thresholds are met (or max rounds). Use for "keep testing until coverage is good". Opens the final HTML report.`,
+      description: `Iterative coverage: runs the full baseline suite, then automatically runs follow-up rounds targeting coverage gaps and failed scenarios until pass rate and gap thresholds are met (or max rounds reached). Use for "keep testing until coverage is good". Returns results across all rounds and opens the final HTML report.`,
       inputSchema: {
         type: 'object' as const,
         properties: {
-          url: { type: 'string', description: 'URL to test.' },
-          codebase_path: { type: 'string', description: 'Absolute path to codebase root. Defaults to cwd.' },
-          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep' },
-          headed: { type: 'boolean', default: true },
+          url: { type: 'string', description: 'Base URL of the running application (e.g. http://localhost:3000).' },
+          codebase_path: { type: 'string', description: 'Absolute path to the project root directory. Defaults to the current working directory.' },
+          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
+          headed: { type: 'boolean', default: true, description: 'Show the browser window during testing. Set false for headless CI runs.' },
           max_followup_rounds: { type: 'number', description: 'Max extra rounds after baseline (default 4).', default: 4 },
           target_pass_rate: { type: 'number', description: 'Stop when last batch pass rate reaches this 0–1 (default 0.92).', default: 0.92 },
           max_high_severity_gaps: { type: 'number', description: 'Stop when critical+important gaps <= this (default 2).', default: 2 },
