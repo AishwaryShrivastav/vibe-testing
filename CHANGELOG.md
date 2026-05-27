@@ -4,6 +4,22 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [0.3.1] — 2026-05-27
+
+### Fixed
+
+- **SvelteKit and Nuxt route detection** — added proper `'sveltekit'` and `'nuxt'` framework types with dedicated route parsers (`+page.svelte`, `pages/*.vue`, `+server.ts`, `server/api/**`). Previously returned `'react-spa'` and `'nextjs-pages'` respectively, producing 0 routes.
+- **HTTP Basic Auth support** — added `'basic'` as a valid auth strategy. Sets credentials on the browser context via `context.setHTTPCredentials()` for preview-gated staging sites. Previously crashed with a raw Zod stack trace.
+- **Auth login on forms without name/id attributes** — login now tries cascading selectors: `[name]`, `[type]`, `#id`, `[placeholder*="email"]`, `[aria-label*="email"]`, `input[type="text"]:first-of-type`. Previously timed out on React controlled components with no identifying attributes.
+- **Phantom "text=Active" click scenarios** — removed hardcoded `['All', 'Active']` fallback in enricher's `findFilterOptions`. When no real filter tabs are found, no filter scenario is generated instead of producing guaranteed failures.
+- **Package name consistency** — replaced all `@aishwaryshrivastava/vibe-test` references with `vibe-testing@latest` across README, MCP-SETUP.md, CLAUDE.md, AGENTS.md template, and CLI init output.
+
+### Changed
+
+- Updated `llms.txt` and `llms-full.txt` to document all 13 MCP tools (was 11, missing `get_context` and `run_converge`).
+
+---
+
 ## [0.3.0] — 2026-05-22
 
 ### Added

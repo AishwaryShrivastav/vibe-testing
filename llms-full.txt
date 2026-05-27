@@ -2,31 +2,33 @@
 
 ## Overview
 
-Vibe Test is a code-aware browser testing agent distributed as an npm package (`vibe-test`). It provides an MCP server with 11 tools that let AI code editors (Cursor, Claude Code, Windsurf) autonomously test web applications.
+Vibe Test is a code-aware browser testing agent distributed as an npm package (`vibe-testing`, CLI command: `vibe-test`). It provides an MCP server with 13 tools that let AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) autonomously test web applications using Playwright.
 
-The core philosophy: **the editor LLM is the brain, Vibe Test is the hands.** Each tool returns structured JSON data plus screenshots as base64 images, allowing the LLM to see the page and reason about it visually.
+The core philosophy: **the editor LLM is the brain, Vibe Test is the hands.** Each tool returns structured JSON data plus screenshots as base64 images, allowing the LLM to see the page and reason about it visually. No internal LLM — pass/fail is determined by heuristics (URL changes, toasts, API errors).
 
 ## Installation
 
 ```bash
-# As MCP server (recommended — add to editor's mcp.json)
-{ "command": "npx", "args": ["-y", "vibe-test@latest", "--mcp"] }
+# One-command setup for all editors (recommended)
+npx vibe-testing@latest init
+
+# As MCP server (add to editor's mcp.json)
+{ "command": "npx", "args": ["-y", "vibe-testing@latest", "--mcp"] }
 
 # As CLI
-npx vibe-test run https://your-app.com --codebase /path/to/project
-
-# As npm package
-npm install -g vibe-test
+npx vibe-testing@latest run https://your-app.com --codebase /path/to/project
+npx vibe-testing@latest converge https://your-app.com
 ```
 
-## Complete Tool Reference
+## Complete Tool Reference (13 Tools)
 
-### scan_codebase
+### 1. scan_codebase
 **Must be called first.** Analyzes the project source code:
-- Detects framework (React, Next.js, Vue, Angular, Svelte, etc.)
-- Parses all routes (file-based and code-defined)
-- Extracts forms, buttons, dialogs, CRUD operations per route
-- Reads existing Playwright/Jest/Cypress test files
+- Detects framework (Next.js App/Pages, React SPA, SvelteKit, Nuxt, Vue, Express, Fastify)
+- Detects monorepos (Turborepo, pnpm, yarn, Lerna) and finds frontend app
+- Parses all routes (file-based and code-defined, including src/ variants)
+- Extracts forms, buttons, dialogs, CRUD operations, search/filter features per route
+- Reads existing Playwright/Jest/Cypress/Vitest test files
 - Maps test coverage and identifies gaps
 - Generates test scenarios for uncovered features
 
@@ -35,25 +37,34 @@ Parameters:
 - `url` (string, optional): App URL to test against.
 - `mode` (string, optional): "fast" or "deep". Default "deep".
 
-Returns: JSON with routes, features, coverage gaps, generated scenarios.
+Returns: JSON with routes, behaviours, coverage map, gaps, and generated scenarios.
 
-### login
+### 2. get_context
+**Call before writing test steps.** Returns the most relevant source files for a feature or route with relevance scoring — so the LLM knows real field names, selectors, and API endpoints instead of guessing.
+
+Parameters:
+- `feature` (string): Feature name, route path, or description (e.g., "login", "/checkout", "user profile form")
+
+Returns: JSON with relevant source file contents (budget-capped), matched routes, and extracted selectors.
+
+### 3. login
 Authenticates in a real Playwright browser:
 - Navigates to login page
-- Fills email/password fields
+- Fills email/password using cascading selectors (name, type, placeholder, aria-label, fallback to first text input)
 - Clicks submit
 - Waits for redirect
 - Captures localStorage tokens and cookies
 - Returns screenshot of post-login state
+- Supports HTTP Basic Auth via `basic` strategy
 
 Parameters:
-- `email` (string): Login email
+- `email` (string): Login email/username
 - `password` (string): Login password
 - `login_url` (string, optional): Login page path. Default "/login".
 
-Returns: JSON with success status, tokens, API calls + screenshot.
+Returns: JSON with success status, final URL, tokens found, API calls observed + screenshot.
 
-### scan_page_elements
+### 4. scan_page_elements
 Discovers all interactive elements on a page without clicking them:
 - Buttons, links, inputs, selects, checkboxes, textareas, tabs
 - For each: tag, type, text, selector, disabled state, href
@@ -64,13 +75,14 @@ Parameters:
 
 Returns: JSON element list + page screenshot.
 
-### explore_page
+### 5. explore_page
 Full interactive exploration — acts like a senior QA tester:
 - Clicks every button and observes state changes
 - Tests every link and verifies navigation
 - Fills inputs with appropriate test data
 - Monitors all API calls (excluding static assets)
 - Records success/failure for each interaction
+- Respects action blocklist (never_interact patterns)
 
 Parameters:
 - `route` (string): Page route to explore
@@ -78,55 +90,58 @@ Parameters:
 
 Returns: JSON with interaction results, API calls, timings + screenshot.
 
-### execute_scenario
+### 6. execute_scenario
 Runs a specific multi-step test scenario:
-- Navigate, fill, click, wait, assert actions
-- Step-by-step execution with screenshots
-- Heuristic verification of outcomes
+- Actions: navigate, fill, click, select, wait, assert, upload
+- Step-by-step execution with screenshots after each state change
+- Heuristic verification of outcomes (URL changes, toasts, API errors)
 - Reuses existing browser context (fast)
 
 Parameters:
-- `scenario` (object): Scenario with id, name, route, steps[], expected_outcome
+- `scenario` (object): Scenario with id, name, route, steps[], expected_outcome, requires_auth
 - `authenticated` (boolean, optional): Default false.
 
-Returns: JSON with status (pass/fail/error), step logs, screenshots.
+Step format:
+```json
+{ "action": "fill", "selector": "[name='email']", "value": "test@example.com", "description": "Fill email" }
+```
 
-### get_coverage
+Returns: JSON with status (pass/fail/error), step logs, screenshots, API errors.
+
+### 7. get_coverage
 Returns test coverage analysis from the last scan_codebase call:
-- Routes with test counts
-- Coverage gaps with priority levels
+- Routes with test counts and test frameworks used
+- Coverage gaps with priority levels (high/medium/low)
 - Available scenarios to run
 
 Returns: JSON with coverage map, gaps, suggested scenarios.
 
-### suggest_tests
+### 8. suggest_tests
 Intelligent gap analysis that returns executable scenarios:
-- Identifies untested CRUD operations (critical priority)
-- Finds missing form validation tests (high priority)
-- Surfaces broken elements from exploration (high priority)
-- Suggests retests for previously failing routes (high priority)
-- Flags API errors found during exploration (critical/high)
-- Lists untested navigation flows (low priority)
+- Untested CRUD operations (critical priority)
+- Missing form validation tests (high priority)
+- Broken elements from exploration (high priority)
+- Previously failing routes for retest (high priority)
+- API errors found during exploration (critical/high)
+- Untested navigation flows (low priority)
 
 Parameters:
 - `route` (string, optional): Focus on specific route. Omit for all routes.
 
 Returns: JSON with prioritized suggestions, each containing an executable scenario object.
 
-### take_screenshot
+### 9. take_screenshot
 Quick visual verification:
-- Navigates to URL
-- Waits for page load
-- Captures screenshot
+- Navigates to URL, waits for page load, captures screenshot
 
 Parameters:
 - `url` (string): Full URL or route path
 - `authenticated` (boolean, optional): Default false.
 - `full_page` (boolean, optional): Full page or viewport. Default false.
 
-Returns: Screenshot.
+Returns: Screenshot as base64 data URI.
 
-### generate_report
+### 10. generate_report
 Generates interactive HTML report:
 - All test results with pass/fail status
 - Step-level screenshots with click-to-enlarge
@@ -138,11 +153,10 @@ Generates interactive HTML report:
 Parameters:
 - `title` (string, optional): Report title.
 
-Returns: Report path + summary.
+Returns: Report path + text summary.
 
-### run_full_test
-All-in-one orchestration:
-- scan_codebase → generate scenarios → execute all → explore pages → generate report
+### 11. run_full_test
+All-in-one orchestration: scan_codebase → generate scenarios → execute all → explore pages → generate report
 
 Parameters:
 - `url` (string): App URL
@@ -150,10 +164,44 @@ Parameters:
 - `mode` (string, optional): "fast" or "deep"
 - `headed` (boolean, optional): Show browser. Default true.
 
-Returns: Full results + report.
+Returns: Full results + report path.
 
-### cleanup
-Closes all browsers and resets session state. Call when done testing.
+### 12. run_converge
+Iterative testing until coverage thresholds are met:
+- Runs baseline suite first
+- Automatically runs follow-up rounds from coverage gaps and failed scenarios
+- Stops when pass rate and gap thresholds are met, or max rounds reached
+
+Parameters:
+- `url` (string): App URL
+- `codebase_path` (string, optional): Project root path
+- `max_followup_rounds` (number, optional): Max follow-up rounds. Default 4.
+- `target_pass_rate` (number, optional): Stop when pass rate >= this (0-1). Default 0.92.
+- `max_high_severity_gaps` (number, optional): Stop when critical+important gaps <= this. Default 2.
+
+Returns: Full results across all rounds + final report.
+
+### 13. cleanup
+Closes all open browsers and resets session state. Call when done testing.
+
+## Recommended Workflow
+
+```
+1. scan_codebase   → understand routes, forms, coverage gaps
+2. get_context     → read actual source code for the feature (real selectors)
+3. login           → authenticate if app requires it
+4. explore_page    → discover elements and interactions visually
+5. execute_scenario → run targeted test steps with real selectors
+6. generate_report → produce HTML report with screenshots
+7. cleanup         → close browsers
+```
+
+## Auth Strategies
+
+vibe.config.json supports three auth strategies:
+- `"credentials"` — form-based login (fills email/password fields, clicks submit)
+- `"basic"` — HTTP Basic Auth (sets credentials on browser context for preview-gated sites)
+- `"skip"` — no authentication
 
 ## VIBE.md Project Guidance
 
@@ -180,11 +228,31 @@ Projects can include a `VIBE.md` file to guide testing:
 
 ## Self-Improvement
 
-Vibe Test persists intelligence in `.vibe/intel.json`:
+Vibe Test persists intelligence in `.vibe/`:
 - Working selectors per route
-- Route load timings
-- Auth state and credentials
+- Route load timings and timeout adjustments
+- Auth state and credentials (reused across runs)
 - Failure patterns and flaky route tracking
 - Run history with pass rate trends
 
 Each subsequent run uses this intelligence to be faster and more accurate.
+
+## Supported Frameworks
+
+| Framework | Routes | API | Forms |
+|-----------|--------|-----|-------|
+| Next.js App Router | Yes | Yes | Yes |
+| Next.js Pages Router | Yes | Yes | Yes |
+| Next.js src/ variant | Yes | Yes | Yes |
+| React SPA (react-router) | Yes | — | Yes |
+| SvelteKit | Yes | Yes | Yes |
+| Nuxt | Yes | Yes | Yes |
+| Vue + Vite | Yes | — | Yes |
+| Express / Fastify | — | Yes | Yes |
+| Monorepos | Yes | Yes | Yes |
+
+## Links
+
+- GitHub: https://github.com/AishwaryShrivastav/vibe-testing
+- npm: https://www.npmjs.com/package/vibe-testing
+- MCP: https://modelcontextprotocol.io

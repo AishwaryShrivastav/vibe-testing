@@ -1,88 +1,81 @@
-# Vibe Test — Code-Aware Browser Testing Agent
+# Vibe Test — Code-Aware Browser Testing Agent (MCP Server)
 
-> An MCP server and CLI tool for AI-powered browser testing. Designed for vibe coding workflows with Cursor, Claude Code, Windsurf, and other LLM-powered code editors.
+> npm package: `vibe-testing` | CLI command: `vibe-test`
+> An MCP server + CLI for AI-powered browser testing. Gives AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 13 Playwright-based testing tools via Model Context Protocol.
 
 ## What is Vibe Test?
 
 Vibe Test is a browser testing agent that reads your codebase, understands every route/form/component, opens a real Playwright browser, explores every interactive element, and reports what works and what breaks — with screenshots.
 
-It works as an **MCP (Model Context Protocol) server** that gives your code editor 11 testing tools, or as a standalone CLI.
+It works as an **MCP (Model Context Protocol) server** that gives your code editor 13 testing tools, or as a standalone CLI. No internal LLM — the editor's AI is the brain, vibe-test is the hands.
 
-## When to use Vibe Test
+## When to Use
 
-- You are vibe coding and want to test your app without writing test cases manually
-- You want an AI agent to explore your web app and find bugs
-- You need automated browser testing that understands your code
-- You want test coverage gap analysis with auto-generated test scenarios
-- You need screenshot-based visual verification during development
-- You want to test login flows, CRUD operations, forms, and navigation automatically
+- Test, verify, or QA any web application feature
+- Explore a page and find what's broken
+- Reproduce or confirm bug fixes
+- Generate test coverage reports with screenshots
+- Find untested routes and auto-generate test scenarios
+- Test login flows, CRUD operations, forms, and navigation
+- Iterative testing until coverage thresholds are met
 
 ## Installation
 
-### One-command setup for all editors
-
 ```bash
-cd /path/to/your/project
-npx vibe-test@latest init
+npx vibe-testing@latest init    # auto-detects editors, configures everything
 ```
-
-This single command auto-detects installed editors (Cursor, Claude Code, VS Code, Windsurf, Roo Code) and configures all of them. It creates:
-- MCP server configs for each detected editor
-- Cursor rules / CLAUDE.md / AGENTS.md with tool instructions
-- VIBE.md template for project-specific test guidance
-- vibe.config.json with sensible defaults
 
 Supported editors: Cursor, Claude Code, Windsurf, VS Code (Copilot), Roo Code, Cline, Codex, Devin, Zed
 
-### Options
+### MCP server config (manual)
 
-```bash
-npx vibe-test init                  # auto-detect, project-level
-npx vibe-test init --global         # also register globally
-npx vibe-test init --editor cursor  # only configure Cursor
+```json
+{ "command": "npx", "args": ["-y", "vibe-testing@latest", "--mcp"] }
 ```
 
 ### CLI
 
 ```bash
-npx vibe-test run https://your-app.com --codebase /path/to/project
-npx vibe-test converge https://your-app.com --codebase /path/to/project
+npx vibe-testing@latest run http://localhost:3000
+npx vibe-testing@latest converge http://localhost:3000
 ```
 
-`converge` runs baseline tests then automatically runs follow-up rounds from coverage gaps and failures until pass-rate / gap thresholds or max rounds.
+## MCP Tools (13)
 
-## MCP Tools (11 tools)
+1. `scan_codebase` — Analyze project: routes, forms, existing tests, coverage gaps, generated scenarios. **Call first.**
+2. `get_context` — Return actual source files for a feature (real selectors, field names, API endpoints). **Call before writing test steps.**
+3. `login` — Authenticate in a real browser, capture tokens and cookies
+4. `scan_page_elements` — Discover all interactive elements on a page
+5. `explore_page` — Click every button, fill every input, monitor API calls, report breakage
+6. `execute_scenario` — Run a multi-step test scenario with step-by-step screenshots
+7. `get_coverage` — View test coverage map and gap analysis
+8. `suggest_tests` — Get prioritized, executable test scenarios for untested features
+9. `take_screenshot` — Visual verification of any page
+10. `generate_report` — HTML report with screenshots (auto-opens in browser)
+11. `run_full_test` — All-in-one: scan → execute → explore → report
+12. `run_converge` — Iterative testing: keeps running follow-up rounds until coverage thresholds met
+13. `cleanup` — Close browsers and reset session
 
-1. `scan_codebase` — Analyze project structure, routes, forms, existing tests, coverage gaps
-2. `login` — Authenticate in a real browser, capture tokens and cookies
-3. `scan_page_elements` — Discover all interactive elements on any page
-4. `explore_page` — Click every button, fill every input, test every link
-5. `execute_scenario` — Run a specific multi-step test scenario
-6. `get_coverage` — View test coverage map and gap analysis
-7. `suggest_tests` — Get prioritized, executable test scenarios from gap analysis
-8. `take_screenshot` — Visual verification of any page
-9. `generate_report` — HTML report with screenshots (auto-opens in browser)
-10. `run_full_test` — All-in-one: scan → execute → explore → report
-11. `cleanup` — Close browsers and reset session
+## Supported Frameworks
+
+Next.js (App Router, Pages Router, src/ variants), React SPA, SvelteKit, Nuxt, Vue + Vite, Express, Fastify. Monorepos (Turborepo, pnpm, yarn, Lerna).
 
 ## Key Features
 
-- **Code-aware**: Reads your source code to understand routes, forms, components, and existing tests
-- **Framework detection**: Supports React, Next.js, Vue, Angular, Svelte, and more
+- **Code-aware**: Reads source code to understand real routes, forms, selectors — no guessing
+- **Framework detection**: Auto-detects 8+ frameworks and parses their route conventions
 - **Self-improving**: Learns working selectors, route timings, and failure patterns across runs
-- **No LLM dependency**: Uses heuristic verification — the editor LLM is the brain
+- **No LLM dependency**: Heuristic pass/fail verification — the editor LLM is the brain
 - **Screenshot reports**: Interactive HTML reports with step-level screenshots
-- **Action blocklist**: Prevents destructive actions (delete account, cancel subscription)
+- **Action blocklist**: Skips destructive actions (delete account, cancel subscription)
 - **Persistent auth**: Saves login credentials and reuses sessions across runs
+- **HTTP Basic Auth**: Supports `basic` auth strategy for preview-gated staging sites
 
 ## Technology
 
-- TypeScript, Node.js
-- Playwright for browser automation
-- Model Context Protocol (MCP) SDK for editor integration
-- JSON-RPC over stdio for communication
+TypeScript, Node.js ≥18, Playwright, Model Context Protocol SDK, JSON-RPC stdio
 
-## Source
+## Links
 
-GitHub: https://github.com/AishwaryShrivastav/vibe-testing
-npm: https://www.npmjs.com/package/vibe-test
+- GitHub: https://github.com/AishwaryShrivastav/vibe-testing
+- npm: https://www.npmjs.com/package/vibe-testing
