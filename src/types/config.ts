@@ -33,6 +33,7 @@ export const VibeConfigSchema = z.object({
     timeout: z.number().default(30000),
   }).optional(),
   mode: z.enum(['fast', 'deep']).default('deep'),
+  routes: z.enum(['auto', 'config']).default('auto'),
 })
 
 export type VibeConfig = z.infer<typeof VibeConfigSchema>

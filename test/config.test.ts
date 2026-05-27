@@ -80,4 +80,16 @@ describe('VibeConfigSchema', () => {
     const result = VibeConfigSchema.safeParse({ url: 'http://localhost:3000', mode: 'turbo' })
     expect(result.success).toBe(false)
   })
+
+  it('accepts routes: auto', () => {
+    const result = VibeConfigSchema.safeParse({ url: 'http://localhost:3000', routes: 'auto' })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.routes).toBe('auto')
+  })
+
+  it('defaults routes to auto', () => {
+    const result = VibeConfigSchema.safeParse({ url: 'http://localhost:3000' })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.routes).toBe('auto')
+  })
 })

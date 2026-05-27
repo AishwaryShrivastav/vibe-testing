@@ -3,6 +3,7 @@ import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../type
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
 import { MemoryManager } from './memory/index.js'
+import { saveRunSnapshot } from './memory/manifest.js'
 import { generateHtmlReport } from './reporter/html.js'
 import { generateCoverageGaps } from './coverage-gaps.js'
 import { runConverge, type ConvergeOptions } from './converge.js'
@@ -54,6 +55,21 @@ export class VibeTester {
     const { results, explorations } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
 
     await memory.updateFromResults(results)
+
+    // Save run snapshot and diff against previous run
+    const vibeDir = path.join(this.projectRoot, '.vibe')
+    const snapshotDiff = await saveRunSnapshot(vibeDir, results)
+    if (snapshotDiff) {
+      logger.section('Changes since last run')
+      if (snapshotDiff.newly_passing.length > 0)
+        logger.success(`  Fixed: ${snapshotDiff.newly_passing.join(', ')}`)
+      if (snapshotDiff.newly_failing.length > 0)
+        logger.error(`  Regression: ${snapshotDiff.newly_failing.join(', ')}`)
+      if (snapshotDiff.new_routes.length > 0)
+        logger.info(`  New: ${snapshotDiff.new_routes.join(', ')}`)
+      if (snapshotDiff.removed_routes.length > 0)
+        logger.warn(`  Removed: ${snapshotDiff.removed_routes.join(', ')}`)
+    }
 
     // Generate coverage gap suggestions
     const coverageGaps = generateCoverageGaps(productModel.behaviours, explorations)

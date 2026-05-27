@@ -8,6 +8,7 @@ import { analyzeGaps } from './gap-analyzer.js'
 import { generateScenarios } from './enricher.js'
 import { logger } from '../../utils/logger.js'
 import { readVibeGuidance } from '../../utils/vibe-md.js'
+import { saveRouteManifest, type RouteManifestDiff } from '../memory/manifest.js'
 import type { MemoryRecommendations } from '../memory/index.js'
 import path from 'path'
 
@@ -49,6 +50,14 @@ export async function buildProductModel(
     .slice(0, max_routes)
 
   spin2.succeed(`Found ${routes.length} routes`)
+
+  // Save route manifest and diff against previous run
+  const vibeDir = path.join(codebasePath, '.vibe')
+  const routeDiff = await saveRouteManifest(vibeDir, routes, framework)
+  if (routeDiff) {
+    if (routeDiff.total_new > 0) logger.info(`  🆕 ${routeDiff.total_new} new route(s): ${routeDiff.new_routes.join(', ')}`)
+    if (routeDiff.total_removed > 0) logger.warn(`  🗑️ ${routeDiff.total_removed} route(s) removed: ${routeDiff.removed_routes.join(', ')}`)
+  }
 
   const spin3 = logger.spin('Extracting route behaviours...')
   const behaviours = await extractBehaviours(routes, mode)
