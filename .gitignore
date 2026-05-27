@@ -14,7 +14,7 @@ dist/
 Thumbs.db
 
 # Test artifacts
-test/
+test/mcp-client.ts
 *.log
 
 # Env
