@@ -1,17 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.AishwaryShrivastav/vibe-testing",
+  "title": "Vibe Test — Browser Testing Agent",
   "description": "Code-aware browser testing agent — 13 Playwright tools for AI code editors via MCP",
   "repository": {
     "url": "https://github.com/AishwaryShrivastav/vibe-testing",
     "source": "github"
   },
-  "version": "0.3.3",
+  "version": "0.3.5",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "vibe-testing",
-      "version": "0.3.3",
+      "version": "0.3.5",
       "transport": {
         "type": "stdio"
       },
