@@ -7,6 +7,9 @@ import type { VibeConfig } from './types/config.js'
 import { logger } from './utils/logger.js'
 import path from 'path'
 import fs from 'fs/promises'
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const PKG_VERSION: string = require('../package.json').version
 
 // ─── Embedded content for init command ──────────────────────────────────────
 
@@ -379,7 +382,7 @@ const program = new Command()
 program
   .name('vibe-test')
   .description('AI-powered browser testing agent — reads your code, tests your product')
-  .version('0.3.3')
+  .version(PKG_VERSION)
 
 program
   .command('run [url]')
