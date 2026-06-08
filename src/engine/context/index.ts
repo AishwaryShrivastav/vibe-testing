@@ -44,7 +44,23 @@ export async function buildProductModel(
   const spin2 = logger.spin('Parsing routes...')
   let routes = await parseRoutes(framework, codebasePath)
 
-  const { include = ['/**'], exclude = [], max_routes = 30 } = config.scope ?? {}
+  const { include = ['/**'], exclude = [], max_routes = 30, seed_routes = [] } = config.scope ?? {}
+
+  // Seed concrete URLs for dynamic-segment routes the parser can't enumerate
+  // (e.g. /live/[slug]). The seeded route inherits requires_auth + file_path
+  // from its dynamic parent so the behaviour extractor still reads the source.
+  for (const seedPath of seed_routes) {
+    if (routes.some(r => r.path === seedPath && r.type === 'page')) continue
+    const parent = findDynamicParent(routes, seedPath)
+    routes.push({
+      path: seedPath,
+      type: 'page',
+      requires_auth: parent?.requires_auth ?? false,
+      dynamic_segments: [],
+      file_path: parent?.file_path,
+    })
+  }
+
   routes = routes
     .filter(r => matchesScope(r.path, include, exclude))
     .slice(0, max_routes)
@@ -81,7 +97,8 @@ export async function buildProductModel(
   spin5.succeed(`Gaps found: ${gaps.length} total (${highGaps} high priority)`)
 
   const spin6 = logger.spin(`Generating test scenarios (${mode} mode)...`)
-  const scenarios = await generateScenarios(gaps, behaviours, coverage, mode, recommendations)
+  const configuredLoginUrl = config.auth?.login_url ?? guidance?.login_url
+  const scenarios = await generateScenarios(gaps, behaviours, coverage, mode, recommendations, configuredLoginUrl)
   spin6.succeed(`Generated ${scenarios.length} test scenarios`)
 
   const projectName = path.basename(codebasePath)
@@ -99,6 +116,20 @@ export async function buildProductModel(
     scenarios,
     route_changes: routeDiff ? { new_routes: routeDiff.new_routes, removed_routes: routeDiff.removed_routes } : undefined,
   }
+}
+
+import type { Route } from '../../types/index.js'
+
+function findDynamicParent(routes: Route[], concretePath: string): Route | undefined {
+  return routes.find(r => {
+    if (r.type !== 'page') return false
+    if (!r.path.includes('[') && !r.path.includes(':')) return false
+    const pattern = r.path
+      .replace(/\[[^\]]+\]/g, '[^/]+')
+      .replace(/:[a-zA-Z]+/g, '[^/]+')
+      .replace(/\//g, '\\/')
+    return new RegExp(`^${pattern}$`).test(concretePath)
+  })
 }
 
 function matchesScope(routePath: string, include: string[], exclude: string[]): boolean {

@@ -21,6 +21,7 @@ export const VibeConfigSchema = z.object({
     include: z.array(z.string()).default(['/**']),
     exclude: z.array(z.string()).default([]),
     max_routes: z.number().default(30),
+    seed_routes: z.array(z.string()).default([]),
   }).optional(),
   never_interact: z.array(z.string()).default([]),
   memory: z.object({

@@ -2,7 +2,7 @@ import type { VibeRunResult } from '../types/index.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
-import { MemoryManager } from './memory/index.js'
+import { MemoryManager, type MemoryRecommendations } from './memory/index.js'
 import { saveRunSnapshot } from './memory/manifest.js'
 import { generateHtmlReport } from './reporter/html.js'
 import { generateCoverageGaps } from './coverage-gaps.js'
@@ -28,7 +28,7 @@ export class VibeTester {
 
     const memory = new MemoryManager(this.projectRoot)
     await memory.load()
-    const recommendations = memory.getRecommendations()
+    const recommendations = mergeConfigCredentials(memory.getRecommendations(), this.config)
 
     if (!recommendations.first_run) {
       logger.info(`Using intelligence from ${memory.getMemory().run_count} previous run(s)`)
@@ -136,7 +136,7 @@ export class VibeTester {
     await memory.load()
 
     const cr = await runConverge(this.config, opts)
-    const recommendations = memory.getRecommendations()
+    const recommendations = mergeConfigCredentials(memory.getRecommendations(), this.config)
     const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
 
     // Save run snapshot and diff against previous run
@@ -203,6 +203,29 @@ export class VibeTester {
         converge_rounds: cr.rounds,
       },
     }
+  }
+}
+
+/**
+ * Inject explicit auth.credentials from the config into the recommendations
+ * bundle so the scenario generator uses real creds instead of inventing
+ * random ones. Config wins over memory — the user just told us which account
+ * to test as.
+ */
+function mergeConfigCredentials(
+  recs: MemoryRecommendations,
+  config: VibeConfig
+): MemoryRecommendations {
+  const creds = config.auth?.credentials
+  if (!creds?.email || !creds?.password) return recs
+  return {
+    ...recs,
+    saved_credentials: {
+      email: creds.email,
+      password: creds.password,
+      registered_at: recs.saved_credentials?.registered_at ?? new Date().toISOString(),
+      last_login_success: recs.saved_credentials?.last_login_success,
+    },
   }
 }
 

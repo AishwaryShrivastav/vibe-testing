@@ -331,9 +331,17 @@ async function inferAuthRequirement(filePath: string, codebasePath: string): Pro
       /withAuth\(/,
       /requireAuth/,
       /getServerSession/,
+      /getSessionUser/,
+      /getCurrentUser\(/,
+      /currentUser\(\)/,
+      /clerkAuth/,
+      /useUser\(/,
       /auth\(\)/,
-      /redirect\(['"]\/login/,
-      /redirect\(['"]\/auth/,
+      /redirect\(['"`]\/login/,
+      /redirect\(['"`]\/signin/,
+      /redirect\(['"`]\/sign-in/,
+      /redirect\(['"`]\/auth/,
+      /notFound\(\).*session/i,
     ]
     return authPatterns.some(p => p.test(content))
   } catch {

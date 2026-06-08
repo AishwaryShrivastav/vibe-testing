@@ -71,6 +71,37 @@ describe('parseRoutes - nextjs-app', () => {
     expect(paths).toContain('/settings')
     await cleanup(dir)
   })
+
+  it('detects requires_auth from getSessionUser pattern', async () => {
+    const dir = await withTempProject({
+      'app/dashboard/page.tsx': `import { getSessionUser } from '@/lib/auth'
+export default async function Dashboard() {
+  const user = await getSessionUser()
+  if (!user) return null
+  return <div>Hello</div>
+}`,
+      'app/about/page.tsx': 'export default function About() { return <div>About</div> }',
+    })
+    const routes = await parseRoutes('nextjs-app', dir)
+    const dashboard = routes.find(r => r.path === '/dashboard')
+    const about = routes.find(r => r.path === '/about')
+    expect(dashboard?.requires_auth).toBe(true)
+    expect(about?.requires_auth).toBe(false)
+    await cleanup(dir)
+  })
+
+  it('detects requires_auth from redirect("/signin") pattern', async () => {
+    const dir = await withTempProject({
+      'app/private/page.tsx': `import { redirect } from 'next/navigation'
+export default function Private() {
+  redirect('/signin')
+}`,
+    })
+    const routes = await parseRoutes('nextjs-app', dir)
+    const priv = routes.find(r => r.path === '/private')
+    expect(priv?.requires_auth).toBe(true)
+    await cleanup(dir)
+  })
 })
 
 // ─── SvelteKit ───────────────────────────────────────────────────────────────

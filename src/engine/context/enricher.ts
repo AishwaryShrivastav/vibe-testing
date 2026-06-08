@@ -3,12 +3,29 @@ import type { MemoryRecommendations } from '../memory/index.js'
 
 let scenarioCounter = 1
 
+// Substrings that identify auth-related routes. Matches both legacy "/login"
+// and modern "/signin" / "/sign-in" / "/auth/login" route conventions.
+const LOGIN_KEYWORDS = ['login', 'signin', 'sign-in', 'log-in']
+const REGISTER_KEYWORDS = ['register', 'signup', 'sign-up']
+
+function isLoginRoute(routePath: string, configuredLoginUrl?: string): boolean {
+  if (configuredLoginUrl && routePath === configuredLoginUrl) return true
+  const lower = routePath.toLowerCase()
+  return LOGIN_KEYWORDS.some(k => lower.includes(k))
+}
+
+function isRegisterRoute(routePath: string): boolean {
+  const lower = routePath.toLowerCase()
+  return REGISTER_KEYWORDS.some(k => lower.includes(k))
+}
+
 export async function generateScenarios(
   gaps: Gap[],
   behaviours: RouteBehaviour[],
   coverage: CoverageMap,
   mode: 'fast' | 'deep',
-  recommendations?: MemoryRecommendations
+  recommendations?: MemoryRecommendations,
+  configuredLoginUrl?: string
 ): Promise<TestScenario[]> {
   const recs = recommendations ?? { skip_routes: new Set<string>(), auth_routes: new Set<string>(), timeout_hints: {}, selector_hints: {}, first_run: true, auth_intel: null, saved_credentials: null }
 
@@ -16,9 +33,9 @@ export async function generateScenarios(
     .filter(g => !recs.skip_routes.has(g.route))
     .slice(0, 15)
 
-  const { scenarios: authFlows, protectedPaths } = generateAuthFlowScenarios(topGaps, behaviours, coverage, recs)
+  const { scenarios: authFlows, protectedPaths } = generateAuthFlowScenarios(topGaps, behaviours, coverage, recs, configuredLoginUrl)
   const perRoute = topGaps.flatMap(gap =>
-    generateFunctionalScenarios(gap, behaviours, coverage, protectedPaths, recs)
+    generateFunctionalScenarios(gap, behaviours, coverage, protectedPaths, recs, configuredLoginUrl)
   )
 
   const redirectChecks = authFlows.filter(s => s.name.includes('redirects to login'))
@@ -36,7 +53,8 @@ function generateFunctionalScenarios(
   behaviours: RouteBehaviour[],
   coverage: CoverageMap,
   protectedPaths: Set<string>,
-  recs?: MemoryRecommendations
+  recs?: MemoryRecommendations,
+  configuredLoginUrl?: string
 ): TestScenario[] {
   const behaviour = behaviours.find(b => b.route.path === gap.route)
   const intel = coverage[gap.route]?.intelligence
@@ -47,7 +65,7 @@ function generateFunctionalScenarios(
   const paramDependentKeywords = ['reset-password', 'verify-email', 'confirm', 'callback', 'oauth']
   if (paramDependentKeywords.some(k => gap.route.toLowerCase().includes(k))) return scenarios
 
-  const isAuthRoute = ['login', 'register', 'signup', 'signin'].some(k => gap.route.toLowerCase().includes(k))
+  const isAuthRoute = isLoginRoute(gap.route, configuredLoginUrl) || isRegisterRoute(gap.route)
   const func = behaviour?.functionality
   const hasFunctionalTests = func && (
     func.features.some(f => f.type === 'search' || f.type === 'filter') ||
@@ -211,17 +229,16 @@ function generateAuthFlowScenarios(
   gaps: Gap[],
   behaviours: RouteBehaviour[],
   coverage: CoverageMap,
-  recs?: MemoryRecommendations
+  recs?: MemoryRecommendations,
+  configuredLoginUrl?: string
 ): { scenarios: TestScenario[]; protectedPaths: Set<string> } {
   const scenarios: TestScenario[] = []
   const protectedPaths = new Set<string>()
 
-  const registerGap = gaps.find(g => g.route.includes('register') || g.route.includes('signup'))
-  const loginGap = gaps.find(g => g.route.includes('login'))
-  const registerBehaviour = behaviours.find(b =>
-    b.route.path.includes('register') || b.route.path.includes('signup')
-  )
-  const loginBehaviour = behaviours.find(b => b.route.path.includes('login'))
+  const registerGap = gaps.find(g => isRegisterRoute(g.route))
+  const loginGap = gaps.find(g => isLoginRoute(g.route, configuredLoginUrl))
+  const registerBehaviour = behaviours.find(b => isRegisterRoute(b.route.path))
+  const loginBehaviour = behaviours.find(b => isLoginRoute(b.route.path, configuredLoginUrl))
 
   if (!loginGap && !registerGap) return { scenarios, protectedPaths }
 
@@ -310,7 +327,7 @@ function generateAuthFlowScenarios(
     scenarios.push(makeScenario(loginRoute, loginLabel, loginSteps, 'high', 'heuristic'))
   }
 
-  const publicPaths = ['login', 'register', 'signup', 'forgot', 'reset', 'privacy', 'terms', 'about']
+  const publicPaths = ['login', 'signin', 'sign-in', 'register', 'signup', 'sign-up', 'forgot', 'reset', 'privacy', 'terms', 'about']
   const memoryAuthRoutes = recs?.auth_routes ?? new Set<string>()
   const protectedRoutes = gaps.filter(g => {
     if (memoryAuthRoutes.has(g.route)) return true

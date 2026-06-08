@@ -481,7 +481,8 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
   "scope": {
     "include": ["/**"],
     "exclude": ["/admin/**", "/api/**"],
-    "max_routes": 30
+    "max_routes": 30,
+    "seed_routes": ["/live/dev-mode-a-now"]
   },
   "browser": {
     "headed": true,
@@ -500,6 +501,7 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
 | `scope.exclude` | Route patterns to exclude from testing |
 | `scope.max_routes` | Cap how many routes are tested per run |
+| `scope.seed_routes` | Concrete URLs for dynamic-segment routes the parser can't enumerate (e.g. `/live/[slug]` → `/live/dev-mode-a-now`). Each seeded route inherits `requires_auth` and the source file from its dynamic parent. |
 | `browser.headed` | `true` = visible browser. CLI default `true`, MCP server default `false` (headless) so editor sessions aren't disrupted by pop-up windows. |
 | `browser.slowMo` | Milliseconds between actions (useful for debugging) |
 | `routes` | `auto` (default) discovers routes from the codebase. `config` uses only routes explicitly listed in config. |

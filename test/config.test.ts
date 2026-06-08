@@ -92,4 +92,28 @@ describe('VibeConfigSchema', () => {
     expect(result.success).toBe(true)
     if (result.success) expect(result.data.routes).toBe('auto')
   })
+
+  it('accepts scope.seed_routes for dynamic-segment URLs', () => {
+    const result = VibeConfigSchema.safeParse({
+      url: 'http://localhost:3000',
+      scope: {
+        seed_routes: ['/live/dev-mode-a-now', '/live/dev-mode-b-now'],
+      },
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.scope?.seed_routes).toEqual(['/live/dev-mode-a-now', '/live/dev-mode-b-now'])
+    }
+  })
+
+  it('defaults scope.seed_routes to empty array', () => {
+    const result = VibeConfigSchema.safeParse({
+      url: 'http://localhost:3000',
+      scope: { include: ['/**'] },
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.scope?.seed_routes).toEqual([])
+    }
+  })
 })

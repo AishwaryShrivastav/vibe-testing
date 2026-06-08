@@ -4,6 +4,33 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [0.4.3] — 2026-06-09
+
+Focus: turning vibe-test into a real assistant for AI coding tools — config you provide actually gets used, dynamic routes are testable, and auth detection catches modern Next.js/NextAuth patterns. No new heuristic noise; only fixes that make the existing browser execution honest.
+
+### Fixed
+
+- **`config.auth.credentials` are now passed to the scenario generator.** Previously the configured email/password were used only for the initial `performLogin` call — the generated authenticated scenarios still filled `vt...@gmail.com` / `Test1234!`, so any project relying on real seeded test accounts (e.g. `teacher.dev@dhyanhq.local`) failed to log in. The credentials supplied in `vibe.config.json` now flow straight into `recommendations.saved_credentials` and into the login scenario steps.
+- **Login route detection no longer hardcoded to substring `"login"`.** Modern Next.js / NextAuth conventions use `/signin`, `/sign-in`, `/log-in`. All four are now recognized as login routes for scenario generation, redirect-to-login assertions, and the public-paths whitelist.
+- **`auth.login_url` from config (or `VIBE.md`) now binds the login route explicitly.** Useful for apps with non-standard login paths (e.g. `/access`, `/authenticate`) that wouldn't be caught by keyword matching.
+- **Broader auth-pattern detection in `inferAuthRequirement`.** Added `getSessionUser`, `getCurrentUser()`, `currentUser()`, `clerkAuth`, `useUser()`, and `redirect('/signin' | '/sign-in')` patterns. Pages using these now correctly get `requires_auth: true` instead of being treated as public.
+
+### Added
+
+- **`scope.seed_routes` config option.** Lists concrete URLs that the static route parser can't enumerate (dynamic segments like `/live/[slug]`). Each seeded route inherits `requires_auth` and `file_path` from its dynamic parent, so behaviour extraction still works. Required for testing any app with slug-based pages — chat sessions, live classes, blog posts, user profiles.
+
+  ```json
+  {
+    "scope": {
+      "seed_routes": ["/live/dev-mode-a-now", "/live/dev-mode-b-now"]
+    }
+  }
+  ```
+
+- **7 new vitest cases** covering credentials forwarding, `/signin` detection, configurable `login_url`, `seed_routes` schema, `getSessionUser` auth detection, and `redirect('/signin')` auth detection. Test count: 56 → 63.
+
+---
+
 ## [0.4.1] — 2026-05-27
 
 ### Fixed
