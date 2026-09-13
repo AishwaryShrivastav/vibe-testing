@@ -369,6 +369,10 @@ async function writeIfMissing(filePath: string, content: string): Promise<boolea
   return true
 }
 
+function printFeedbackNudge(): void {
+  logger.dim('Feedback or bugs: https://github.com/AishwaryShrivastav/vibe-testing/issues (a star helps others find it)')
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 // If invoked with --mcp flag, start the MCP server directly
@@ -381,7 +385,7 @@ const program = new Command()
 
 program
   .name('vibe-test')
-  .description('AI-powered browser testing agent — reads your code, tests your product')
+  .description('Code-aware browser testing for AI coding agents — reads your code, tests your app in a real browser, reports regressions')
   .version(PKG_VERSION)
 
 program
@@ -422,6 +426,8 @@ program
 
     const tester = new VibeTester(config)
     const result = await tester.run()
+
+    printFeedbackNudge()
 
     if (result.summary.failed > 0 || result.summary.errors > 0) {
       process.exit(1)
@@ -475,6 +481,8 @@ program
     })
 
     logger.info(`Converge finished: ${result.summary.converge_rounds ?? 1} round(s), ${result.coverage_gaps.length} gaps remaining`)
+
+    printFeedbackNudge()
 
     if (result.summary.failed > 0 || result.summary.errors > 0) {
       process.exit(1)
