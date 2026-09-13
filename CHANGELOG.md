@@ -4,7 +4,7 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
-## [0.4.3] — 2026-06-09
+## [0.4.3] — unreleased
 
 Focus: turning vibe-test into a real assistant for AI coding tools — config you provide actually gets used, dynamic routes are testable, and auth detection catches modern Next.js/NextAuth patterns. No new heuristic noise; only fixes that make the existing browser execution honest.
 
@@ -28,6 +28,22 @@ Focus: turning vibe-test into a real assistant for AI coding tools — config yo
   ```
 
 - **7 new vitest cases** covering credentials forwarding, `/signin` detection, configurable `login_url`, `seed_routes` schema, `getSessionUser` auth detection, and `redirect('/signin')` auth detection. Test count: 56 → 63.
+
+- **CLI feedback line** — after `run` and `converge` complete, the CLI prints one dim line pointing to GitHub issues for feedback.
+- **`docs/0.5.0-scope.md`** — scope document for the planned `vibe-scenarios.yaml` feature (AI-authored test plans as YAML, targeting 0.5.0).
+
+### Changed
+
+- **README repositioned around "code-aware browser testing"** — leads with the regression diff (run it twice and it tells you what you broke) and the zero-LLM-calls architecture. Same technical content, sentence-case headings, ASCII throughout.
+- **MCP server version string reads from `package.json`** — was hardcoded to `0.3.9`, so MCP clients saw a stale server version. Now always matches the published package.
+
+---
+
+## [0.4.2] — 2026-05-27
+
+### Changed
+
+- **Docs-only release** — synced README, CHANGELOG, llms.txt, and CLAUDE.md with the 0.3.2 → 0.4.1 changes. No code changes.
 
 ---
 
