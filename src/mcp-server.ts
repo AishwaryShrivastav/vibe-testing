@@ -17,6 +17,10 @@ import { ensureDir, fileExists } from './utils/file.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+const PKG_VERSION: string = require('../package.json').version
 
 function openInBrowser(filePath: string): void {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
@@ -68,7 +72,7 @@ async function screenshotToBase64(filepath: string): Promise<string | null> {
 // ─── MCP Server ───────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'vibe-test', version: '0.3.9' },
+  { name: 'vibe-test', version: PKG_VERSION },
   { capabilities: { tools: {} } }
 )
 
