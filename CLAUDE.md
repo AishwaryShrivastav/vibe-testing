@@ -62,7 +62,7 @@ src/
 npm run build      # tsc compile → dist/
 npm run dev        # Run CLI via tsx (no compile)
 npm run mcp        # Run MCP server via tsx
-npm test           # vitest — 56 tests (config, framework, manifest, ...)
+npm test           # vitest — 63 tests (config, framework, manifest, ...)
 ```
 
 Node 20+ required (vitest 4.x).

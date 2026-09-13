@@ -2,7 +2,7 @@
   "name": "vibe-testing",
   "version": "0.4.3",
   "mcpName": "io.github.AishwaryShrivastav/vibe-testing",
-  "description": "Code-aware browser testing agent — reads your codebase, understands functionality, tests every element, reports with screenshots. Works as MCP server for Cursor/Claude Code or standalone CLI.",
+  "description": "Code-aware browser testing for AI coding agents. Reads your codebase so tests use real routes and field names, runs them in Playwright, remembers what broke, and reports what your last change fixed or regressed. No LLM calls inside. MCP server for Claude Code/Cursor/Windsurf, or standalone CLI.",
   "type": "module",
   "bin": {
     "vibe-test": "dist/cli.js",

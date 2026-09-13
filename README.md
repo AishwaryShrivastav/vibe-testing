@@ -1,4 +1,4 @@
-# vibe-test
+# vibe-testing
 
 [![npm version](https://img.shields.io/npm/v/vibe-testing.svg)](https://www.npmjs.com/package/vibe-testing)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
@@ -6,72 +6,85 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/AishwaryShrivastav/vibe-testing/actions/workflows/ci.yml/badge.svg)](https://github.com/AishwaryShrivastav/vibe-testing/actions)
 
-**Code-aware browser testing agent for AI-powered editors.**
+**Code-aware browser testing for AI coding agents.**
 
-Reads your codebase, understands every route and form, opens a real Playwright browser, explores every element, and reports what works and what breaks — with screenshots.
-
-Works as an **MCP server** that gives your AI editor (Claude Code, Cursor, Windsurf, VS Code Copilot) 13 browser testing tools — or as a **standalone CLI**.
-
----
-
-## Install in Any Project (One Command)
+vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 13 testing tools, or as a standalone CLI.
 
 ```bash
 cd /path/to/your/project
 npx vibe-testing@latest init
 ```
 
-This command:
-- Detects which AI editors you have installed
-- Registers vibe-test in **global** editor configs (`~/.claude/settings.json`, `~/.cursor/mcp.json`, etc.) so the tools are available in **every project, every session**
-- Creates project-level MCP configs and AI instruction files
-- Auto-detects your app's URL (reads `.env`, `vite.config`, framework defaults)
-- Creates `VIBE.md` (edit with your test credentials) and `vibe.config.json`
-
 Then open your editor and say:
 
 > "Scan this codebase and test it against http://localhost:3000"
 
-Your AI will pick up the tools automatically and start testing.
+---
+
+## Why not just a browser tool
+
+Playwright MCP gives your agent hands. vibe-testing gives it a testing workflow: code-derived scenarios, memory across runs, and a report. Two things a stateless browser tool cannot do:
+
+**1. Run it twice and it tells you what you broke.** Every run writes `.vibe/run-snapshot.json` and diffs it against the previous run. Every scan writes `.vibe/route-manifest.json` and diffs your routes. The second run prints regressions and fixes instead of a wall of results:
+
+```
+Changes since last run
+  Fixed:      /login
+  Regression: /checkout
+  New:        /admin/users
+```
+
+The same diff reaches your editor as `snapshot_diff` on `run_full_test` and `run_converge`, and as `route_changes` on `scan_codebase`, so the agent can flag "checkout broke after that commit" without anyone scrolling a report. Flaky routes, working selectors, and measured timeouts are also remembered between runs.
+
+**2. Zero LLM calls inside the tool.** Pass/fail verification is heuristic: URL changes, toast detection, API errors. Your editor's model decides what to test; vibe-testing does the browsing and checking. No API key, no per-run cost beyond the editor subscription you already pay for.
 
 ---
 
 ## Contents
 
-- [How It Works](#how-it-works)
-- [MCP Setup (per editor)](#mcp-setup)
-- [MCP Tools Reference](#mcp-tools-reference)
-- [Recommended Workflow](#recommended-workflow)
-- [init Command](#init-command)
-- [CLI Commands](#cli-commands)
-- [VIBE.md — Project Guidance](#vibemd--project-guidance)
+- [How it works](#how-it-works)
+- [MCP setup (per editor)](#mcp-setup)
+- [MCP tools reference](#mcp-tools-reference)
+- [Recommended workflow](#recommended-workflow)
+- [init command](#init-command)
+- [CLI commands](#cli-commands)
+- [VIBE.md, project guidance](#vibemd-project-guidance)
 - [Configuration (vibe.config.json)](#configuration)
-- [Supported Frameworks](#supported-frameworks)
+- [Supported frameworks](#supported-frameworks)
+- [Memory and regression detection](#memory-and-regression-detection)
 - [FAQ](#faq)
 
 ---
 
-## How It Works
+## How it works
 
 ```
 npx vibe-testing@latest init
-       ↓
+        |
 Registers 13 MCP tools in your editor
-       ↓
+        |
 You ask: "Test the checkout flow"
-       ↓
-AI calls: scan_codebase → get_context("checkout") → login → explore_page → execute_scenario → generate_report
-       ↓
+        |
+AI calls: scan_codebase -> get_context("checkout") -> login -> explore_page -> execute_scenario -> generate_report
+        |
 HTML report opens in browser with screenshots of every step
 ```
 
-**No test cases to write.** The AI reads your source code to understand real field names and routes, opens a browser, tests everything, and shows you what's broken.
+No test cases to write. The AI reads your source code to understand real field names and routes, opens a browser, tests everything, and shows you what's broken.
+
+`init` also:
+
+- Detects which AI editors you have installed
+- Registers vibe-test in global editor configs (`~/.claude/settings.json`, `~/.cursor/mcp.json`, and so on) so the tools are available in every project, every session
+- Creates project-level MCP configs and AI instruction files
+- Auto-detects your app's URL (reads `.env`, `vite.config`, framework defaults)
+- Creates `VIBE.md` (edit with your test credentials) and `vibe.config.json`
 
 ---
 
-## MCP Setup
+## MCP setup
 
-### Option 1 — Automatic (recommended)
+### Option 1: automatic (recommended)
 
 ```bash
 npx vibe-testing@latest init
@@ -79,13 +92,11 @@ npx vibe-testing@latest init
 
 Detects and configures all installed editors. Done.
 
----
-
-### Option 2 — Manual per editor
+### Option 2: manual per editor
 
 #### Claude Code
 
-Add to `~/.claude/settings.json` (global — works in every project):
+Add to `~/.claude/settings.json` (global, works in every project):
 
 ```json
 {
@@ -186,27 +197,27 @@ Add to `.roo/mcp.json`:
 
 ---
 
-## MCP Tools Reference
+## MCP tools reference
 
 13 tools available to your AI editor after setup:
 
 | Tool | When to call | Returns |
 |------|-------------|---------|
-| `scan_codebase` | **Always first.** Reads source code, finds routes/forms/tests/gaps | Routes, forms, coverage map, generated scenarios, `route_changes` since last scan |
-| `get_context` | **Before writing test steps.** Returns source files for a feature | Actual source code with real field names and selectors |
+| `scan_codebase` | Always first. Reads source code, finds routes/forms/tests/gaps | Routes, forms, coverage map, generated scenarios, `route_changes` since last scan |
+| `get_context` | Before writing test steps. Returns source files for a feature | Actual source code with real field names and selectors |
 | `login` | When app requires authentication | Post-login screenshot, token state, API calls observed |
-| `scan_page_elements` | To see all interactive elements on a page | Element list with selectors + page screenshot |
+| `scan_page_elements` | To see all interactive elements on a page | Element list with selectors plus page screenshot |
 | `explore_page` | Broad "does everything work?" testing | Interaction results, API calls, errors, screenshot |
-| `execute_scenario` | Run specific test steps | Step-by-step logs + screenshots |
+| `execute_scenario` | Run specific test steps | Step-by-step logs plus screenshots |
 | `get_coverage` | View coverage map and untested routes | Coverage entries, gaps, available scenarios |
 | `suggest_tests` | Find coverage gaps after exploration | Prioritized, ready-to-run scenarios with steps |
 | `take_screenshot` | Quick visual verification | Screenshot of any URL |
-| `generate_report` | Build HTML report (auto-opens) | Report path + summary |
-| `run_full_test` | One-shot: scan → execute → explore → report | Full results + `snapshot_diff` vs last run |
-| `run_converge` | Iterative testing until thresholds | Summary across all rounds + `snapshot_diff` vs last run |
-| `cleanup` | Close browsers, free resources | — |
+| `generate_report` | Build HTML report (auto-opens) | Report path plus summary |
+| `run_full_test` | One-shot: scan, execute, explore, report | Full results plus `snapshot_diff` vs last run |
+| `run_converge` | Iterative testing until thresholds | Summary across all rounds plus `snapshot_diff` vs last run |
+| `cleanup` | Close browsers, free resources | - |
 
-### Tool Inputs
+### Tool inputs
 
 **`scan_codebase`**
 ```json
@@ -285,7 +296,7 @@ Step actions: `navigate`, `fill`, `click`, `select`, `wait`, `assert`, `upload`
 
 ---
 
-## Recommended Workflow
+## Recommended workflow
 
 ### Full test session
 
@@ -298,15 +309,15 @@ settings pages, run the suggested tests, and generate a report.
 ```
 
 The AI will:
-1. `scan_codebase` — understand routes, forms, existing tests
-2. `get_context("login")` — read actual login form source code
-3. `login` — authenticate in a real browser
-4. `explore_page("/dashboard")` — click everything, observe what breaks
-5. `explore_page("/settings")` — same
-6. `suggest_tests` — find coverage gaps
-7. `execute_scenario` × N — run targeted test flows
-8. `generate_report` — HTML report opens automatically
-9. `cleanup` — close browsers
+1. `scan_codebase`, to understand routes, forms, existing tests
+2. `get_context("login")`, to read the actual login form source code
+3. `login`, to authenticate in a real browser
+4. `explore_page("/dashboard")`, clicking everything and observing what breaks
+5. `explore_page("/settings")`, same
+6. `suggest_tests`, to find coverage gaps
+7. `execute_scenario` x N, running targeted test flows
+8. `generate_report`, HTML report opens automatically
+9. `cleanup`, closing browsers
 
 ### Test a specific feature
 
@@ -317,9 +328,9 @@ then run the full purchase flow with card number 4242424242424242.
 
 The AI will:
 1. `scan_codebase` (if not already done)
-2. `get_context("checkout")` — read `CheckoutForm.tsx`, `api/orders/route.ts` etc.
-3. `login` — authenticate
-4. `execute_scenario` — fill the real form fields from source code
+2. `get_context("checkout")`, reading `CheckoutForm.tsx`, `api/orders/route.ts` and so on
+3. `login`
+4. `execute_scenario`, filling the real form fields from source code
 5. `generate_report`
 
 ### Verify a bug fix
@@ -329,8 +340,8 @@ I fixed the login redirect bug. Use vibe-test to confirm it's working.
 ```
 
 The AI will:
-1. `login` — test the login flow
-2. `take_screenshot` — visual confirmation of the post-login state
+1. `login`, testing the login flow
+2. `take_screenshot`, visual confirmation of the post-login state
 3. Report back what it sees
 
 ### Find what's broken
@@ -343,13 +354,13 @@ The AI will run `explore_page` on every route, collecting API errors, broken ele
 
 ---
 
-## init Command
+## init command
 
 ```bash
 npx vibe-testing@latest init [options]
 ```
 
-**What it creates:**
+What it creates:
 
 | File | Where | Purpose |
 |------|-------|---------|
@@ -357,7 +368,7 @@ npx vibe-testing@latest init [options]
 | `~/.claude/settings.json` | Global | Claude Code MCP config (all projects) |
 | `.cursor/mcp.json` | Project root | Cursor MCP config |
 | `~/.cursor/mcp.json` | Global | Cursor MCP config (all projects) |
-| `.cursor/rules/vibe-test.mdc` | Project | Cursor rules — `alwaysApply: true` |
+| `.cursor/rules/vibe-test.mdc` | Project | Cursor rules, `alwaysApply: true` |
 | `.windsurfrules` | Project | Windsurf instructions |
 | `~/.codeium/windsurf/mcp_config.json` | Global | Windsurf MCP config (all projects) |
 | `.vscode/mcp.json` | Project | VS Code Copilot MCP config |
@@ -365,10 +376,10 @@ npx vibe-testing@latest init [options]
 | `.roo/mcp.json` | Project | Roo Code MCP config |
 | `CLAUDE.md` | Project | Claude Code session instructions |
 | `AGENTS.md` | Project | Universal agent instructions (Codex, Devin, Zed) |
-| `VIBE.md` | Project | Test guidance — edit with your credentials |
-| `vibe.config.json` | Project | Config — URL auto-detected from your project |
+| `VIBE.md` | Project | Test guidance, edit with your credentials |
+| `vibe.config.json` | Project | Config, URL auto-detected from your project |
 
-**Options:**
+Options:
 
 ```bash
 npx vibe-testing@latest init                     # auto-detect editors, register globally + project
@@ -377,11 +388,11 @@ npx vibe-testing@latest init --editor cursor     # only configure Cursor
 npx vibe-testing@latest init --editor claude-code windsurf
 ```
 
-**After init**, edit `VIBE.md` with your login URL and test credentials.
+After init, edit `VIBE.md` with your login URL and test credentials.
 
 ---
 
-## CLI Commands
+## CLI commands
 
 ```bash
 # Set up in current project
@@ -407,8 +418,8 @@ npx vibe-testing@latest reset
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--mode fast\|deep` | `deep` | `fast`: quick scan. `deep`: full feature extraction + exploration |
-| `--no-headed` | — | Run browser headless (default: visible) |
+| `--mode fast\|deep` | `deep` | `fast`: quick scan. `deep`: full feature extraction plus exploration |
+| `--no-headed` | - | Run browser headless (default: visible) |
 | `--codebase <path>` | cwd | Path to project root |
 | `--scope <routes...>` | all | Test only specific routes |
 | `-c <path>` | `vibe.config.json` | Config file path |
@@ -418,14 +429,14 @@ npx vibe-testing@latest reset
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--max-rounds <n>` | `4` | Max follow-up rounds after baseline |
-| `--target-pass-rate <r>` | `0.92` | Stop when pass rate ≥ this (0–1) |
-| `--max-gaps <n>` | `2` | Stop when critical+important gaps ≤ this |
+| `--target-pass-rate <r>` | `0.92` | Stop when pass rate reaches this (0-1) |
+| `--max-gaps <n>` | `2` | Stop when critical plus important gaps fall to this |
 
 ---
 
-## VIBE.md — Project Guidance
+## VIBE.md, project guidance
 
-Create `VIBE.md` in your project root. Vibe Test reads it automatically on every run.
+Create `VIBE.md` in your project root. vibe-testing reads it automatically on every run.
 
 ```markdown
 ## Login URL
@@ -442,12 +453,12 @@ Create `VIBE.md` in your project root. Vibe Test reads it automatically on every
 - .billing-section
 
 ## Known Flaky
-- /notifications (WebSocket dependent — skip or expect retry)
+- /notifications (WebSocket dependent, skip or expect retry)
 - /live-feed
 
 ## Notes
-- Admin panel at /admin — use admin@example.com / adminpass
-- Dashboard data loads async — wait for [data-loaded="true"]
+- Admin panel at /admin, use admin@example.com / adminpass
+- Dashboard data loads async, wait for [data-loaded="true"]
 - Profile page: click "Edit Profile" before form fields appear
 ```
 
@@ -494,68 +505,50 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 
 | Key | Description |
 |-----|-------------|
-| `url` | App URL — localhost or staging. Auto-detected by `init`. |
-| `mode` | `fast` (heuristic scan) or `deep` (full extraction + exploration) |
+| `url` | App URL, localhost or staging. Auto-detected by `init`. |
+| `mode` | `fast` (heuristic scan) or `deep` (full extraction plus exploration) |
 | `auth.strategy` | `credentials` (form login), `basic` (HTTP Basic Auth), or `skip` |
-| `auth.credentials` | Login credentials — persisted across runs once used |
+| `auth.login_url` | Explicit login route for non-standard paths keyword matching would miss |
+| `auth.credentials` | Login credentials, used for login and for generated scenarios, persisted across runs |
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
 | `scope.exclude` | Route patterns to exclude from testing |
 | `scope.max_routes` | Cap how many routes are tested per run |
-| `scope.seed_routes` | Concrete URLs for dynamic-segment routes the parser can't enumerate (e.g. `/live/[slug]` → `/live/dev-mode-a-now`). Each seeded route inherits `requires_auth` and the source file from its dynamic parent. |
+| `scope.seed_routes` | Concrete URLs for dynamic-segment routes the parser can't enumerate (e.g. `/live/[slug]` becomes `/live/dev-mode-a-now`). Each seeded route inherits `requires_auth` and the source file from its dynamic parent. |
 | `browser.headed` | `true` = visible browser. CLI default `true`, MCP server default `false` (headless) so editor sessions aren't disrupted by pop-up windows. |
 | `browser.slowMo` | Milliseconds between actions (useful for debugging) |
 | `routes` | `auto` (default) discovers routes from the codebase. `config` uses only routes explicitly listed in config. |
 
 ---
 
-## Supported Frameworks
+## Supported frameworks
 
 | Framework | Routes | API endpoints | Forms |
 |-----------|--------|---------------|-------|
-| Next.js App Router | ✅ | ✅ | ✅ |
-| Next.js Pages Router | ✅ | ✅ | ✅ |
-| Next.js (src/ variant) | ✅ | ✅ | ✅ |
-| React SPA (react-router) | ✅ | — | ✅ |
-| Vue + Vite (vue-router) | ✅ | — | ✅ |
-| Nuxt | ✅ | ✅ | ✅ |
-| SvelteKit | ✅ | ✅ | ✅ |
-| Express / Fastify | — | ✅ | ✅ |
-| Monorepos (Turborepo, pnpm, Lerna) | ✅ | ✅ | ✅ |
+| Next.js App Router | yes | yes | yes |
+| Next.js Pages Router | yes | yes | yes |
+| Next.js (src/ variant) | yes | yes | yes |
+| React SPA (react-router) | yes | - | yes |
+| Vue + Vite (vue-router) | yes | - | yes |
+| Nuxt | yes | yes | yes |
+| SvelteKit | yes | yes | yes |
+| Express / Fastify | - | yes | yes |
+| Monorepos (Turborepo, pnpm, Lerna) | yes | yes | yes |
 
-Existing test files are also read to build a coverage map:
-
-| Test runner | Supported |
-|-------------|-----------|
-| Jest / Vitest | ✅ |
-| Playwright | ✅ |
-| Cypress | ✅ |
+Existing test files are also read to build a coverage map: Jest, Vitest, Playwright, and Cypress suites are all parsed.
 
 ---
 
-## Self-Improvement
+## Memory and regression detection
 
-Vibe Test learns across runs and stores intelligence in `.vibe/`:
+vibe-testing learns across runs and stores state in `.vibe/`:
 
-- **Working selectors** — remembers `[name='email']` worked on `/login`, uses it next run
-- **Route timings** — adjusts timeouts based on measured load times
-- **Auth credentials** — saved after first login, reused automatically
-- **Flaky routes** — tracks high fail-rate routes, marks them for retry
-- **Skip routes** — routes that consistently error (need URL params) are auto-skipped
-- **Route manifest** (`.vibe/route-manifest.json`) — every scan diffs against the previous one; new and removed routes are surfaced as `route_changes` on `scan_codebase` results so the AI can immediately cover them
-- **Run snapshot** (`.vibe/run-snapshot.json`) — every run captures per-route pass/fail status and diffs against the prior run; `snapshot_diff` flags `newly_passing` (fixes), `newly_failing` (regressions), `still_failing`, plus added/removed routes
-
-Reset with `npx vibe-testing@latest reset` to start fresh.
-
-### Regression detection in action
-
-After a second run, the console and `VibeRunResult` include a snapshot diff:
-
-```
-─── Changes since last run ───
-  ✓ Fixed:      /login
-  ✗ Regression: /checkout
-  ℹ New:        /admin/users
-```
+- **Working selectors**: remembers `[name='email']` worked on `/login`, uses it next run
+- **Route timings**: adjusts timeouts based on measured load times
+- **Auth credentials**: saved after first login, reused automatically
+- **Flaky routes**: tracks high fail-rate routes, marks them for retry
+- **Skip routes**: routes that consistently error (need URL params) are auto-skipped
+- **Route manifest** (`.vibe/route-manifest.json`): every scan diffs against the previous one; new and removed routes surface as `route_changes` on `scan_codebase` results so the AI can cover them immediately
+- **Run snapshot** (`.vibe/run-snapshot.json`): every run captures per-route pass/fail and diffs against the prior run; `snapshot_diff` flags `newly_passing` (fixes), `newly_failing` (regressions), `still_failing`, plus added and removed routes
 
 ```json
 {
@@ -571,49 +564,37 @@ After a second run, the console and `VibeRunResult` include a snapshot diff:
 
 `run_converge` returns the same shape, so iterative runs in your editor highlight what you just broke.
 
+Reset with `npx vibe-testing@latest reset` to start fresh.
+
 ---
 
-## How the AI Uses These Tools
+## What a session looks like
 
-When you ask your editor to "test the login flow", here is exactly what it does:
+When you ask your editor to "test the login flow", here is what it does:
 
 ```
 User: "Test the login flow"
 
 AI calls:
   scan_codebase({ codebase_path: ".", url: "http://localhost:3000" })
-    → Finds /login route, LoginForm component, POST /api/auth/login endpoint
-    → Returns 8 generated test scenarios
+    -> Finds /login route, LoginForm component, POST /api/auth/login endpoint
+    -> Returns 8 generated test scenarios
 
   get_context({ feature: "login" })
-    → Returns src/app/login/page.tsx (has email, password fields, name="email", name="password")
-    → Returns src/app/api/auth/login/route.ts (POST handler, returns { token })
-    → AI now knows the REAL selectors: [name='email'], [name='password']
+    -> Returns src/app/login/page.tsx (has name="email", name="password" fields)
+    -> Returns src/app/api/auth/login/route.ts (POST handler, returns { token })
+    -> AI now knows the real selectors: [name='email'], [name='password']
 
   login({ email: "test@example.com", password: "pass123" })
-    → Opens Chromium, navigates to /login
-    → Fills email and password fields
-    → Clicks submit
-    → Returns: { success: true, final_url: "/dashboard", tokens_found: 2 }
-    → Returns screenshot of post-login dashboard
+    -> Opens Chromium, fills the form, clicks submit
+    -> Returns: { success: true, final_url: "/dashboard", tokens_found: 2 }
+    -> Returns screenshot of post-login dashboard
 
-  execute_scenario({
-    scenario: {
-      name: "Login with invalid password",
-      steps: [
-        { action: "navigate", url: "/login" },
-        { action: "fill", selector: "[name='email']", value: "test@example.com" },
-        { action: "fill", selector: "[name='password']", value: "wrongpassword" },
-        { action: "click", selector: "button[type='submit']" }
-      ],
-      expected_outcome: "Error message shown"
-    }
-  })
-    → Returns screenshot showing error state
+  execute_scenario({ scenario: { name: "Login with invalid password", ... } })
+    -> Returns screenshot showing error state
 
   generate_report()
-    → Writes .vibe/report.html
-    → Opens in browser automatically
+    -> Writes .vibe/report.html, opens in browser
 
 AI reports: "Login works. Invalid password shows an error. All 3 login scenarios passed."
 ```
@@ -622,17 +603,17 @@ AI reports: "Login works. Invalid password shows an error. All 3 login scenarios
 
 ## FAQ
 
-**Does vibe-test use an AI/LLM internally?**
-No. It uses heuristic verification (URL changes, toast detection, API errors). Your editor's AI (Claude, GPT-4, etc.) is the brain — it sees screenshots and decides what to test next.
+**Does vibe-testing use an LLM internally?**
+No. It uses heuristic verification (URL changes, toast detection, API errors). Your editor's model is the brain: it sees screenshots and decides what to test next. Runs have no API cost.
 
 **What's the difference between `explore_page` and `execute_scenario`?**
-`explore_page` is broad — it clicks every button and input it finds and reports the results. `execute_scenario` is precise — you give it specific steps and it follows them exactly. Use `explore_page` to find what's on a page, then `execute_scenario` to test specific flows.
+`explore_page` is broad: it clicks every button and input it finds and reports the results. `execute_scenario` is precise: you give it specific steps and it follows them exactly. Use `explore_page` to find what's on a page, then `execute_scenario` to test specific flows.
 
 **What's `get_context` for?**
-It returns the actual source code for a feature — so the AI knows `[name='email']` instead of guessing `#email-input`. Always call it before writing test steps for a specific feature.
+It returns the actual source code for a feature, so the AI knows `[name='email']` instead of guessing `#email-input`. Always call it before writing test steps for a specific feature.
 
 **Does it handle SPAs with client-side routing?**
-Yes. Playwright navigates the real browser, so client-side routing (React Router, Vue Router, etc.) works naturally.
+Yes. Playwright navigates the real browser, so client-side routing (React Router, Vue Router, and the rest) works naturally.
 
 **Does it handle login / authentication?**
 Yes. The `login` tool fills credentials in a real browser, captures auth tokens from localStorage/cookies, and keeps that session alive for authenticated tests. Credentials are persisted in `.vibe/memory/` and reused automatically.
@@ -641,7 +622,7 @@ Yes. The `login` tool fills credentials in a real browser, captures auth tokens 
 No. Set `never_interact` in `vibe.config.json` or `VIBE.md` to blocklist dangerous actions. Any button whose text or selector matches is skipped during exploration.
 
 **Can I use it without an AI editor?**
-Yes — `vibe-test run https://your-app.com` runs standalone. It scans, generates scenarios, executes them, and produces an HTML report without needing an editor.
+Yes. `vibe-test run https://your-app.com` runs standalone. It scans, generates scenarios, executes them, and produces an HTML report without needing an editor.
 
 **How do I test a staging environment?**
 Set `url` in `vibe.config.json` to your staging URL, or pass it as a CLI argument: `npx vibe-testing@latest run https://staging.myapp.com`.
@@ -653,16 +634,16 @@ Yes. `init` detects Turborepo/pnpm/yarn workspaces and finds the frontend app au
 
 ## Requirements
 
-- **Node.js** ≥ 20 (the test suite uses vitest 4.x which requires Node 20+)
-- **Playwright Chromium** — install once with:
+- Node.js >= 20 (the test suite uses vitest 4.x which requires Node 20+)
+- Playwright Chromium, install once with:
   ```bash
   npx playwright install chromium
   ```
-  (vibe-test will prompt you if it's missing)
+  (vibe-testing will prompt you if it's missing)
 
 ### Docker
 
-A Node 20 + Chromium image is included for environments that prefer container-based MCP servers (and for Glama.ai quality scoring):
+A Node 20 + Chromium image is included for environments that prefer container-based MCP servers:
 
 ```bash
 docker build -t vibe-test .
@@ -679,25 +660,28 @@ git clone https://github.com/AishwaryShrivastav/vibe-testing.git
 cd vibe-testing
 npm install
 npx playwright install chromium
-npm run build   # tsc → dist/
+npm run build   # tsc -> dist/
 npm run dev     # run CLI without building
 npm run mcp     # run MCP server without building
+npm test        # vitest, 63 tests
 ```
 
-See [CHANGELOG.md](./CHANGELOG.md) for version history.
+See [CHANGELOG.md](./CHANGELOG.md) for version history. Bug reports and feature requests: [GitHub issues](https://github.com/AishwaryShrivastav/vibe-testing/issues).
 
 ---
 
 ## License
 
-MIT — [Aishwary Shrivastav](https://github.com/AishwaryShrivastav)
+MIT, [Aishwary Shrivastav](https://github.com/AishwaryShrivastav)
 
 ---
 
 ## Links
 
-- **npm:** https://www.npmjs.com/package/vibe-testing
-- **GitHub:** https://github.com/AishwaryShrivastav/vibe-testing
-- **Issues:** https://github.com/AishwaryShrivastav/vibe-testing/issues
+- npm: https://www.npmjs.com/package/vibe-testing
+- GitHub: https://github.com/AishwaryShrivastav/vibe-testing
+- Issues: https://github.com/AishwaryShrivastav/vibe-testing/issues
+- Official MCP registry: listed as `io.github.AishwaryShrivastav/vibe-testing` at https://registry.modelcontextprotocol.io
+- [![mcpindex](https://mcpindex.ai/api/v1/badge/io-github-aishwaryshrivastav-vibe-testing)](https://mcpindex.ai/server/io-github-aishwaryshrivastav-vibe-testing)
 - [Model Context Protocol](https://modelcontextprotocol.io)
 - [Playwright](https://playwright.dev)
