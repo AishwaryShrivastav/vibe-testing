@@ -4,7 +4,7 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
-## [0.4.4] — unreleased
+## [0.4.4] — 2026-09-14
 
 ### Added
 
@@ -15,6 +15,12 @@ All notable changes to **vibe-test** are documented here.
 ### Fixed
 
 - **Glama container evaluation.** The Docker image now compiles from a clean checkout, installs Chromium with its system dependencies, and verifies the MCP handshake in CI. `server.json` now matches the published package version.
+- **Assertions now affect the verdict.** Selector visibility, visible text, and exact URL assertions execute in Playwright and fail the scenario when they do not match.
+- **Uploads now use the browser.** Upload steps validate the local file and set it on the requested file input instead of returning success without interacting with the page.
+- **Empty runs fail clearly.** A scan that discovers no runnable scenarios now exits with an error in both the CLI and MCP paths. Failed MCP runs also set `isError`.
+- **Default route scope covers real apps.** The default `/**` scope includes the root route and nested routes while treating regex metacharacters as literal path characters.
+- **CLI and MCP share one runner.** Both entry points now execute the same action and assertion logic, so the result no longer depends on how vibe-testing was started.
+- **Real-browser CI coverage.** The test suite now installs Chromium and exercises browser assertions, uploads, empty-run failures, route matching, and MCP error results. Test count: 140.
 
 ---
 
