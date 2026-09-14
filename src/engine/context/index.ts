@@ -134,10 +134,14 @@ function findDynamicParent(routes: Route[], concretePath: string): Route | undef
 
 function matchesScope(routePath: string, include: string[], exclude: string[]): boolean {
   const matches = (pattern: string, p: string): boolean => {
-    const regex = pattern
-      .replace(/\*\*/g, '.*')
-      .replace(/\*/g, '[^/]*')
-      .replace(/\//g, '\\/')
+    // Tokenize wildcards once; never rewrite the stars introduced by expansion.
+    // A trailing /** includes the subtree root as well as descendants.
+    const subtree = pattern.endsWith('/**')
+    const source = subtree ? pattern.slice(0, -3) : pattern
+    const regex = source
+      .split(/(\*\*|\*)/)
+      .map(token => token === '**' ? '.*' : token === '*' ? '[^/]*' : token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('') + (subtree ? '(?:/.*)?' : '')
     return new RegExp(`^${regex}$`).test(p)
   }
 

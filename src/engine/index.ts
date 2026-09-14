@@ -37,22 +37,12 @@ export class VibeTester {
     const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
 
     if (productModel.scenarios.length === 0) {
-      logger.warn('No test scenarios generated. Check codebase path and scope config.')
-      const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
-      const emptyReport = '<html><body><h1>Vibe Test Report</h1><p>No scenarios generated.</p></body></html>'
-      await fs.mkdir(path.dirname(reportPath), { recursive: true })
-      await fs.writeFile(reportPath, emptyReport, 'utf-8')
-      return {
-        product_model: productModel,
-        results: [],
-        report: emptyReport,
-        report_path: reportPath,
-        coverage_gaps: [],
-        summary: { total: 0, passed: 0, failed: 0, errors: 0, duration_ms: 0, elements_explored: 0, api_calls_observed: 0 },
-      }
+      throw new Error('No test scenarios generated. Check codebase path and scope config.')
     }
 
     const { results, explorations } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
+
+    if (results.length === 0) throw new Error('No scenarios executed: empty execution result')
 
     await memory.updateFromResults(results)
 

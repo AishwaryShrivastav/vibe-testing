@@ -275,6 +275,41 @@ Add to `.roo/mcp.json`:
 
 Step actions: `navigate`, `fill`, `click`, `select`, `wait`, `assert`, `upload`
 
+CLI and MCP use the same scenario runner. An `assert` step evaluates every
+supplied condition:
+
+- `selector`: the target must be visible. CSS, `text=`, `label=`, and
+  `placeholder=` are supported; the named locators match exactly.
+- `value`: visible text must contain this string, on the selected element or on
+  the page body when no selector is supplied.
+- `url`: the current URL must exactly match this absolute URL or path resolved
+  against the configured base URL, including query and fragment.
+
+For example:
+
+```json
+{ "action": "assert", "selector": "#confirmation", "value": "Saved", "url": "/settings", "timeout": 5000, "description": "Check saved settings" }
+```
+
+These checks wait up to the step timeout (default 15000 ms per check). A failed
+assertion stops the scenario, records a failed step and reason, and returns
+`status: "fail"`; MCP also sets `isError: true`. Explicit conditions are used as
+the verdict after the existing authentication and form API checks. The
+`description` and `expected_outcome` prose are not executable assertions.
+Without `selector`, `value`, or `url`, `assert` only checks page health: at least
+10 characters of visible body text and no nonempty visible error indicators.
+This compatibility check does not prove a described business outcome.
+
+`upload` requires a file-input `selector` and a nonempty file path in `value`.
+Relative paths resolve against the codebase root. Hidden file inputs are
+supported. A missing file, directory, missing target, or target that is not a
+file input returns `status: "error"`. The action selects one file using
+Playwright; add an assertion of the resulting UI to verify application-side
+processing. It does not automate native file-picker dialogs.
+
+Scenarios must contain at least one step. Unknown actions are errors.
+
+
 **`take_screenshot`**
 ```json
 { "url": "/settings", "authenticated": true, "full_page": false }
@@ -429,6 +464,11 @@ npx vibe-testing@latest reset
 | `--scope <routes...>` | all | Test only specific routes |
 | `-c <path>` | `vibe.config.json` | Config file path |
 
+`run` and `converge` fail with a nonzero exit when no scenarios are discovered
+or an execution batch is empty. MCP `run_full_test` and `run_converge` return
+`isError: true` for these cases. Empty runs do not write a successful run
+snapshot or replace the prior report.
+
 ### `converge` options
 
 | Option | Default | Description |
@@ -516,6 +556,7 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | `auth.login_url` | Explicit login route for non-standard paths keyword matching would miss |
 | `auth.credentials` | Login credentials, used for login and for generated scenarios, persisted across runs |
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
+| `scope.include` | Route patterns to include; default `/**` includes `/` and all nested routes. `*` stays within one segment; a trailing `/**` includes the subtree root and its descendants. Other characters are literal. |
 | `scope.exclude` | Route patterns to exclude from testing |
 | `scope.max_routes` | Cap how many routes are tested per run |
 | `scope.seed_routes` | Concrete URLs for dynamic-segment routes the parser can't enumerate (e.g. `/live/[slug]` becomes `/live/dev-mode-a-now`). Each seeded route inherits `requires_auth` and the source file from its dynamic parent. |
@@ -669,7 +710,8 @@ npx playwright install chromium
 npm run build   # tsc -> dist/
 npm run dev     # run CLI without building
 npm run mcp     # run MCP server without building
-npm test        # vitest, 69 tests
+npm test        # unit and isolated integration tests
+VIBE_REAL_BROWSER=1 npm test  # also run real Chromium CLI/MCP regressions
 ```
 
 See [CHANGELOG.md](./CHANGELOG.md) for version history. Bug reports and feature requests: [GitHub issues](https://github.com/AishwaryShrivastav/vibe-testing/issues).

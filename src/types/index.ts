@@ -112,8 +112,11 @@ export type StepAction = 'navigate' | 'fill' | 'click' | 'wait' | 'assert' | 'se
 
 export interface TestStep {
   action: StepAction
+  /** For assert: a visible target. For upload: a file input (may be hidden). */
   selector?: string
+  /** For assert: contained visible text. For upload: one local file path. */
   value?: string
+  /** For assert: exact expected URL, resolved against the configured base URL. */
   url?: string
   timeout?: number
   description: string
