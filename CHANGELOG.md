@@ -4,6 +4,20 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [0.4.4] — unreleased
+
+### Added
+
+- **Reliable browser setup.** `init` installs the Chromium build required by its bundled Playwright version. `install-browser` repairs or installs that exact build without relying on whichever Playwright version `npx` resolves globally.
+- **Early browser check.** `run` and `converge` now stop before scanning when Chromium is missing and print one working recovery command.
+- **`--skip-browser-install` for `init`.** CI images and managed environments can skip the download explicitly.
+
+### Fixed
+
+- **Glama container evaluation.** The Docker image now compiles from a clean checkout, installs Chromium with its system dependencies, and verifies the MCP handshake in CI. `server.json` now matches the published package version.
+
+---
+
 ## [0.4.3] — 2026-09-14
 
 Focus: turning vibe-test into a real assistant for AI coding tools — config you provide actually gets used, dynamic routes are testable, and auth detection catches modern Next.js/NextAuth patterns. No new heuristic noise; only fixes that make the existing browser execution honest.
