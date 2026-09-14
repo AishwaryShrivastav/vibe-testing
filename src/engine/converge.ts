@@ -220,7 +220,7 @@ function mergeExplorations(a: PageExploration[], b: PageExploration[]): PageExpl
 }
 
 function passRate(results: TestResult[]): number {
-  if (results.length === 0) return 1
+  if (results.length === 0) throw new Error('No scenarios executed: empty execution batch')
   return results.filter(r => r.status === 'pass').length / results.length
 }
 
@@ -255,8 +255,7 @@ export async function runConverge(
 
   const productModel = await buildProductModel(config, memory.getMemory(), recs)
   if (productModel.scenarios.length === 0) {
-    logger.warn('No scenarios generated — aborting converge')
-    return { rounds: 0, final_gaps: [], last_pass_rate: 0, total_results: [], explorations: [] }
+    throw new Error('No test scenarios generated. Check codebase path and scope config.')
   }
 
   let explorations: PageExploration[] = []
@@ -266,13 +265,13 @@ export async function runConverge(
   // Round 1: baseline (full scenario list)
   logger.section('Round 1 — baseline scenarios')
   const first = await executeScenarios(productModel.scenarios, config, projectRoot, guidance)
+  const baselinePr = passRate(first.results)
   explorations = first.explorations
   allResults.push(...first.results)
   await memory.updateFromResults(first.results)
   lastGaps = generateCoverageGaps(productModel.behaviours, explorations)
 
   let high = highSeverityCount(lastGaps)
-  const baselinePr = passRate(first.results)
   logger.info(`  Gaps: ${lastGaps.length} total (${high} critical/important), pass rate: ${(baselinePr * 100).toFixed(0)}%`)
 
   let followUps = 0
@@ -290,13 +289,13 @@ export async function runConverge(
       logger.section(`Round ${followUps + 1} — ${followUp.length} gap / retest scenario(s)`)
 
       const ex = await executeScenarios(followUp, config, projectRoot, guidance)
+      const pr = passRate(ex.results)
       explorations = mergeExplorations(explorations, ex.explorations)
       allResults.push(...ex.results)
       await memory.updateFromResults(ex.results)
 
       lastGaps = generateCoverageGaps(productModel.behaviours, explorations)
       high = highSeverityCount(lastGaps)
-      const pr = passRate(ex.results)
       logger.info(`  Batch pass rate: ${(pr * 100).toFixed(0)}%, gaps: ${lastGaps.length} (${high} critical/important)`)
 
       if (high <= o.max_high_severity_gaps && pr >= o.target_pass_rate) {

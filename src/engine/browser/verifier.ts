@@ -1,5 +1,6 @@
 import { Page } from 'playwright'
 import { TestScenario, ApiError } from '../../types/index.js'
+import { hasExplicitAssertion } from './assertions.js'
 
 export interface VerificationResult {
   passed: boolean
@@ -16,11 +17,11 @@ export async function verifyResult(
   const currentUrl  = page.url()
 
   const hasErrorMessage = await page.locator(
-    '[role="alert"]:not(:empty), [data-error]:not(:empty), .toast-error:not(:empty)'
+    '[role="alert"]:visible:not(:empty), [data-error]:visible:not(:empty), .toast-error:visible:not(:empty)'
   ).count().then(n => n > 0).catch(() => false)
 
   const hasSuccessIndicator = await page.locator(
-    '[data-success]:not(:empty), .toast-success:not(:empty)'
+    '[data-success]:visible:not(:empty), .toast-success:visible:not(:empty)'
   ).count().then(n => n > 0).catch(() => false)
 
   const toastInfo = await detectToast(page)
@@ -48,6 +49,12 @@ export async function verifyResult(
       passed: false,
       explanation: `API error: ${firstErr.status} ${firstErr.body.slice(0, 100)}`,
     }
+  }
+
+  // The runner already evaluated explicit assertions. Prose heuristics must not
+  // override a successfully checked expected error UI or a short valid page.
+  if (scenario.steps.some(hasExplicitAssertion)) {
+    return { passed: true, explanation: 'All explicit page assertions passed' }
   }
 
   return heuristicVerification(scenario, currentUrl, hasErrorMessage, hasSuccessIndicator, page, wasRedirected, toastInfo, apiErrors)

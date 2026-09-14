@@ -8,6 +8,8 @@ import { ActionBlocklist } from '../../utils/blocklist.js'
 import { logger } from '../../utils/logger.js'
 import { ensureDir } from '../../utils/file.js'
 import path from 'path'
+import fs from 'fs/promises'
+import { assertPage, AssertionFailure, stepLocator } from './assertions.js'
 
 export interface ExecutionResult {
   results: TestResult[]
@@ -20,6 +22,7 @@ export async function executeScenarios(
   projectRoot: string,
   guidance?: VibeGuidance | null
 ): Promise<ExecutionResult> {
+  if (scenarios.length === 0) throw new Error('No scenarios to execute: empty scenario batch')
   const screenshotsDir = path.join(projectRoot, '.vibe', 'screenshots')
   await ensureDir(screenshotsDir)
 
@@ -55,7 +58,7 @@ export async function executeScenarios(
     for (const scenario of unauthScenarios) {
       logger.info(`Running: ${scenario.name}`)
       try {
-        const result = await runOneScenario(scenario, unauthCtx, config, screenshotsDir)
+        const result = await runOneScenario(scenario, unauthCtx, config, screenshotsDir, projectRoot)
         results.push(result)
         logResult(result)
       } catch (err) {
@@ -240,7 +243,7 @@ export async function executeScenarios(
       for (const scenario of authScenarios) {
         logger.info(`Running: ${scenario.name}`)
         try {
-          const result = await runOneScenario(scenario, authCtx, config, screenshotsDir)
+          const result = await runOneScenario(scenario, authCtx, config, screenshotsDir, projectRoot)
           results.push(result)
           logResult(result)
         } catch (err) {
@@ -296,11 +299,12 @@ function extractUrlPath(url: string): string {
   try { return new URL(url).pathname } catch { return url }
 }
 
-async function runOneScenario(
+export async function runOneScenario(
   scenario: TestScenario,
   context: BrowserContext,
   config: VibeConfig,
-  screenshotsDir: string
+  screenshotsDir: string,
+  projectRoot = config.codebase_path ?? process.cwd()
 ): Promise<TestResult> {
   const startTime = Date.now()
   const screenshotPath = path.join(screenshotsDir, `${scenario.id}.png`)
@@ -309,10 +313,13 @@ async function runOneScenario(
   const apiErrors: ApiError[] = []
   let navigatedUrl: string | undefined
 
-  // Decide which steps deserve a screenshot: state-changing steps (fill, click, navigate, select)
-  const isScreenshotWorthy = (action: string) => ['fill', 'click', 'navigate', 'select'].includes(action)
+  // Decide which steps deserve a screenshot: state-changing steps (fill, click, navigate, select, upload)
+  const isScreenshotWorthy = (action: string) => ['fill', 'click', 'navigate', 'select', 'upload'].includes(action)
 
   try {
+    if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
+      throw new Error('No steps to execute: scenario must contain at least one step')
+    }
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const urlBefore = page.url()
@@ -321,7 +328,7 @@ async function runOneScenario(
       let stepScreenshotPath: string | undefined
 
       try {
-        selectorUsed = await executeStep(page, step, config.url, apiErrors)
+        selectorUsed = await executeStep(page, step, config.url, apiErrors, projectRoot)
 
         if (step.action === 'navigate' && !navigatedUrl) {
           navigatedUrl = step.url?.startsWith('http')
@@ -393,7 +400,7 @@ async function runOneScenario(
 
     return {
       scenario,
-      status: 'error',
+      status: err instanceof AssertionFailure ? 'fail' : 'error',
       duration_ms: Date.now() - startTime,
       screenshot_path: screenshotPath,
       current_url: page.url(),
@@ -407,8 +414,9 @@ async function runOneScenario(
   }
 }
 
-async function executeStep(page: Page, step: TestStep, baseUrl: string, apiErrors?: ApiError[]): Promise<string | undefined> {
+async function executeStep(page: Page, step: TestStep, baseUrl: string, apiErrors?: ApiError[], projectRoot = process.cwd()): Promise<string | undefined> {
   const timeout = step.timeout ?? 15000
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('Step timeout must be a positive finite number')
 
   switch (step.action) {
     case 'navigate': {
@@ -465,26 +473,18 @@ async function executeStep(page: Page, step: TestStep, baseUrl: string, apiError
       return undefined
     }
     case 'upload': {
-      if (!step.value) break
-      const { locator, resolved } = await resolveLocator(page, step, timeout)
-      await locator.setInputFiles(step.value, { timeout })
-      return resolved
+      if (typeof step.value !== 'string' || !step.value.trim()) throw new Error('upload requires a nonempty file path in value')
+      if (typeof step.selector !== 'string' || !step.selector.trim()) throw new Error('upload requires a nonempty file input selector')
+      const filePath = path.resolve(projectRoot, step.value)
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) throw new Error(`Upload path is not a file: ${filePath}`)
+      await stepLocator(page, step.selector).setInputFiles(filePath, { timeout })
+      return step.selector
     }
-    case 'assert': {
-      // Check for hard error indicators on the page
-      const errorEl = page.locator('[role="alert"], [data-error], .error-message, .toast-error').first()
-      const hasError = await errorEl.isVisible({ timeout: 500 }).catch(() => false)
-      if (hasError) {
-        const errorText = await errorEl.textContent().catch(() => 'Unknown error')
-        throw new Error(`Assertion failed — error visible on page: ${errorText?.slice(0, 200)}`)
-      }
-      // Check for blank/crashed page
-      const bodyText = await page.locator('body').textContent().catch(() => '') ?? ''
-      if (bodyText.trim().length < 10) {
-        throw new Error('Assertion failed — page appears blank or crashed')
-      }
-      return undefined
-    }
+    case 'assert':
+      return assertPage(page, step, baseUrl)
+    default:
+      throw new Error(`Unsupported step action: ${String(step.action)}`)
   }
   return undefined
 }

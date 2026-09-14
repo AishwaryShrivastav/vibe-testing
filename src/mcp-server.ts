@@ -7,6 +7,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { chromium, BrowserContext, Page } from 'playwright'
 import { VibeTester, buildProductModel, MemoryManager } from './engine/index.js'
+import { runOneScenario } from './engine/browser/runner.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
@@ -170,14 +171,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
               priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Scenario priority level.' },
               steps: {
                 type: 'array',
-                description: 'Ordered list of test steps to execute sequentially.',
+                minItems: 1,
+                description: 'Nonempty ordered list of test steps to execute sequentially.',
                 items: {
                   type: 'object',
                   properties: {
-                    action: { type: 'string', enum: ['navigate', 'fill', 'click', 'wait', 'assert', 'select', 'upload'], description: 'Step action: navigate (go to URL), fill (type into input), click (click element), wait (pause ms), assert (verify page state), select (dropdown), upload (file input).' },
+                    action: { type: 'string', enum: ['navigate', 'fill', 'click', 'wait', 'assert', 'select', 'upload'], description: 'Step action: navigate (go to URL), fill (type into input), click (click element), wait (pause ms), assert (selector must be visible, value checks contained visible text on selector or body, url checks exact URL; supplied checks all apply; without these fields only checks page health), select (dropdown), upload (file input).' },
                     selector: { type: 'string', description: 'CSS selector, text=, placeholder=, or label= locator for the target element.' },
-                    value: { type: 'string', description: 'Value to fill/select, milliseconds for wait, or file path for upload.' },
-                    url: { type: 'string', description: 'URL or route path for navigate action.' },
+                    value: { type: 'string', description: 'Value to fill/select, milliseconds for wait, expected contained visible text for assert, or file path for upload (relative to codebase_path or absolute).' },
+                    url: { type: 'string', description: 'URL or route path for navigate, or exact expected URL for assert.' },
                     timeout: { type: 'number', description: 'Step timeout in milliseconds. Default 15000.' },
                     description: { type: 'string', description: 'Human-readable description of what this step does.' },
                   },
@@ -710,7 +712,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
   const ctx = useAuth ? session.authContext : await getOrCreateUnauthContext()
   if (!ctx) throw new Error(useAuth ? 'No authenticated context. Call login first.' : 'Failed to create browser context.')
 
-  const result = await runScenarioInContext(scenario, ctx, session.config, session.screenshotsDir)
+  const result = await runOneScenario(scenario, ctx, session.config, session.screenshotsDir, session.projectRoot)
   session.results.push(result)
 
   // Collect screenshots from step logs
@@ -767,7 +769,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
     })
   }
 
-  return { content }
+  return { content, isError: result.status !== 'pass' }
 }
 
 // ─── get_coverage ─────────────────────────────────────────────────────────────
@@ -1171,7 +1173,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
 - Report: ${result.report_path} (opened in browser)`
 
-  return { content: [{ type: 'text', text: summary }] }
+  return { content: [{ type: 'text', text: summary }], isError: result.summary.failed > 0 || result.summary.errors > 0 }
 }
 
 // ─── run_converge ─────────────────────────────────────────────────────────────
@@ -1204,7 +1206,7 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
 - Report: ${result.report_path} (opened in browser)`
 
-  return { content: [{ type: 'text', text: roundsLine }] }
+  return { content: [{ type: 'text', text: roundsLine }], isError: result.summary.failed > 0 || result.summary.errors > 0 }
 }
 
 // ─── get_context ─────────────────────────────────────────────────────────────
@@ -1344,203 +1346,6 @@ async function handleCleanup() {
   session.config = null
 
   return { content: [{ type: 'text', text: 'Session cleaned up. All browsers closed.' }] }
-}
-
-// ─── Scenario Runner (reuses session browser) ────────────────────────────────
-
-async function runScenarioInContext(
-  scenario: TestScenario,
-  context: BrowserContext,
-  config: VibeConfig,
-  screenshotsDir: string
-): Promise<TestResult> {
-  const startTime = Date.now()
-  const screenshotPath = path.join(screenshotsDir, `${scenario.id}.png`)
-  const page = await context.newPage()
-  const stepLogs: Array<{ step: TestScenario['steps'][0]; status: 'ok' | 'failed' | 'skipped'; url_before: string; url_after: string; duration_ms: number; error?: string; selector_used?: string; screenshot_path?: string }> = []
-  const apiErrors: Array<{ url: string; status: number; body: string }> = []
-
-  try {
-    for (let i = 0; i < scenario.steps.length; i++) {
-      const step = scenario.steps[i]
-      const urlBefore = page.url()
-      const stepStart = Date.now()
-      let selectorUsed: string | undefined
-      let stepScreenshotPath: string | undefined
-
-      try {
-        selectorUsed = await executeStepOnPage(page, step, config.url, apiErrors)
-
-        if (['fill', 'click', 'navigate', 'select'].includes(step.action)) {
-          stepScreenshotPath = path.join(screenshotsDir, `${scenario.id}_step${i}.png`)
-          try { await page.screenshot({ path: stepScreenshotPath, fullPage: false }) } catch { stepScreenshotPath = undefined }
-        }
-
-        stepLogs.push({ step, status: 'ok', url_before: urlBefore, url_after: page.url(), duration_ms: Date.now() - stepStart, selector_used: selectorUsed, screenshot_path: stepScreenshotPath })
-      } catch (stepErr: unknown) {
-        stepScreenshotPath = path.join(screenshotsDir, `${scenario.id}_step${i}_error.png`)
-        try { await page.screenshot({ path: stepScreenshotPath, fullPage: false }) } catch { stepScreenshotPath = undefined }
-
-        stepLogs.push({ step, status: 'failed', url_before: urlBefore, url_after: page.url(), duration_ms: Date.now() - stepStart, error: stepErr instanceof Error ? stepErr.message : String(stepErr), selector_used: selectorUsed, screenshot_path: stepScreenshotPath })
-        throw stepErr
-      }
-    }
-
-    if (scenario.steps.some(s => s.action === 'fill')) {
-      await page.waitForTimeout(1500)
-    }
-
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
-
-    const currentPath = (() => { try { return new URL(page.url()).pathname } catch { return '' } })()
-    const startedOnForm = scenario.steps.some(s => s.action === 'fill')
-    const leftLoginPage = startedOnForm && !currentPath.includes('login') && !currentPath.includes('signin')
-    const hasApiErrors = apiErrors.length > 0
-
-    let verdict = 'Completed all steps'
-    let passed = true
-    if (hasApiErrors) {
-      verdict = `API error: ${apiErrors[0].status} ${apiErrors[0].url.slice(0, 80)}`
-      passed = false
-    } else if (leftLoginPage) {
-      verdict = `Navigated away from login to ${currentPath} — form action succeeded`
-    }
-
-    return {
-      scenario, status: passed ? 'pass' : 'fail', duration_ms: Date.now() - startTime,
-      screenshot_path: screenshotPath, current_url: page.url(), ai_verdict: verdict,
-      step_logs: stepLogs as TestResult['step_logs'], api_errors: apiErrors.length > 0 ? apiErrors : undefined,
-    }
-  } catch (err: unknown) {
-    try { await page.screenshot({ path: screenshotPath, fullPage: false }) } catch {}
-    return {
-      scenario, status: 'error', duration_ms: Date.now() - startTime,
-      screenshot_path: screenshotPath, current_url: page.url(),
-      failure_reason: err instanceof Error ? err.message : String(err),
-      step_logs: stepLogs as TestResult['step_logs'], api_errors: apiErrors.length > 0 ? apiErrors : undefined,
-    }
-  } finally {
-    await page.close()
-  }
-}
-
-async function executeStepOnPage(page: Page, step: TestScenario['steps'][0], baseUrl: string, apiErrors: Array<{ url: string; status: number; body: string }>): Promise<string | undefined> {
-  const timeout = step.timeout ?? 15000
-
-  switch (step.action) {
-    case 'navigate': {
-      const url = step.url?.startsWith('http') ? step.url : new URL(step.url ?? '/', baseUrl).href
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Math.max(timeout, 30000) })
-      return undefined
-    }
-    case 'fill': {
-      if (!step.value) return undefined
-      const locator = await resolveLocatorForStep(page, step, timeout)
-      await locator.locator.fill(step.value, { timeout })
-      return locator.name
-    }
-    case 'click': {
-      const locator = await resolveLocatorForStep(page, step, timeout)
-      const isSubmit = step.selector?.includes('submit') || step.description.toLowerCase().includes('submit')
-
-      if (isSubmit) {
-        const urlBefore = page.url()
-        const responsePromise = page.waitForResponse(
-          resp => (resp.url().includes('/api') || resp.url().includes('/auth')) && resp.status() > 0,
-          { timeout: 8000 }
-        ).catch(() => null)
-
-        await locator.locator.click({ timeout })
-
-        await Promise.race([
-          page.waitForURL(url => url.href !== urlBefore, { timeout: 15000 }).catch(() => {}),
-          page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}),
-        ])
-        await page.waitForTimeout(500)
-
-        const apiResp = await responsePromise
-        if (apiResp && apiResp.status() >= 400) {
-          const body = await apiResp.text().catch(() => '')
-          apiErrors.push({ url: apiResp.url(), status: apiResp.status(), body: body.slice(0, 200) })
-        }
-      } else {
-        await locator.locator.click({ timeout })
-      }
-      return locator.name
-    }
-    case 'select': {
-      if (!step.value) return undefined
-      const locator = await resolveLocatorForStep(page, step, timeout)
-      await locator.locator.selectOption(step.value, { timeout })
-      return locator.name
-    }
-    case 'wait': {
-      await page.waitForTimeout(parseInt(step.value ?? '1000'))
-      return undefined
-    }
-    case 'assert':
-      return undefined
-  }
-  return undefined
-}
-
-function mcpFillableByLabel(page: Page, text: string, exact: boolean) {
-  const base = exact ? page.getByLabel(text, { exact: true }) : page.getByLabel(text, { exact: false })
-  return base.locator('input, textarea, select, [contenteditable="true"]').first()
-}
-
-async function resolveLocatorForStep(page: Page, step: TestScenario['steps'][0], _timeout: number) {
-  const selector = step.selector ?? ''
-  const strategies: Array<{ locator: ReturnType<Page['locator']>; name: string }> = []
-
-  if (step.action === 'click' && (selector.includes('submit') || step.description.toLowerCase().includes('submit'))) {
-    strategies.push({ locator: page.locator('button[type="submit"], input[type="submit"]'), name: 'button[type="submit"]' })
-  }
-
-  if (step.action === 'fill') {
-    const labelFromSel = selector.match(/^label=(.+)$/)?.[1]?.trim()
-    if (labelFromSel) {
-      strategies.push({ locator: mcpFillableByLabel(page, labelFromSel, true), name: `getByLabel("${labelFromSel}")→input` })
-      strategies.push({ locator: mcpFillableByLabel(page, labelFromSel, false), name: `getByLabel("${labelFromSel}", fuzzy)→input` })
-    }
-    const phFromSel = selector.match(/^placeholder=(.+)$/)?.[1]?.trim()
-    if (phFromSel) {
-      strategies.push({ locator: page.getByPlaceholder(phFromSel, { exact: false }), name: `getByPlaceholder("${phFromSel}")` })
-    }
-    const labelHint = step.description.match(/Fill\s+(\w+)/i)?.[1]
-    if (labelHint) strategies.push({ locator: mcpFillableByLabel(page, labelHint, false), name: `getByLabel("${labelHint}")→input` })
-    const desc = step.description.toLowerCase()
-    if (desc.includes('email')) strategies.push({ locator: page.getByPlaceholder('email', { exact: false }), name: 'getByPlaceholder("email")' })
-    if (desc.includes('password')) strategies.push({ locator: page.getByPlaceholder('password', { exact: false }), name: 'getByPlaceholder("password")' })
-  }
-
-  if (selector && !selector.startsWith('text=') && !selector.startsWith('label=') && !selector.startsWith('placeholder=')) {
-    strategies.push({ locator: page.locator(selector), name: selector })
-  }
-
-  if (selector.startsWith('text=')) {
-    strategies.push({ locator: page.getByText(selector.slice(5), { exact: false }), name: `getByText("${selector.slice(5)}")` })
-  }
-
-  for (const s of strategies) {
-    try {
-      const count = await s.locator.count()
-      if (count > 0 && await s.locator.first().isVisible().catch(() => false)) {
-        return { locator: s.locator.first(), name: s.name }
-      }
-    } catch { continue }
-  }
-
-  if (selector.startsWith('label=')) {
-    const lt = selector.slice(6).trim()
-    return { locator: mcpFillableByLabel(page, lt, false), name: `fallback: getByLabel("${lt}")→input` }
-  }
-  if (selector.startsWith('placeholder=')) {
-    const ph = selector.slice(12)
-    return { locator: page.getByPlaceholder(ph, { exact: false }), name: `fallback: getByPlaceholder("${ph}")` }
-  }
-  if (selector) return { locator: page.locator(selector).first(), name: `fallback: ${selector}` }
-  throw new Error(`No valid selector for step: ${step.description}`)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

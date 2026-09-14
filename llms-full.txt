@@ -94,6 +94,13 @@ Returns: JSON with interaction results, API calls, timings + screenshot.
 ### 6. execute_scenario
 Runs a specific multi-step test scenario:
 - Actions: navigate, fill, click, select, wait, assert, upload
+- CLI and MCP share execution. assert checks selector visibility, contained visible text in value (selector or body), and exact URL in url. Every supplied condition must pass. CSS, text=, label=, and placeholder= targets are supported; named targets match exactly.
+- Description-only assert is a page-health check (visible body text and no visible error indicators), not verification of prose business claims. Use explicit fields for precise assertions.
+- Failed assertions stop execution with status fail and a reason. MCP also returns isError true. Empty scenarios and unknown actions are errors.
+- upload selects one local file using a required file-input selector and file path in value. Relative paths use codebase_path; hidden inputs work. Invalid files or inputs fail. Assert resulting UI separately to verify application processing.
+- Empty discovery or execution fails run/converge: CLI exits nonzero and MCP returns isError true. No success snapshot is written.
+- Scope /** includes the root and nested routes; * matches within one segment; a trailing /** includes its subtree root and descendants. Exclusions take precedence; other characters are literal.
+
 - Step-by-step execution with screenshots after each state change
 - Heuristic verification of outcomes (URL changes, toasts, API errors)
 - Reuses existing browser context (fast)
