@@ -4,12 +4,14 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
-## [0.4.3] — unreleased
+## [0.4.3] — 2026-09-14
 
 Focus: turning vibe-test into a real assistant for AI coding tools — config you provide actually gets used, dynamic routes are testable, and auth detection catches modern Next.js/NextAuth patterns. No new heuristic noise; only fixes that make the existing browser execution honest.
 
 ### Fixed
 
+- **`npx vibe-testing@latest` now resolves the CLI.** The package keeps the existing `vibe-test` and `vibe-test-mcp` binaries and adds a `vibe-testing` CLI alias matching the package name, so npm can select the intended executable.
+- **The installed `vibe-test-mcp` binary now starts with Node.** The source lacked an executable shebang, so invoking the npm binary directly caused the shell to parse JavaScript as shell commands.
 - **`config.auth.credentials` are now passed to the scenario generator.** Previously the configured email/password were used only for the initial `performLogin` call — the generated authenticated scenarios still filled `vt...@gmail.com` / `Test1234!`, so any project relying on real seeded test accounts (e.g. `teacher.dev@dhyanhq.local`) failed to log in. The credentials supplied in `vibe.config.json` now flow straight into `recommendations.saved_credentials` and into the login scenario steps.
 - **Login route detection no longer hardcoded to substring `"login"`.** Modern Next.js / NextAuth conventions use `/signin`, `/sign-in`, `/log-in`. All four are now recognized as login routes for scenario generation, redirect-to-login assertions, and the public-paths whitelist.
 - **`auth.login_url` from config (or `VIBE.md`) now binds the login route explicitly.** Useful for apps with non-standard login paths (e.g. `/access`, `/authenticate`) that wouldn't be caught by keyword matching.
@@ -28,6 +30,7 @@ Focus: turning vibe-test into a real assistant for AI coding tools — config yo
   ```
 
 - **7 new vitest cases** covering credentials forwarding, `/signin` detection, configurable `login_url`, `seed_routes` schema, `getSessionUser` auth detection, and `redirect('/signin')` auth detection. Test count: 56 → 63.
+- **2 package contract tests** covering the default `npx` alias and executable shebangs. Test count: 63 → 65.
 
 - **CLI feedback line** — after `run` and `converge` complete, the CLI prints one dim line pointing to GitHub issues for feedback.
 - **`docs/0.5.0-scope.md`** — scope document for the planned `vibe-scenarios.yaml` feature (AI-authored test plans as YAML, targeting 0.5.0).
