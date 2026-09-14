@@ -21,3 +21,4 @@ test/mcp-client.ts
 .env
 .env.*
 mcp-publisher
+.worktrees/
