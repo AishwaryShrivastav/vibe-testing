@@ -79,6 +79,7 @@ No test cases to write. The AI reads your source code to understand real field n
 - Creates project-level MCP configs and AI instruction files
 - Auto-detects your app's URL (reads `.env`, `vite.config`, framework defaults)
 - Creates `VIBE.md` (edit with your test credentials) and `vibe.config.json`
+- Installs the matching Playwright Chromium build
 
 ---
 
@@ -384,6 +385,7 @@ Options:
 ```bash
 npx vibe-testing@latest init                     # auto-detect editors, register globally + project
 npx vibe-testing@latest init --no-global         # project-level only, skip global registration
+npx vibe-testing@latest init --skip-browser-install
 npx vibe-testing@latest init --editor cursor     # only configure Cursor
 npx vibe-testing@latest init --editor claude-code windsurf
 ```
@@ -397,6 +399,9 @@ After init, edit `VIBE.md` with your login URL and test credentials.
 ```bash
 # Set up in current project
 npx vibe-testing@latest init
+
+# Install or repair the matching browser build
+npx vibe-testing@latest install-browser
 
 # Run tests against a URL
 npx vibe-testing@latest run http://localhost:3000
@@ -635,11 +640,12 @@ Yes. `init` detects Turborepo/pnpm/yarn workspaces and finds the frontend app au
 ## Requirements
 
 - Node.js >= 20 (the test suite uses vitest 4.x which requires Node 20+)
-- Playwright Chromium, install once with:
+- Playwright Chromium. `init` installs the matching build. To install or repair it directly:
   ```bash
-  npx playwright install chromium
+  npx vibe-testing@latest install-browser
   ```
-  (vibe-testing will prompt you if it's missing)
+
+`run` and `converge` check for the browser before scanning your project and print the same recovery command when it is missing.
 
 ### Docker
 
@@ -663,7 +669,7 @@ npx playwright install chromium
 npm run build   # tsc -> dist/
 npm run dev     # run CLI without building
 npm run mcp     # run MCP server without building
-npm test        # vitest, 63 tests
+npm test        # vitest, 69 tests
 ```
 
 See [CHANGELOG.md](./CHANGELOG.md) for version history. Bug reports and feature requests: [GitHub issues](https://github.com/AishwaryShrivastav/vibe-testing/issues).

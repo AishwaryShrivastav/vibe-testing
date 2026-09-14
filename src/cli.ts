@@ -5,6 +5,11 @@ import { readJSON, fileExists } from './utils/file.js'
 import { detectBaseUrl, detectMonorepo, findFrontendApp, detectFramework } from './engine/context/detector.js'
 import type { VibeConfig } from './types/config.js'
 import { logger } from './utils/logger.js'
+import {
+  chromiumInstallCommand,
+  installChromium,
+  isChromiumInstalled,
+} from './utils/playwright.js'
 import path from 'path'
 import fs from 'fs/promises'
 import { createRequire } from 'module'
@@ -373,6 +378,32 @@ function printFeedbackNudge(): void {
   logger.dim('Feedback or bugs: https://github.com/AishwaryShrivastav/vibe-testing/issues (a star helps others find it)')
 }
 
+async function requireChromium(): Promise<boolean> {
+  if (await isChromiumInstalled()) return true
+
+  logger.error('Chromium is missing for this version of vibe-testing.')
+  logger.dim(`Install it with: ${chromiumInstallCommand}`)
+  return false
+}
+
+async function setupChromium(): Promise<boolean> {
+  if (await isChromiumInstalled()) {
+    logger.success('Chromium is ready.')
+    return true
+  }
+
+  logger.info('Downloading the Chromium browser used by vibe-testing...')
+  const installed = await installChromium()
+  if (installed && await isChromiumInstalled()) {
+    logger.success('Chromium installed.')
+    return true
+  }
+
+  logger.error('Chromium could not be installed.')
+  logger.dim(`Try again with: ${chromiumInstallCommand}`)
+  return false
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 // If invoked with --mcp flag, start the MCP server directly
@@ -403,6 +434,11 @@ program
     codebase?: string
     scope?: string[]
   }) => {
+    if (!await requireChromium()) {
+      process.exitCode = 1
+      return
+    }
+
     const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
     const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
 
@@ -453,6 +489,11 @@ program
     targetPassRate: string
     maxGaps: string
   }) => {
+    if (!await requireChromium()) {
+      process.exitCode = 1
+      return
+    }
+
     const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
     const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
 
@@ -493,8 +534,9 @@ program
   .command('init')
   .description('Set up Vibe Test — auto-detects editors (Cursor, Claude Code, Windsurf, VS Code, Roo Code) and configures all of them globally + per-project')
   .option('--no-global', 'Skip global editor config registration (project-level only)')
+  .option('--skip-browser-install', 'Skip the Chromium download')
   .option('--editor <names...>', 'Only configure specific editors (cursor, claude-code, windsurf, vscode, roo)')
-  .action(async (opts: { global?: boolean; editor?: string[] }) => {
+  .action(async (opts: { global?: boolean; skipBrowserInstall?: boolean; editor?: string[] }) => {
     const cwd = process.cwd()
     const projectName = path.basename(cwd)
     let created = 0
@@ -636,6 +678,16 @@ program
       created++
     }
 
+    console.log('')
+    if (opts.skipBrowserInstall) {
+      if (!await isChromiumInstalled()) {
+        logger.warn(`Chromium is not installed. Run ${chromiumInstallCommand} before your first test.`)
+      }
+    } else if (!await setupChromium()) {
+      process.exitCode = 1
+      return
+    }
+
     // Summary
     console.log('')
     if (created > 0) {
@@ -654,6 +706,13 @@ program
     console.log('')
     logger.dim('  Your editor will pick up vibe-test tools automatically in every project.')
     console.log('')
+  })
+
+program
+  .command('install-browser')
+  .description('Install the Chromium browser used by this version of vibe-testing')
+  .action(async () => {
+    if (!await setupChromium()) process.exitCode = 1
   })
 
 program
