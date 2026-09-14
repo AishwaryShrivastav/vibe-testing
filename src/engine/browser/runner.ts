@@ -392,6 +392,7 @@ export async function runOneScenario(
       current_url: page.url(),
       navigated_url: navigatedUrl,
       ai_verdict: verdict.explanation,
+      verification_status: verdict.verification,
       step_logs: stepLogs,
       api_errors: apiErrors.length > 0 ? apiErrors : undefined,
     }
@@ -406,6 +407,7 @@ export async function runOneScenario(
       current_url: page.url(),
       navigated_url: navigatedUrl,
       failure_reason: err instanceof Error ? err.message : String(err),
+      verification_status: 'not_verified',
       step_logs: stepLogs,
       api_errors: apiErrors.length > 0 ? apiErrors : undefined,
     }

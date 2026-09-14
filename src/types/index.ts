@@ -135,6 +135,7 @@ export interface TestScenario {
 }
 
 export type TestStatus = 'pass' | 'fail' | 'skip' | 'error'
+export type VerificationStatus = 'outcome_verified' | 'smoke_check_passed' | 'not_verified'
 
 export interface StepLog {
   step: TestStep
@@ -162,6 +163,7 @@ export interface TestResult {
   navigated_url?: string
   failure_reason?: string
   ai_verdict?: string
+  verification_status?: VerificationStatus
   step_logs: StepLog[]
   api_errors?: ApiError[]
 }

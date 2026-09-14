@@ -1,10 +1,11 @@
 import { Page } from 'playwright'
-import { TestScenario, ApiError } from '../../types/index.js'
-import { hasExplicitAssertion } from './assertions.js'
+import { TestScenario, ApiError, VerificationStatus } from '../../types/index.js'
+import { hasExplicitAssertion, hasStrongExplicitAssertion } from './assertions.js'
 
 export interface VerificationResult {
   passed: boolean
   explanation: string
+  verification: VerificationStatus
 }
 
 export async function verifyResult(
@@ -33,10 +34,12 @@ export async function verifyResult(
     return {
       passed: false,
       explanation: `Authentication failed — expected ${scenario.route} but ended up on ${currentPath}`,
+      verification: 'not_verified',
     }
   }
 
   const isFormScenario = scenario.steps.some(s => s.action === 'fill')
+  const hasProofAssertion = scenario.steps.some(hasStrongExplicitAssertion)
   const expectsError = scenario.expected_outcome.toLowerCase().includes('error') ||
     scenario.expected_outcome.toLowerCase().includes('validation') ||
     scenario.name.toLowerCase().includes('invalid') ||
@@ -48,13 +51,18 @@ export async function verifyResult(
     return {
       passed: false,
       explanation: `API error: ${firstErr.status} ${firstErr.body.slice(0, 100)}`,
+      verification: 'not_verified',
     }
   }
 
   // The runner already evaluated explicit assertions. Prose heuristics must not
   // override a successfully checked expected error UI or a short valid page.
   if (scenario.steps.some(hasExplicitAssertion)) {
-    return { passed: true, explanation: 'All explicit page assertions passed' }
+    return {
+      passed: true,
+      explanation: 'All explicit page assertions passed',
+      verification: hasProofAssertion ? 'outcome_verified' : 'smoke_check_passed',
+    }
   }
 
   return heuristicVerification(scenario, currentUrl, hasErrorMessage, hasSuccessIndicator, page, wasRedirected, toastInfo, apiErrors)
@@ -156,15 +164,27 @@ async function heuristicVerification(
   if (apiErrors?.length && isFormScenario) {
     const firstErr = apiErrors[0]
     if (expectsError) {
-      return { passed: true, explanation: `Expected API error: ${firstErr.status} ${firstErr.body.slice(0, 80)}` }
+      return {
+        passed: true,
+        explanation: `Expected API error: ${firstErr.status} ${firstErr.body.slice(0, 80)}`,
+        verification: 'not_verified',
+      }
     }
-    return { passed: false, explanation: `API returned error: ${firstErr.status} ${firstErr.body.slice(0, 80)}` }
+    return {
+      passed: false,
+      explanation: `API returned error: ${firstErr.status} ${firstErr.body.slice(0, 80)}`,
+      verification: 'not_verified',
+    }
   }
 
   // Toast-based verdict
   if (toastInfo.found) {
     if (toastInfo.type === 'success') {
-      return { passed: true, explanation: `Success toast: "${toastInfo.text}"` }
+      return {
+        passed: true,
+        explanation: `Success toast: "${toastInfo.text}"`,
+        verification: 'smoke_check_passed',
+      }
     }
     if (toastInfo.type === 'error') {
       return {
@@ -172,6 +192,7 @@ async function heuristicVerification(
         explanation: expectsError
           ? `Expected error toast: "${toastInfo.text}"`
           : `Error toast: "${toastInfo.text}"`,
+        verification: expectsError ? 'outcome_verified' : 'not_verified',
       }
     }
   }
@@ -185,17 +206,33 @@ async function heuristicVerification(
 
   if (expectsNoRedirect) {
     if (currentPath === scenario.route || currentPath.startsWith(scenario.route)) {
-      return { passed: true, explanation: `Page loaded at ${currentPath} without redirect` }
+      return {
+        passed: true,
+        explanation: `Page loaded at ${currentPath} without redirect`,
+        verification: 'smoke_check_passed',
+      }
     }
     if (currentPath.includes('login') || currentPath.includes('signin')) {
-      return { passed: false, explanation: `Redirected to ${currentPath} — authentication may have failed` }
+      return {
+        passed: false,
+        explanation: `Redirected to ${currentPath} — authentication may have failed`,
+        verification: 'not_verified',
+      }
     }
-    return { passed: false, explanation: `Unexpected redirect from ${scenario.route} to ${currentPath}` }
+    return {
+      passed: false,
+      explanation: `Unexpected redirect from ${scenario.route} to ${currentPath}`,
+      verification: 'not_verified',
+    }
   }
 
   if (expectsRedirectToLogin) {
     if (currentPath.includes('login') || currentPath.includes('signin')) {
-      return { passed: true, explanation: `Correctly redirected to login page (${currentPath})` }
+      return {
+        passed: true,
+        explanation: `Correctly redirected to login page (${currentPath})`,
+        verification: 'smoke_check_passed',
+      }
     }
     // SPAs often keep the URL on the protected route while showing an auth gate in-page
     const pwdVisible = await page.locator('input[type="password"]:visible').count().then(n => n > 0).catch(() => false)
@@ -205,12 +242,21 @@ async function heuristicVerification(
       return {
         passed: true,
         explanation: `Auth gate visible on page (SPA pattern) while URL remains ${currentPath}`,
+        verification: 'outcome_verified',
       }
     }
     if (currentPath === scenario.route) {
-      return { passed: false, explanation: `Expected redirect to login but stayed on ${currentPath}` }
+      return {
+        passed: false,
+        explanation: `Expected redirect to login but stayed on ${currentPath}`,
+        verification: 'not_verified',
+      }
     }
-    return { passed: true, explanation: `Redirected from ${scenario.route} to ${currentPath}` }
+    return {
+      passed: true,
+      explanation: `Redirected from ${scenario.route} to ${currentPath}`,
+      verification: 'smoke_check_passed',
+    }
   }
 
   // Navigation tests
@@ -219,11 +265,16 @@ async function heuristicVerification(
     return {
       passed: false,
       explanation: `Unexpected redirect: navigated to ${redirect.from} but ended up on ${redirect.to} (likely requires authentication)`,
+      verification: 'not_verified',
     }
   }
 
   if (isNavigationTest && currentPath !== scenario.route) {
-    return { passed: true, explanation: `Successfully navigated to ${currentPath}` }
+    return {
+      passed: true,
+      explanation: `Successfully navigated to ${currentPath}`,
+      verification: 'smoke_check_passed',
+    }
   }
 
   // Form submission: URL changed = likely success
@@ -231,24 +282,52 @@ async function heuristicVerification(
     if (redirect.redirected) {
       const landedOnAuth = redirect.to && /login|signin|auth/.test(redirect.to)
       if (landedOnAuth) {
-        return { passed: false, explanation: `Form submitted but redirected to login (${redirect.to})` }
+        return {
+          passed: false,
+          explanation: `Form submitted but redirected to login (${redirect.to})`,
+          verification: 'not_verified',
+        }
       }
-      return { passed: true, explanation: `Navigated from ${scenario.route} to ${currentPath} after form submission` }
+      return {
+        passed: true,
+        explanation: `Navigated from ${scenario.route} to ${currentPath} after form submission`,
+        verification: 'smoke_check_passed',
+      }
     }
-    return { passed: true, explanation: `Navigated away from ${scenario.route} to ${currentPath} — form action succeeded` }
+    return {
+      passed: true,
+      explanation: `Navigated away from ${scenario.route} to ${currentPath} — form action succeeded`,
+      verification: 'smoke_check_passed',
+    }
   }
 
   // Smoke test: "page loads"
   const isSmokeTest = scenario.name.includes('page loads') || scenario.name.includes('accessible when')
 
   if (isSmokeTest) {
-    if (isBlankPage)  return { passed: false, explanation: 'Page appears blank — no content rendered' }
-    if (isErrorPage)  return { passed: false, explanation: 'Error page detected (404/500)' }
+    if (isBlankPage)  return {
+      passed: false,
+      explanation: 'Page appears blank — no content rendered',
+      verification: 'not_verified',
+    }
+    if (isErrorPage)  return {
+      passed: false,
+      explanation: 'Error page detected (404/500)',
+      verification: 'not_verified',
+    }
     if (hasContent && !hasErrorMessage) {
-      return { passed: true, explanation: 'Page loaded with content, no errors detected' }
+      return {
+        passed: true,
+        explanation: 'Page loaded with content, no errors detected',
+        verification: 'smoke_check_passed',
+      }
     }
     if (hasErrorMessage) {
-      return { passed: false, explanation: 'Page loaded but error indicators found on page' }
+      return {
+        passed: false,
+        explanation: 'Page loaded but error indicators found on page',
+        verification: 'not_verified',
+      }
     }
   }
 
@@ -259,39 +338,68 @@ async function heuristicVerification(
       explanation: expectsError
         ? 'Validation/error message displayed as expected'
         : 'Unexpected error message found on page',
+      verification: expectsError ? 'outcome_verified' : 'not_verified',
     }
   }
 
   if (hasSuccessIndicator) {
-    return { passed: true, explanation: 'Success indicator found on page' }
+    return {
+      passed: true,
+      explanation: 'Success indicator found on page',
+      verification: 'smoke_check_passed',
+    }
   }
 
   // Search/filter tests stay on same page
   const isSearchOrFilter = /search|filter|sort/i.test(scenario.name)
   if (isSearchOrFilter && currentPath === scenario.route) {
-    return { passed: true, explanation: `Search/filter executed on ${currentPath} — page updated in place` }
+    return {
+      passed: true,
+      explanation: `Search/filter executed on ${currentPath} — page updated in place`,
+      verification: 'smoke_check_passed',
+    }
   }
 
   // Create/dialog tests
   const isCreateTest = /create|add new|cancel/i.test(scenario.name)
   if (isCreateTest && currentPath === scenario.route && !hasErrorMessage) {
-    return { passed: true, explanation: 'Create action executed on page' }
+    return {
+      passed: true,
+      explanation: 'Create action executed on page',
+      verification: 'smoke_check_passed',
+    }
   }
 
   // Data display verification
   const isDataTest = /data renders|content visible/i.test(scenario.name)
   if (isDataTest && hasContent && !isBlankPage && !isErrorPage) {
-    return { passed: true, explanation: 'Page has content rendered' }
+    return {
+      passed: true,
+      explanation: 'Page has content rendered',
+      verification: 'smoke_check_passed',
+    }
   }
 
   const hasSubmitClick = scenario.steps.some(s => s.action === 'click' && (s.selector?.includes('submit') || s.description.toLowerCase().includes('submit')))
   if (isFormScenario && hasSubmitClick && currentPath === scenario.route && !expectsError) {
-    return { passed: false, explanation: `Form stayed on ${currentPath} with no success indication` }
+    return {
+      passed: false,
+      explanation: `Form stayed on ${currentPath} with no success indication`,
+      verification: 'not_verified',
+    }
   }
 
   if (hasContent && !hasErrorMessage && !isErrorPage) {
-    return { passed: true, explanation: 'Page rendered with content, no errors detected' }
+    return {
+      passed: true,
+      explanation: 'Page rendered with content, no errors detected',
+      verification: 'smoke_check_passed',
+    }
   }
 
-  return { passed: false, explanation: 'Could not determine result — review screenshot manually' }
+  return {
+    passed: false,
+    explanation: 'Could not determine result — review screenshot manually',
+    verification: 'not_verified',
+  }
 }

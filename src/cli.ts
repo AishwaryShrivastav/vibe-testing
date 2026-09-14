@@ -13,6 +13,7 @@ import {
 import path from 'path'
 import fs from 'fs/promises'
 import { createRequire } from 'module'
+import { fileURLToPath } from 'url'
 const require = createRequire(import.meta.url)
 const PKG_VERSION: string = require('../package.json').version
 
@@ -378,6 +379,37 @@ function printFeedbackNudge(): void {
   logger.dim('Feedback or bugs: https://github.com/AishwaryShrivastav/vibe-testing/issues (a star helps others find it)')
 }
 
+export function buildInitCompletionPrompt(input: { appUrl: string }): string {
+  const appUrl = input.appUrl.trim()
+  let route = '/'
+  try {
+    route = new URL(appUrl).pathname || '/'
+  } catch { /* keep default */ }
+
+  return [
+    'Try this ready-to-paste, URL-scoped smoke test:',
+    `1) scan_codebase({ "codebase_path": ".", "url": "${appUrl}" })`,
+    '2) get_context({ "feature": "' + route + '" })',
+    '3) execute_scenario({',
+    '  "scenario": {',
+    `    "id": "smoke-${route.replace(/\\W+/g, '-').replace(/^-|-$/g, '') || 'route'}",`,
+    `    "name": "Smoke check: ${route}",`,
+    `    "route": "${route}",`,
+    '    "priority": "medium",',
+    '    "steps": [',
+    `      { "action": "navigate", "url": "${route}", "description": "Open the route" },`,
+    `      { "action": "assert", "url": "${appUrl}", "description": "Verify request ends on the scoped URL" }`,
+    '    ],',
+    `    "expected_outcome": "Exact URL matches ${appUrl} and route is reachable with explicit assertions",`,
+    '    "is_gap": false,',
+    `    "generated_by": "heuristic"`,
+    '  }',
+    '})',
+    '',
+    'This includes explicit assertions so the result is reported as outcome verified when it passes.',
+  ].join('\\n')
+}
+
 async function requireChromium(): Promise<boolean> {
   if (await isChromiumInstalled()) return true
 
@@ -541,6 +573,7 @@ program
     const projectName = path.basename(cwd)
     let created = 0
     let skipped = 0
+    let initializedUrl = ''
 
     logger.section(`Setting up Vibe Test in ${projectName}`)
 
@@ -649,6 +682,10 @@ program
     // vibe.config.json — auto-detect port from .env / vite.config / framework defaults
     const configPath = path.join(cwd, 'vibe.config.json')
     if (await fileExists(configPath)) {
+      try {
+        const existingConfig = await readJSON<{ url?: string }>(configPath)
+        initializedUrl = existingConfig?.url?.trim() || ''
+      } catch { /* ignore parse failures */ }
       logger.dim('    vibe.config.json already exists')
       skipped++
     } else {
@@ -665,6 +702,7 @@ program
 
       const framework = await detectFramework(scanPath)
       const detectedUrl = await detectBaseUrl(scanPath, framework)
+      initializedUrl = detectedUrl
       const defaultConfig = {
         url: detectedUrl,
         mode: 'deep',
@@ -698,11 +736,11 @@ program
 
     console.log('')
     logger.info('Next steps:')
-    logger.dim('  1. Edit VIBE.md with your login URL and test credentials')
-    logger.dim('  2. Confirm the URL in vibe.config.json matches your running app')
-    logger.dim('  3. Open your editor and ask:')
+    const promptUrl = initializedUrl || 'http://localhost:3000'
+    const prompt = buildInitCompletionPrompt({ appUrl: promptUrl })
+    logger.dim('  1. Open your editor and paste the starter flow below:')
     console.log('')
-    console.log('     "Scan this codebase and test it against <your-url>."')
+    console.log(prompt.split('\\n').map(l => `     ${l}`).join('\\n'))
     console.log('')
     logger.dim('  Your editor will pick up vibe-test tools automatically in every project.')
     console.log('')
@@ -744,6 +782,8 @@ program
     }
   })
 
-program.parse()
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  program.parse()
+}
 
 } // end if not --mcp
