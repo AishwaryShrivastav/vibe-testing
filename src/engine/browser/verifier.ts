@@ -192,7 +192,7 @@ async function heuristicVerification(
         explanation: expectsError
           ? `Expected error toast: "${toastInfo.text}"`
           : `Error toast: "${toastInfo.text}"`,
-        verification: expectsError ? 'outcome_verified' : 'not_verified',
+        verification: expectsError ? 'smoke_check_passed' : 'not_verified',
       }
     }
   }
@@ -242,7 +242,7 @@ async function heuristicVerification(
       return {
         passed: true,
         explanation: `Auth gate visible on page (SPA pattern) while URL remains ${currentPath}`,
-        verification: 'outcome_verified',
+        verification: 'smoke_check_passed',
       }
     }
     if (currentPath === scenario.route) {
@@ -338,7 +338,7 @@ async function heuristicVerification(
       explanation: expectsError
         ? 'Validation/error message displayed as expected'
         : 'Unexpected error message found on page',
-      verification: expectsError ? 'outcome_verified' : 'not_verified',
+      verification: expectsError ? 'smoke_check_passed' : 'not_verified',
     }
   }
 
