@@ -4,6 +4,20 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [0.4.5] — 2026-09-15
+
+### Added
+
+- **Evidence-based QA verdicts.** Reports now distinguish outcomes proved by explicit URL or element assertions from browser steps that completed without proving the expected product result.
+- **Verification details in HTML reports.** Each scenario shows the assertion evidence behind its status so a builder can see what was checked and what still needs human review.
+- **Interactive init prompt.** `init` asks whether to install Chromium when running interactively while preserving predictable behavior in scripts and CI.
+
+### Fixed
+
+- **Heuristic checks no longer overclaim success.** Expected error messages, SPA auth gates, and DOM error checks are reported as smoke checks unless an explicit assertion proves the outcome.
+
+---
+
 ## [0.4.4] — 2026-09-14
 
 ### Added
