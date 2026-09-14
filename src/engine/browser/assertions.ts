@@ -15,6 +15,18 @@ export function hasExplicitAssertion(step: TestStep): boolean {
   return step.action === 'assert' && (step.selector !== undefined || step.value !== undefined || step.url !== undefined)
 }
 
+/** Explicit assertions that can be used as outcome-level proof. */
+export function hasStrongExplicitAssertion(step: TestStep): boolean {
+  if (step.action !== 'assert') return false
+  if (step.url !== undefined && step.url.trim() !== '') return true
+  return (
+    typeof step.selector === 'string' &&
+    step.selector.trim() !== '' &&
+    typeof step.value === 'string' &&
+    step.value.trim() !== ''
+  )
+}
+
 /** selector = visible target; value = contained visible text; url = exact URL. */
 export async function assertPage(page: Page, step: TestStep, baseUrl: string): Promise<string | undefined> {
   const timeout = step.timeout ?? 15000
