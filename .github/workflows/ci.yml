@@ -44,9 +44,27 @@ jobs:
       - name: Verify CLI starts
         run: node dist/cli.js --version
 
+  container:
+    name: Build & Smoke Test Container
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build container
+        run: docker build --tag vibe-testing:ci .
+
+      - name: Verify container MCP handshake
+        run: |
+          set -o pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"container-smoke","version":"1.0.0"}}}' | \
+            timeout 10 docker run --rm -i vibe-testing:ci | \
+            grep "\"version\":\"$VERSION\""
+
   publish-npm:
     name: Publish to npm
-    needs: build
+    needs: [build, container]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

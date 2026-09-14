@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import packageJson from '../package.json'
+import serverJson from '../server.json'
 import fs from 'fs'
 import path from 'path'
 
@@ -16,5 +17,14 @@ describe('package executables', () => {
       const firstLine = fs.readFileSync(path.resolve(source), 'utf8').split('\n')[0]
       expect(firstLine, `${source} needs a Node shebang`).toBe('#!/usr/bin/env node')
     }
+  })
+})
+
+describe('MCP distribution metadata', () => {
+  it('keeps the registry manifest aligned with the npm package', () => {
+    expect(serverJson.version).toBe(packageJson.version)
+    expect(serverJson.packages).toHaveLength(1)
+    expect(serverJson.packages[0].identifier).toBe(packageJson.name)
+    expect(serverJson.packages[0].version).toBe(packageJson.version)
   })
 })
