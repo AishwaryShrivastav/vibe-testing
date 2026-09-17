@@ -1,0 +1,52 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "vibe-testing",
+  "display_name": "vibe-testing",
+  "version": "0.4.5",
+  "description": "Code-aware browser testing for AI coding agents.",
+  "long_description": "Read the app's routes and forms, run browser checks with Playwright, compare runs, and produce an evidence-backed QA report. The server makes no LLM calls and needs no API key.",
+  "author": {
+    "name": "Aishwary Shrivastav",
+    "url": "https://github.com/AishwaryShrivastav"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AishwaryShrivastav/vibe-testing.git"
+  },
+  "homepage": "https://aishwaryshrivastav.github.io/vibe-testing/",
+  "documentation": "https://github.com/AishwaryShrivastav/vibe-testing#readme",
+  "support": "https://github.com/AishwaryShrivastav/vibe-testing/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/mcp-server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/mcp-server.js"],
+      "env": {}
+    }
+  },
+  "tools": [
+    { "name": "scan_codebase", "description": "Map routes, forms, existing tests, coverage gaps, and test scenarios." },
+    { "name": "login", "description": "Create an authenticated browser session for later checks." },
+    { "name": "scan_page_elements", "description": "List interactive elements and capture the current page." },
+    { "name": "explore_page", "description": "Exercise page controls and record UI and API behavior." },
+    { "name": "execute_scenario", "description": "Run one browser scenario with step logs and screenshots." },
+    { "name": "get_coverage", "description": "Return route coverage, gaps, and suggested checks." },
+    { "name": "generate_report", "description": "Create a self-contained HTML QA report." },
+    { "name": "take_screenshot", "description": "Capture a route with optional authentication." },
+    { "name": "suggest_tests", "description": "Prioritize test scenarios from code and coverage evidence." },
+    { "name": "run_full_test", "description": "Scan the app, run generated scenarios, and write a report." },
+    { "name": "run_converge", "description": "Repeat testing and compare the current run with the previous run." },
+    { "name": "get_context", "description": "Return current session, product-model, and result state." },
+    { "name": "cleanup", "description": "Close browser sessions and release test resources." }
+  ],
+  "tools_generated": false,
+  "keywords": ["testing", "playwright", "qa", "browser", "vibe-coding"],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": { "node": ">=20" }
+  }
+}

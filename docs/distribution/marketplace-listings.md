@@ -18,7 +18,7 @@ Use the same product facts on every listing. Change only the length required by 
 
 **License:** MIT
 
-**Icon:** `assets/vibe-testing-icon-400.png`
+**Icon:** `assets/vibe-testing-icon-512.png` for MCPB; `assets/vibe-testing-icon-400.png` where a marketplace requires 400 by 400 pixels.
 
 **MCP command:** `npx -y vibe-testing@latest --mcp`
 
@@ -50,17 +50,14 @@ The final submission uses the owner's Anthropic account and remains an account/U
 
 ## Smithery
 
-Smithery's current publishing documentation requires local stdio servers to be uploaded as a pre-built MCPB bundle. The npm command alone is not an accepted Smithery artifact.
+Smithery's current publishing documentation accepts local stdio servers as pre-built MCPB bundles. Prepare the validated artifact with:
 
-Prepare the bundle in a separate release task:
+```bash
+npm ci
+npm run build:mcpb
+```
 
-1. Build the package with `npm ci && npm run build`.
-2. Create an MCPB `manifest.json` using specification 0.3 or newer.
-3. Bundle `dist/`, production dependencies, package metadata, README, and the icon.
-4. Validate and pack with `npx @anthropic-ai/mcpb validate` and `npx @anthropic-ai/mcpb pack`.
-5. Upload the resulting `.mcpb` through the Smithery publish flow documented at https://smithery.ai/docs/build/publish.
-
-Bundling is intentionally separate from this website commit because it creates a second distributable that needs clean-machine testing and release ownership.
+The command writes `artifacts/vibe-testing-0.4.5.mcpb`. It validates schema 0.4, installs locked production dependencies, tests the stdio handshake and 13-tool list, packs the archive, and inspects the result. Uploading it through https://smithery.ai/new remains a manual account action. The [MCPB guide](mcpb.md) records the runtime prerequisite and listing facts.
 
 ## PulseMCP
 

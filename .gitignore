@@ -22,3 +22,5 @@ test/mcp-client.ts
 .env.*
 mcp-publisher
 .worktrees/
+.mcpb-build/
+artifacts/*.mcpb

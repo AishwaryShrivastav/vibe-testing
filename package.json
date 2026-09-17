@@ -27,6 +27,7 @@
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "mcp": "tsx src/mcp-server.ts",
+    "build:mcpb": "node scripts/build-mcpb.mjs",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
