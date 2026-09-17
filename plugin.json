@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "vibe-testing",
+  "version": "0.4.5",
+  "description": "Code-aware browser testing and release QA for AI coding agents.",
+  "author": {
+    "name": "Aishwary Shrivastav"
+  },
+  "homepage": "https://github.com/AishwaryShrivastav/vibe-testing",
+  "repository": "https://github.com/AishwaryShrivastav/vibe-testing",
+  "license": "MIT",
+  "keywords": [
+    "browser-testing",
+    "qa",
+    "playwright",
+    "mcp",
+    "vibe-coding"
+  ]
+}

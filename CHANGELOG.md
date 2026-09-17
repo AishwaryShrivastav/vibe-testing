@@ -4,6 +4,12 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Portable Agent Plugin packaging.** The repository now bundles the MCP server with a `release-qa` Agent Skill for evidence-backed browser testing and release verdicts. It includes Agent Plugins 1.0, Claude Code, and marketplace manifests so the same QA workflow can be distributed beyond MCP directories.
+
 ## [0.4.5] — 2026-09-15
 
 ### Added

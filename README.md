@@ -10,6 +10,8 @@
 
 vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 13 testing tools, or as a standalone CLI.
 
+The repository is also an [Agent Plugin](https://agent-plugins.org/) with a `release-qa` skill. Compatible agents get both the testing tools and a senior-QA workflow for coverage, evidence, regression checks, and a clear release verdict.
+
 ```bash
 cd /path/to/your/project
 npx vibe-testing@latest init
@@ -84,6 +86,21 @@ No test cases to write. The AI reads your source code to understand real field n
 ---
 
 ## MCP setup
+
+### Agent Plugin
+
+Install this repository as a plugin when your agent supports the Agent Plugins standard. It includes the portable `release-qa` skill and starts the published npm MCP server with no API key.
+
+- Cursor: submit or install `https://github.com/AishwaryShrivastav/vibe-testing` as an Agent Plugin.
+- Claude Code:
+
+  ```bash
+  claude plugin marketplace add AishwaryShrivastav/vibe-testing
+  claude plugin install vibe-testing@vibe-testing
+  ```
+- Other compatible agents: load the repository root containing `plugin.json`, `skills/`, and `mcp.json`.
+
+The direct MCP and CLI setup below remains available for editors without plugin support.
 
 ### Option 1: automatic (recommended)
 

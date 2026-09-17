@@ -1,0 +1,14 @@
+{
+  "name": "vibe-testing",
+  "owner": {
+    "name": "Aishwary Shrivastav"
+  },
+  "description": "Release QA tools and workflow for AI-built web apps.",
+  "plugins": [
+    {
+      "name": "vibe-testing",
+      "source": ".",
+      "description": "Code-aware browser testing with regression memory and evidence-backed release verdicts."
+    }
+  ]
+}
