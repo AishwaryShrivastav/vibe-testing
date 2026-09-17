@@ -67,9 +67,34 @@ jobs:
             timeout 10 docker run --rm -i vibe-testing:ci | \
             grep "\"version\":\"$VERSION\""
 
+  mcpb:
+    name: Build MCPB bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and verify MCPB
+        run: npm run build:mcpb
+
+      - name: Save bundle for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-testing-mcpb
+          path: artifacts/*.mcpb
+          if-no-files-found: error
+
   publish-npm:
     name: Publish to npm
-    needs: [build, container]
+    needs: [build, container, mcpb]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

@@ -104,6 +104,17 @@ Install this repository as a plugin when your agent supports the Agent Plugins s
 
 The direct MCP and CLI setup below remains available for editors without plugin support.
 
+### MCPB bundle
+
+Claude Desktop and other MCPB hosts can install one local bundle. Build and validate it from this repository:
+
+```bash
+npm ci
+npm run build:mcpb
+```
+
+The artifact is written to `artifacts/vibe-testing-<version>.mcpb`. See the [MCPB distribution guide](docs/distribution/mcpb.md) for the bundle contents, validation steps, Smithery handoff, and the one-time Playwright Chromium prerequisite.
+
 ### Option 1: automatic (recommended)
 
 ```bash
