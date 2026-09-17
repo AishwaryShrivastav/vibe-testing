@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Code-aware browser testing for AI coding agents. Find regressions, preserve test memory, and get a release verdict with evidence.">
+  <meta name="theme-color" content="#f3f0e8">
+  <meta name="analytics-endpoint" content="">
+  <meta property="og:title" content="vibe-testing | Your agent's senior QA layer">
+  <meta property="og:description" content="Run browser tests against your real routes, remember what changed, and review the evidence before release.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://aishwaryshrivastav.github.io/vibe-testing/">
+  <meta property="og:image" content="https://aishwaryshrivastav.github.io/vibe-testing/social-card.png">
+  <link rel="canonical" href="https://aishwaryshrivastav.github.io/vibe-testing/">
+  <title>vibe-testing | Your agent's senior QA layer</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="#top" aria-label="vibe-testing home">
+      <svg viewBox="0 0 30 30" aria-hidden="true"><path d="M4 5h22v20H4z"/><path d="M9 11h4v4H9zm8 0h4v4h-4zM9 19h12"/></svg>
+      <span>vibe-testing</span>
+      <span class="version">v0.4.5</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a href="#report">Report</a>
+      <a href="#tools">13 tools</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/AishwaryShrivastav/vibe-testing" data-event="nav_github">GitHub</a>
+    </nav>
+    <a class="header-action" href="#install" data-event="nav_install">Run your first check</a>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <p class="kicker">Release review / browser evidence / memory</p>
+        <h1>Your coding agent shipped it. <em>Now test what changed.</em></h1>
+        <p class="hero-intro">vibe-testing reads the routes and forms in your codebase, tests them in Playwright, and remembers the result. The next run tells you which fix held and which route regressed.</p>
+
+        <div class="command" data-command-block>
+          <code>npx vibe-testing@latest init</code>
+          <button type="button" data-copy-command data-event="hero_copy_install" aria-label="Copy install command">
+            <span data-copy-label>Copy</span>
+          </button>
+        </div>
+
+        <div class="hero-links">
+          <a class="button primary" href="https://www.npmjs.com/package/vibe-testing" data-event="hero_npm">Open on npm</a>
+          <a class="button text" href="https://github.com/AishwaryShrivastav/vibe-testing" data-event="hero_github">Read the source</a>
+        </div>
+
+        <dl class="proof-strip" aria-label="Product facts">
+          <div><dt>13</dt><dd>testing tools</dd></div>
+          <div><dt>0</dt><dd>internal LLM calls</dd></div>
+          <div><dt>3</dt><dd>ways to run</dd></div>
+        </dl>
+      </div>
+
+      <div class="dossier" aria-label="Example regression report">
+        <div class="dossier-topline">
+          <span>QA-048 / EXAMPLE REPORT</span>
+          <div class="run-switch" role="group" aria-label="Select report run">
+            <button type="button" data-run="previous">Previous</button>
+            <button type="button" data-run="current" class="active" aria-pressed="true">Current</button>
+          </div>
+        </div>
+
+        <div class="verdict" data-verdict>
+          <div>
+            <p>Release verdict</p>
+            <strong>BLOCKED</strong>
+          </div>
+          <span class="verdict-stamp">1 regression</span>
+        </div>
+
+        <div class="run-meta">
+          <span><b>project</b> atlas-web</span>
+          <span><b>commit</b> 31da2e7</span>
+          <span><b>duration</b> 42.8s</span>
+        </div>
+
+        <section class="delta" aria-labelledby="delta-title">
+          <div class="section-label"><span id="delta-title">Changes since last run</span><code>snapshot_diff</code></div>
+          <div class="delta-row fixed">
+            <span class="delta-mark">FIXED</span>
+            <code>/login</code>
+            <span>redirect and session verified</span>
+          </div>
+          <div class="delta-row regression" data-regression-row>
+            <span class="delta-mark">REGRESSION</span>
+            <code>/checkout</code>
+            <span data-regression-copy>payment request returned 500</span>
+          </div>
+          <div class="delta-row new">
+            <span class="delta-mark">NEW</span>
+            <code>/account/security</code>
+            <span>route found, coverage missing</span>
+          </div>
+        </section>
+
+        <div class="evidence-grid">
+          <section class="evidence-card critical">
+            <div class="section-label"><span>Blocking evidence</span><span>01</span></div>
+            <p class="route">POST /api/checkout</p>
+            <p class="failure">Expected 200, observed 500</p>
+            <div class="console-line"><span>console</span><code>PaymentError: price_id missing</code></div>
+          </section>
+          <section class="evidence-card image-proof">
+            <div class="section-label"><span>Screenshot</span><span>STEP 04</span></div>
+            <div class="mock-browser" aria-label="Stylized screenshot of checkout error">
+              <div class="browser-bar"><i></i><i></i><i></i><span>/checkout</span></div>
+              <div class="mock-content"><span>Complete order</span><b>We could not process this payment.</b><small>Try again or use another method.</small></div>
+            </div>
+          </section>
+        </div>
+
+        <footer class="dossier-footer">
+          <span>OUTCOME VERIFIED 6 / 8</span>
+          <span>API ERRORS 1</span>
+          <span>CONSOLE ERRORS 1</span>
+        </footer>
+      </div>
+    </section>
+
+    <section class="report-section" id="report">
+      <header class="section-heading">
+        <p class="kicker">The report is the product</p>
+        <h2>A release decision with receipts.</h2>
+        <p>Each run leaves a self-contained HTML report with route coverage, browser screenshots, observed API calls, console errors, and the steps needed to reproduce a failure.</p>
+      </header>
+
+      <div class="report-frame">
+        <aside class="report-rail" aria-label="Report summary">
+          <div class="rail-head"><span>RUN 048</span><b>BLOCKED</b></div>
+          <dl>
+            <div><dt>Passed</dt><dd>7</dd></div>
+            <div class="bad"><dt>Failed</dt><dd>1</dd></div>
+            <div><dt>Outcome verified</dt><dd>6</dd></div>
+            <div><dt>Smoke checks</dt><dd>1</dd></div>
+          </dl>
+          <p>Generated locally.<br>No API key required.</p>
+        </aside>
+
+        <div class="report-body">
+          <div class="report-body-head">
+            <div><span class="eyebrow">Blocking issue</span><h3>Checkout fails before order creation</h3></div>
+            <span class="severity">P0</span>
+          </div>
+          <div class="finding-grid">
+            <div><span>Route</span><code>/checkout</code></div>
+            <div><span>Action</span><p>Submit a valid card</p></div>
+            <div><span>Expected</span><p>Order confirmation appears</p></div>
+            <div><span>Observed</span><p>Payment API returned 500</p></div>
+          </div>
+          <ol class="steps">
+            <li><span>01</span><p>Open <code>/pricing</code> and choose the Pro plan.</p><b>PASS</b></li>
+            <li><span>02</span><p>Enter the account and billing details found in the form schema.</p><b>PASS</b></li>
+            <li><span>03</span><p>Submit payment and wait for the order request.</p><b class="fail-text">FAIL</b></li>
+          </ol>
+          <div class="report-footnote"><span>Coverage gap</span><p>The new <code>/account/security</code> route has no completed scenario.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="difference">
+      <header class="section-heading compact">
+        <p class="kicker">What the browser remembers</p>
+        <h2>Your agent gets continuity between runs.</h2>
+      </header>
+      <div class="difference-grid">
+        <article>
+          <span class="index">A</span>
+          <h3>It reads the app before clicking.</h3>
+          <p>Routes, forms, field names, existing tests, and coverage gaps come from the codebase. The agent starts with the product you built.</p>
+          <code>scan_codebase, then get_context</code>
+        </article>
+        <article>
+          <span class="index">B</span>
+          <h3>It keeps a regression ledger.</h3>
+          <p>Run snapshots preserve pass and fail state by route. The next run separates fixes, regressions, known failures, and new routes.</p>
+          <code>snapshot_diff + route_changes</code>
+        </article>
+        <article>
+          <span class="index">C</span>
+          <h3>It returns evidence to the agent.</h3>
+          <p>Step logs, screenshots, network observations, and verification status let the coding agent repair the failure and rerun the smallest scenario.</p>
+          <code>execute_scenario, then generate_report</code>
+        </article>
+      </div>
+      <p class="llm-note"><strong>The runner makes zero internal LLM calls.</strong> Your editor's model decides what to test. vibe-testing handles the browser, deterministic checks, memory, and report.</p>
+    </section>
+
+    <section class="tools-section" id="tools">
+      <header class="section-heading split">
+        <div><p class="kicker">Thirteen tools, one QA workflow</p><h2>Use one check or run the whole release.</h2></div>
+        <p>The MCP server exposes each stage, so an agent can inspect context, test one route, examine evidence, fix the code, and rerun the affected flow.</p>
+      </header>
+
+      <div class="tool-ledger">
+        <div class="tool-group">
+          <h3>Understand</h3>
+          <div><code>scan_codebase</code><span>Map routes, forms, tests, and changes.</span></div>
+          <div><code>get_context</code><span>Read the source behind one feature.</span></div>
+          <div><code>get_coverage</code><span>See tested routes and open gaps.</span></div>
+          <div><code>suggest_tests</code><span>Turn gaps into runnable scenarios.</span></div>
+        </div>
+        <div class="tool-group">
+          <h3>Exercise</h3>
+          <div><code>login</code><span>Enter authenticated test state.</span></div>
+          <div><code>scan_page_elements</code><span>Inventory interactive controls.</span></div>
+          <div><code>explore_page</code><span>Probe broad page behavior.</span></div>
+          <div><code>execute_scenario</code><span>Run exact steps with evidence.</span></div>
+          <div><code>take_screenshot</code><span>Capture a visual checkpoint.</span></div>
+        </div>
+        <div class="tool-group">
+          <h3>Decide</h3>
+          <div><code>generate_report</code><span>Build the reviewable HTML dossier.</span></div>
+          <div><code>run_full_test</code><span>Scan, execute, compare, and report.</span></div>
+          <div><code>run_converge</code><span>Repeat until the threshold is met.</span></div>
+          <div><code>cleanup</code><span>Close browsers and free resources.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="install-section" id="install">
+      <header class="section-heading compact">
+        <p class="kicker">Pick your entry point</p>
+        <h2>Give your agent a QA shift.</h2>
+        <p>Node 20 or newer. MIT licensed. The first run installs the matching Playwright Chromium build.</p>
+      </header>
+
+      <div class="install-options">
+        <article class="install-card featured">
+          <div class="install-type"><span>Fastest</span><b>CLI + editor setup</b></div>
+          <p>Detect installed editors, register the MCP server, and create project guidance.</p>
+          <div class="mini-command" data-command-block><code>npx vibe-testing@latest init</code><button type="button" data-copy-command data-event="install_init"><span data-copy-label>Copy</span></button></div>
+        </article>
+        <article class="install-card">
+          <div class="install-type"><span>Direct</span><b>One-off browser run</b></div>
+          <p>Run against a local or deployed app without an editor integration.</p>
+          <div class="mini-command" data-command-block><code>npx vibe-testing@latest run http://localhost:3000</code><button type="button" data-copy-command data-event="install_cli"><span data-copy-label>Copy</span></button></div>
+        </article>
+        <article class="install-card">
+          <div class="install-type"><span>Portable</span><b>Agent Plugin</b></div>
+          <p>Load the repository to get the MCP server and the senior-QA release skill together.</p>
+          <div class="mini-command" data-command-block><code>claude plugin marketplace add AishwaryShrivastav/vibe-testing</code><button type="button" data-copy-command data-event="install_plugin"><span data-copy-label>Copy</span></button></div>
+        </article>
+      </div>
+      <div class="compatibility"><span>Works with</span><b>Claude Code</b><b>Cursor</b><b>Windsurf</b><b>VS Code</b><b>Roo Code</b><b>Cline</b></div>
+    </section>
+
+    <section class="first-users">
+      <div>
+        <p class="kicker">Founding QA runs</p>
+        <h2>Bring one app you are about to ship.</h2>
+      </div>
+      <div>
+        <p>I am working with the first ten teams directly. We will install vibe-testing, run a release check, and use the report to improve the product. Thirty minutes.</p>
+        <a class="button primary large" href="https://github.com/AishwaryShrivastav/vibe-testing/issues/new?title=Founding%20QA%20run&body=App%20framework%3A%0AApp%20URL%20or%20local%20setup%3A%0AThe%20flow%20I%20need%20to%20trust%3A%0APreferred%20time%20zone%3A" data-event="founding_qa_request">Request a founding QA run</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wordmark footer-mark"><svg viewBox="0 0 30 30" aria-hidden="true"><path d="M4 5h22v20H4z"/><path d="M9 11h4v4H9zm8 0h4v4h-4zM9 19h12"/></svg><span>vibe-testing</span></div>
+    <p>Code-aware browser testing for AI coding agents.</p>
+    <div><a href="https://www.npmjs.com/package/vibe-testing" data-event="footer_npm">npm</a><a href="https://github.com/AishwaryShrivastav/vibe-testing" data-event="footer_github">GitHub</a><a href="https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing" data-event="footer_registry">MCP Registry</a></div>
+  </footer>
+</body>
+</html>

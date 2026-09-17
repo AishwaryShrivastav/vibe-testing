@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f3f0e8"/>
+  <path d="M70 60h70v65H70zM88 80h13v13H88zm28 0h13v13h-13zM88 108h41" fill="none" stroke="#171914" stroke-width="5"/>
+  <text x="160" y="105" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#171914">vibe-testing</text>
+  <text x="70" y="260" font-family="Georgia, serif" font-size="76" fill="#171914">Your coding agent shipped it.</text>
+  <text x="70" y="345" font-family="Georgia, serif" font-size="76" font-style="italic" fill="#2457d6">Now test what changed.</text>
+  <rect x="70" y="450" width="570" height="80" fill="#171914"/>
+  <text x="100" y="500" font-family="monospace" font-size="22" fill="#fffefa">npx vibe-testing@latest init</text>
+  <rect x="810" y="435" width="300" height="105" fill="#f0d9d2" stroke="#c33a2c" stroke-width="2"/>
+  <text x="840" y="472" font-family="monospace" font-size="14" fill="#62665c">RELEASE VERDICT</text>
+  <text x="840" y="515" font-family="Georgia, serif" font-size="38" fill="#c33a2c">BLOCKED</text>
+</svg>

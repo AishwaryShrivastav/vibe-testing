@@ -8,6 +8,8 @@
 
 **Code-aware browser testing for AI coding agents.**
 
+[Product site](https://aishwaryshrivastav.github.io/vibe-testing/) · [npm](https://www.npmjs.com/package/vibe-testing) · [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing)
+
 vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 13 testing tools, or as a standalone CLI.
 
 The repository is also an [Agent Plugin](https://agent-plugins.org/) with a `release-qa` skill. Compatible agents get both the testing tools and a senior-QA workflow for coverage, evidence, regression checks, and a clear release verdict.
@@ -23,7 +25,7 @@ Then open your editor and say:
 
 ---
 
-## Why not just a browser tool
+## What code-aware testing adds
 
 Playwright MCP gives your agent hands. vibe-testing gives it a testing workflow: code-derived scenarios, memory across runs, and a report. Two things a stateless browser tool cannot do:
 
