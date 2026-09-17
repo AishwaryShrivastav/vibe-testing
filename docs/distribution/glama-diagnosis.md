@@ -1,8 +1,10 @@
 # Glama listing diagnosis
 
+Last verified: 2026-09-17
+
 ## Public state
 
-The public admin shows the vibe-testing listing as unclaimed. Its schema page has no inspected tools or capabilities because inspection has never run.
+The public listing is unclaimed. Its schema page has no inspected tools or capabilities because inspection has never run. The public API now requires a Glama API key, so the listing page is the available unauthenticated check.
 
 Listing: https://glama.ai/mcp/servers/AishwaryShrivastav/vibe-testing/schema
 
@@ -25,6 +27,6 @@ The live schema requires `maintainers` as an array of unique GitHub usernames. L
 2. Open the listing and run **Claim ownership** again. Glama's documentation says the claim flow fetches the latest `glama.json`.
 3. Trigger inspection after the claim completes.
 4. Confirm that the listing shows 13 tools and a quality score.
-5. Resubmit to `punkpeye/awesome-mcp-servers`, referencing the previous PR #6962 and the evaluated Glama page.
+5. Let the existing `punkpeye/awesome-mcp-servers` PR #14575 update from the evaluated listing. Its submission check already passes. Do not close it or open a replacement.
 
 No source-code or manifest blocker remains. Claiming and starting inspection require the owner's authenticated Glama session.

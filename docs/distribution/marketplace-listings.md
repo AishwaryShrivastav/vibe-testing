@@ -1,5 +1,7 @@
 # Marketplace submission kit
 
+Current submission state and next actions: [launch-status.md](launch-status.md).
+
 Use the same product facts on every listing. Change only the length required by the form.
 
 ## Canonical listing
@@ -89,3 +91,11 @@ Submission issue #2554 is open:
 https://github.com/cline/mcp-marketplace/issues/2554
 
 The issue includes the repository and 400 by 400 icon required by Cline. Monitor the issue for maintainer feedback; do not open a duplicate.
+
+## agent-plugins directory
+
+Submission issue #134 is open:
+
+https://github.com/dmgrok/agent-plugins/issues/134
+
+The issue points to the repository's root Agent Plugin manifest. Monitor it for maintainer feedback; do not open a duplicate.
