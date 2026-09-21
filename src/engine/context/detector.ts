@@ -3,6 +3,12 @@ import { readJSON, fileExists, glob } from '../../utils/file.js'
 import fs from 'fs/promises'
 import path from 'path'
 
+type PackageManifest = {
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+  scripts?: Record<string, string>
+}
+
 // ─── Monorepo detection ───────────────────────────────────────────────────────
 
 export async function detectMonorepo(codebasePath: string): Promise<boolean> {
@@ -65,7 +71,7 @@ export async function findFrontendApp(codebasePath: string): Promise<string | nu
  * Detect the base URL for the dev server by checking (in order):
  *   1. .env.local / .env.development / .env — PORT= variable
  *   2. vite.config.{ts,js,mts} — port: <number>
- *   3. Framework defaults (Next.js: 3000, SvelteKit: 5173, Nuxt: 3000, Vite: 5173)
+ *   3. Framework defaults, using project evidence to distinguish TanStack Start from Router
  */
 export async function detectBaseUrl(codebasePath: string, framework: Framework): Promise<string> {
   // 1. .env files
@@ -79,16 +85,29 @@ export async function detectBaseUrl(codebasePath: string, framework: Framework):
   }
 
   // 2. Vite config
+  const viteConfigContents: string[] = []
   for (const viteFile of ['vite.config.ts', 'vite.config.js', 'vite.config.mts']) {
     const vitePath = path.join(codebasePath, viteFile)
     try {
       const content = await fs.readFile(vitePath, 'utf-8')
+      viteConfigContents.push(content)
       const match = content.match(/port\s*:\s*(\d+)/)
       if (match) return `http://localhost:${match[1]}`
     } catch { /* file doesn't exist */ }
   }
 
   // 3. Framework defaults
+  if (framework === 'tanstack-router') {
+    const pkg = await readJSON<PackageManifest>(path.join(codebasePath, 'package.json'))
+    const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {}
+    const scripts = Object.values(pkg?.scripts ?? {})
+    const usesTanStackStart = !!deps['@tanstack/react-start'] ||
+      scripts.some(script => /\bvinxi\b|tanstack-start|@tanstack\/react-start/i.test(script)) ||
+      viteConfigContents.some(content => /@tanstack\/react-start|tanstackStart\s*\(/.test(content))
+
+    return `http://localhost:${usesTanStackStart ? 3000 : 5173}`
+  }
+
   const portMap: Partial<Record<Framework, number>> = {
     'nextjs-app': 3000,
     'nextjs-pages': 3000,
@@ -103,14 +122,21 @@ export async function detectBaseUrl(codebasePath: string, framework: Framework):
 
 // ─── Framework detection ──────────────────────────────────────────────────────
 
+async function hasTanStackRouteLayout(codebasePath: string): Promise<boolean> {
+  const [rootFiles, routeFiles] = await Promise.all([
+    glob('src/routes/__root.{tsx,jsx,ts,js}', codebasePath),
+    glob('src/routes/**/*.{tsx,jsx,ts,js}', codebasePath),
+  ])
+
+  return rootFiles.length > 0 && routeFiles.some(file => !/^src\/routes\/__root\./.test(file))
+}
+
 export async function detectFramework(codebasePath: string): Promise<Framework> {
-  const pkg = await readJSON<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(
+  const pkg = await readJSON<PackageManifest>(
     path.join(codebasePath, 'package.json')
   )
 
-  if (!pkg) return 'unknown'
-
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+  const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {}
 
   if (deps['next']) {
     // Check src/app and src/pages variants used in many Next.js setups
@@ -130,6 +156,10 @@ export async function detectFramework(codebasePath: string): Promise<Framework> 
   if (deps['nuxt'] || deps['nuxt3'] || deps['@nuxt/core']) return 'nuxt'
 
   if (deps['vue'] && (deps['vue-router'] || deps['@vue/router'])) return 'vue-spa'
+
+  if (deps['@tanstack/react-start'] || deps['@tanstack/react-router'] || await hasTanStackRouteLayout(codebasePath)) {
+    return 'tanstack-router'
+  }
 
   if (deps['react'] && (deps['react-router-dom'] || deps['react-router'])) {
     return 'react-spa'

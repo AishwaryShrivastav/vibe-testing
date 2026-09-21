@@ -10,10 +10,79 @@ export async function parseRoutes(framework: Framework, codebasePath: string): P
     case 'nuxt':          return parseNuxtRoutes(codebasePath)
     case 'vue-spa':       return parseVueSpaRoutes(codebasePath)
     case 'react-spa':     return parseReactSpaRoutes(codebasePath)
+    case 'tanstack-router': return parseTanStackRoutes(codebasePath)
     case 'express':       return parseExpressRoutes(codebasePath)
     case 'unknown':       return []
     default:              return []
   }
+}
+
+function normalizeTanStackRoute(filePath: string): string | null {
+  const routeFile = filePath
+    .replace(/^src\/routes\//, '')
+    .replace(/\.(tsx|jsx|ts|js)$/, '')
+
+  if (routeFile === '__root') return null
+
+  const escapedValues: string[] = []
+  const protectedRouteFile = routeFile.replace(/\[([^\]]+)\]/g, (_match, value: string) => {
+    const token = `\uE000${escapedValues.length}\uE001`
+    escapedValues.push(value)
+    return token
+  })
+  const restoreEscapes = (segment: string): string => segment.replace(
+    /\uE000(\d+)\uE001/g,
+    (_match, index: string) => escapedValues[Number(index)] ?? ''
+  )
+
+  let routeId = protectedRouteFile
+  if (routeId.endsWith('.lazy')) routeId = routeId.slice(0, -'.lazy'.length)
+
+  let isIndexRoute = false
+  const terminalToken = routeId.match(/(?:^|[/.])(index|route)$/)?.[1]
+  if (terminalToken) {
+    isIndexRoute = terminalToken === 'index'
+    routeId = routeId.slice(0, -terminalToken.length).replace(/[/.]$/, '')
+  }
+
+  const rawSegments = routeId.split(/[/.]/)
+  if (rawSegments.some(segment => segment.startsWith('-'))) return null
+
+  const segments = rawSegments
+    .filter(segment => !segment.startsWith('_') && !/^\([^)]+\)$/.test(segment))
+    .map(segment => segment.replace(/_$/, ''))
+    .filter(Boolean)
+    .map(segment => segment === '$' ? '*' : segment.replace(/^\$(.+)$/, ':$1'))
+    .map(restoreEscapes)
+
+  if (segments.length === 0) return isIndexRoute ? '/' : null
+  return `/${segments.join('/')}`
+}
+
+async function parseTanStackRoutes(codebasePath: string): Promise<Route[]> {
+  const routeFiles = await glob('src/routes/**/*.{tsx,jsx,ts,js}', codebasePath)
+  const routes = new Map<string, Route>()
+
+  for (const filePath of routeFiles.sort()) {
+    const routePath = normalizeTanStackRoute(filePath)
+    if (!routePath) continue
+
+    const existing = routes.get(routePath)
+    const isLazyFile = /\.lazy\.(tsx|jsx|ts|js)$/.test(filePath)
+    if (existing && (isLazyFile || !existing.file_path?.match(/\.lazy\.(tsx|jsx|ts|js)$/))) {
+      continue
+    }
+
+    routes.set(routePath, {
+      path: routePath,
+      type: 'page',
+      requires_auth: await inferAuthRequirement(filePath, codebasePath),
+      dynamic_segments: extractDynamicSegments(routePath),
+      file_path: path.join(codebasePath, filePath),
+    })
+  }
+
+  return [...routes.values()]
 }
 
 function filePathToRoute(filePath: string, _type: 'nextjs-app' | 'nextjs-pages'): string {

@@ -5,6 +5,7 @@ export type Framework =
   | 'nuxt'
   | 'vue-spa'
   | 'react-spa'
+  | 'tanstack-router'
   | 'express'
   | 'unknown'
 

@@ -204,6 +204,103 @@ describe('parseRoutes - react-spa', () => {
   })
 })
 
+// ─── TanStack Router / Start ────────────────────────────────────────────────
+
+describe('parseRoutes - tanstack-router', () => {
+  it('normalizes root, index, pathless layout, and dynamic routes', async () => {
+    const dir = await withTempProject({
+      'src/routes/__root.tsx': 'export const Route = createRootRoute()({})',
+      'src/routes/index.tsx': "export const Route = createFileRoute('/')({})",
+      'src/routes/_authenticated/dashboard.tsx': "export const Route = createFileRoute('/_authenticated/dashboard')({})",
+      'src/routes/users/$userId.tsx': "export const Route = createFileRoute('/users/$userId')({})",
+    })
+    const routes = await parseRoutes('tanstack-router', dir)
+    const paths = routes.map(r => r.path).sort()
+
+    expect(paths).toEqual(['/', '/dashboard', '/users/:userId'])
+    expect(routes.find(r => r.path === '/users/:userId')?.dynamic_segments).toEqual(['userId'])
+    expect(routes.some(r => r.file_path?.endsWith('__root.tsx'))).toBe(false)
+    await cleanup(dir)
+  })
+
+  it('supports flat routes and route and lazy suffix conventions without duplicates', async () => {
+    const dir = await withTempProject({
+      'src/routes/posts.index.tsx': "export const Route = createFileRoute('/posts/')({})",
+      'src/routes/posts.$postId.tsx': "export const Route = createFileRoute('/posts/$postId')({})",
+      'src/routes/account/route.tsx': "export const Route = createFileRoute('/account')({})",
+      'src/routes/settings.profile.route.tsx': "export const Route = createFileRoute('/settings/profile')({})",
+      'src/routes/about.tsx': "export const Route = createFileRoute('/about')({})",
+      'src/routes/about.lazy.tsx': "export const Route = createLazyFileRoute('/about')({})",
+    })
+    const routes = await parseRoutes('tanstack-router', dir)
+    const paths = routes.map(r => r.path).sort()
+
+    expect(paths).toEqual(['/about', '/account', '/posts', '/posts/:postId', '/settings/profile'])
+    await cleanup(dir)
+  })
+
+  it('treats route tokens as terminal suffixes and keeps lazy-only virtual anchors', async () => {
+    const dir = await withTempProject({
+      'src/routes/docs.lazy.guide.tsx': "export const Route = createFileRoute('/docs/lazy/guide')({})",
+      'src/routes/docs.index.reference.tsx': "export const Route = createFileRoute('/docs/index/reference')({})",
+      'src/routes/docs.route.examples.tsx': "export const Route = createFileRoute('/docs/route/examples')({})",
+      'src/routes/standalone.lazy.tsx': "export const Route = createLazyFileRoute('/standalone')({})",
+      'src/routes/posts.index.lazy.tsx': "export const Route = createLazyFileRoute('/posts/')({})",
+    })
+    const routes = await parseRoutes('tanstack-router', dir)
+    const paths = routes.map(r => r.path).sort()
+
+    expect(paths).toEqual([
+      '/docs/index/reference',
+      '/docs/lazy/guide',
+      '/docs/route/examples',
+      '/posts',
+      '/standalone',
+    ])
+    await cleanup(dir)
+  })
+
+  it('decodes escaped filename characters before splitting flat route segments', async () => {
+    const dir = await withTempProject({
+      'src/routes/my-script[.]js.tsx': "export const Route = createFileRoute('/my-script.js')({})",
+      'src/routes/api[.]v1.users.tsx': "export const Route = createFileRoute('/api.v1/users')({})",
+    })
+    const routes = await parseRoutes('tanstack-router', dir)
+    const paths = routes.map(r => r.path).sort()
+
+    expect(paths).toEqual(['/api.v1/users', '/my-script.js'])
+    await cleanup(dir)
+  })
+
+  it('handles route groups and non-nested suffixes while excluding colocated files', async () => {
+    const dir = await withTempProject({
+      'src/routes/(marketing)/about.tsx': "export const Route = createFileRoute('/about')({})",
+      'src/routes/posts_.$postId.edit.tsx': "export const Route = createFileRoute('/posts/$postId/edit')({})",
+      'src/routes/-components/card.tsx': 'export function Card() {}',
+    })
+    const routes = await parseRoutes('tanstack-router', dir)
+    const paths = routes.map(r => r.path).sort()
+
+    expect(paths).toEqual(['/about', '/posts/:postId/edit'])
+    await cleanup(dir)
+  })
+
+  it('ignores generated and dependency route noise', async () => {
+    const dir = await withTempProject({
+      'src/routes/index.tsx': "export const Route = createFileRoute('/')({})",
+      'src/routes/build/index.tsx': "export const Route = createFileRoute('/build')({})",
+      'src/routes/dist/index.tsx': "export const Route = createFileRoute('/dist')({})",
+      'src/routes/coverage/index.tsx': "export const Route = createFileRoute('/coverage')({})",
+      'src/routes/.output/noise.tsx': 'noise',
+      'src/routes/node_modules/noise.tsx': 'noise',
+    })
+    const routes = await parseRoutes('tanstack-router', dir)
+
+    expect(routes.map(r => r.path).sort()).toEqual(['/', '/build', '/coverage', '/dist'])
+    await cleanup(dir)
+  })
+})
+
 // ─── Edge cases ──────────────────────────────────────────────────────────────
 
 describe('parseRoutes - edge cases', () => {

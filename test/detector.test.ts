@@ -76,6 +76,42 @@ describe('detectFramework', () => {
     await cleanup(dir)
   })
 
+  it('detects TanStack Start before generic React', async () => {
+    const dir = await withTempProject({
+      react: '^19.0.0',
+      '@tanstack/react-start': '^1.0.0',
+    })
+    expect(await detectFramework(dir)).toBe('tanstack-router')
+    await cleanup(dir)
+  })
+
+  it('detects TanStack Router before generic React', async () => {
+    const dir = await withTempProject({
+      react: '^19.0.0',
+      '@tanstack/react-router': '^1.0.0',
+    })
+    expect(await detectFramework(dir)).toBe('tanstack-router')
+    await cleanup(dir)
+  })
+
+  it('detects TanStack Router from its source layout without framework dependencies', async () => {
+    const dir = await withTempProject({}, {
+      'src/routes/__root.tsx': 'export const Route = createRootRoute()({})',
+      'src/routes/index.tsx': "export const Route = createFileRoute('/')({})",
+    })
+    expect(await detectFramework(dir)).toBe('tanstack-router')
+    await cleanup(dir)
+  })
+
+  it('prefers a TanStack source layout over generic React detection', async () => {
+    const dir = await withTempProject({ react: '^19.0.0' }, {
+      'src/routes/__root.tsx': 'export const Route = createRootRoute()({})',
+      'src/routes/dashboard.tsx': "export const Route = createFileRoute('/dashboard')({})",
+    })
+    expect(await detectFramework(dir)).toBe('tanstack-router')
+    await cleanup(dir)
+  })
+
   it('detects Express', async () => {
     const dir = await withTempProject({ express: '^4.0.0' })
     expect(await detectFramework(dir)).toBe('express')
@@ -119,6 +155,45 @@ describe('detectBaseUrl', () => {
     expect(await detectBaseUrl(dir, 'sveltekit')).toBe('http://localhost:5173')
     expect(await detectBaseUrl(dir, 'nuxt')).toBe('http://localhost:3000')
     expect(await detectBaseUrl(dir, 'vue-spa')).toBe('http://localhost:5173')
+    await cleanup(dir)
+  })
+
+  it('defaults standalone TanStack Router projects to the Vite port', async () => {
+    const dir = await withTempProject({
+      '@tanstack/react-router': '^1.0.0',
+      vite: '^7.0.0',
+    })
+    expect(await detectBaseUrl(dir, 'tanstack-router')).toBe('http://localhost:5173')
+    await cleanup(dir)
+  })
+
+  it('defaults TanStack Start projects to port 3000 from package evidence', async () => {
+    const dir = await withTempProject({
+      '@tanstack/react-start': '^1.0.0',
+      '@tanstack/react-router': '^1.0.0',
+    })
+    expect(await detectBaseUrl(dir, 'tanstack-router')).toBe('http://localhost:3000')
+    await cleanup(dir)
+  })
+
+  it('recognizes TanStack Start script and config evidence', async () => {
+    const dir = await withTempProject({ react: '^19.0.0' }, {
+      'vite.config.ts': "import { tanstackStart } from '@tanstack/react-start/plugin/vite'\nexport default { plugins: [tanstackStart()] }",
+    })
+    await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({
+      dependencies: { react: '^19.0.0' },
+      scripts: { dev: 'vinxi dev' },
+    }))
+    expect(await detectBaseUrl(dir, 'tanstack-router')).toBe('http://localhost:3000')
+    await cleanup(dir)
+  })
+
+  it('keeps explicit port evidence ahead of TanStack defaults', async () => {
+    const dir = await withTempProject({ '@tanstack/react-start': '^1.0.0' }, {
+      '.env.local': 'PORT=4100',
+      'vite.config.ts': 'export default { server: { port: 8080 } }',
+    })
+    expect(await detectBaseUrl(dir, 'tanstack-router')).toBe('http://localhost:4100')
     await cleanup(dir)
   })
 
