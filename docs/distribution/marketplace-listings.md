@@ -14,7 +14,7 @@ Use the same product facts on every listing. Change only the length required by 
 
 **Repository:** https://github.com/AishwaryShrivastav/vibe-testing
 
-**Website:** https://aishwaryshrivastav.github.io/vibe-testing/
+**Website:** https://vibetesting.tfgstudio.com/
 
 **npm:** https://www.npmjs.com/package/vibe-testing
 
@@ -59,7 +59,7 @@ npm ci
 npm run build:mcpb
 ```
 
-The command writes `artifacts/vibe-testing-0.4.5.mcpb`. It validates schema 0.4, installs locked production dependencies, tests the stdio handshake and 13-tool list, packs the archive, and inspects the result. Uploading it through https://smithery.ai/new remains a manual account action. The [MCPB guide](mcpb.md) records the runtime prerequisite and listing facts.
+The command writes `artifacts/vibe-testing-0.4.6.mcpb`. It validates schema 0.4, installs locked production dependencies, tests the stdio handshake and 14-tool list, packs the archive, and inspects the result. Uploading it through https://smithery.ai/new remains a manual account action. The [MCPB guide](mcpb.md) records the runtime prerequisite and listing facts.
 
 ## PulseMCP
 

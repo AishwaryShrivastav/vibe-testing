@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "vibe-testing",
   "display_name": "vibe-testing",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Code-aware browser testing for AI coding agents.",
   "long_description": "Read the app's routes and forms, run browser checks with Playwright, compare runs, and produce an evidence-backed QA report. The server makes no LLM calls and needs no API key.",
   "author": {
@@ -14,7 +14,7 @@
     "type": "git",
     "url": "https://github.com/AishwaryShrivastav/vibe-testing.git"
   },
-  "homepage": "https://aishwaryshrivastav.github.io/vibe-testing/",
+  "homepage": "https://vibetesting.tfgstudio.com/",
   "documentation": "https://github.com/AishwaryShrivastav/vibe-testing#readme",
   "support": "https://github.com/AishwaryShrivastav/vibe-testing/issues",
   "icon": "icon.png",

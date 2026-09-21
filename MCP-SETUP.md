@@ -1,6 +1,6 @@
 # MCP Setup — Add vibe-test to Any Project
 
-The fastest way: run `npx vibe-testing@latest init` in your project root. It auto-detects your editors and writes all configs.
+Run `npx vibe-testing@latest init` in your project root. It detects your editors and writes the MCP configuration. The MCP server then follows `configure` → `run_full_test` → `generate_report`.
 
 Or configure manually:
 
@@ -74,10 +74,9 @@ run a create-user scenario, and generate a report
 
 ## Tool Workflow (what the AI will do)
 
-1. `scan_codebase` — reads your code, finds routes/forms/gaps
-2. `get_context` — reads actual source files for the feature (real selectors)
-3. `login` — authenticates in a real browser
-4. `explore_page` — clicks everything, finds what breaks
-5. `execute_scenario` — runs targeted test flows
-6. `generate_report` — HTML report with screenshots, opens in browser
-7. `cleanup` — closes browsers
+1. `configure` — detects the framework, active server, and authentication method
+2. `run_full_test` — discovers routes, runs safe scenarios, and writes a report
+3. `get_context` — reads source files when a targeted follow-up needs exact selectors
+4. `execute_scenario` — runs a focused follow-up
+5. `generate_report` — refreshes the HTML report with collected evidence
+6. `cleanup` — closes browsers

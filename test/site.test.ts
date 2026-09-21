@@ -6,6 +6,9 @@ const root = resolve(import.meta.dirname, '..')
 const html = readFileSync(resolve(root, 'site/index.html'), 'utf8')
 const css = readFileSync(resolve(root, 'site/styles.css'), 'utf8')
 const script = readFileSync(resolve(root, 'site/app.js'), 'utf8')
+const cname = readFileSync(resolve(root, 'site/CNAME'), 'utf8').trim()
+const robots = readFileSync(resolve(root, 'site/robots.txt'), 'utf8')
+const sitemap = readFileSync(resolve(root, 'site/sitemap.xml'), 'utf8')
 
 const tools = [
   'scan_codebase',
@@ -21,6 +24,7 @@ const tools = [
   'run_full_test',
   'run_converge',
   'cleanup',
+  'configure',
 ]
 
 describe('launch site', () => {
@@ -29,6 +33,18 @@ describe('launch site', () => {
     expect(html).toContain('https://www.npmjs.com/package/vibe-testing')
     expect(html).toContain('https://github.com/AishwaryShrivastav/vibe-testing')
     expect(html).toContain('https://registry.modelcontextprotocol.io/')
+  })
+
+  it('uses the canonical domain in site discovery metadata', () => {
+    const canonical = 'https://vibetesting.tfgstudio.com/'
+    expect(cname).toBe('vibetesting.tfgstudio.com')
+    expect(html).toContain(`<link rel="canonical" href="${canonical}">`)
+    expect(html).toContain(`<meta property="og:url" content="${canonical}">`)
+    expect(html).toContain('application/ld+json')
+    expect(html).toContain('"@type": "SoftwareApplication"')
+    expect(html).toContain('<link rel="sitemap"')
+    expect(robots).toContain(`Sitemap: ${canonical}sitemap.xml`)
+    expect(sitemap).toContain(`<loc>${canonical}</loc>`)
   })
 
   it('shows actual report and regression vocabulary', () => {

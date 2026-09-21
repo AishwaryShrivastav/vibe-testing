@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://vibetesting.tfgstudio.com/sitemap.xml

@@ -1,6 +1,6 @@
 {
   "name": "vibe-testing",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "mcpName": "io.github.AishwaryShrivastav/vibe-testing",
   "description": "Code-aware browser testing for AI coding agents. Reads your codebase so tests use real routes and field names, runs them in Playwright, remembers what broke, and reports what your last change fixed or regressed. No LLM calls inside. MCP server for Claude Code/Cursor/Windsurf, or standalone CLI.",
   "type": "module",
@@ -35,7 +35,7 @@
     "type": "git",
     "url": "git+https://github.com/AishwaryShrivastav/vibe-testing.git"
   },
-  "homepage": "https://aishwaryshrivastav.github.io/vibe-testing/",
+  "homepage": "https://vibetesting.tfgstudio.com/",
   "bugs": {
     "url": "https://github.com/AishwaryShrivastav/vibe-testing/issues"
   },

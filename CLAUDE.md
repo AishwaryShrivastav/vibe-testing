@@ -4,7 +4,7 @@ This is the **vibe-test** source repository. It's an MCP server + CLI for AI-pow
 
 ## What This Project Does
 
-vibe-test gives AI coding assistants (Claude Code, Cursor, Windsurf, etc.) 13 browser testing tools via MCP. When a user asks "test the login flow", the AI uses these tools to:
+vibe-test gives AI coding assistants (Claude Code, Cursor, Windsurf, etc.) 14 browser testing tools via MCP. When a user asks "test the login flow", the AI uses these tools to:
 1. Read the source code (understand real field names, routes, selectors)
 2. Open a real Playwright browser
 3. Execute test steps, take screenshots
@@ -15,7 +15,7 @@ vibe-test gives AI coding assistants (Claude Code, Cursor, Windsurf, etc.) 13 br
 ```
 src/
 ├── cli.ts              # CLI entry: vibe-test run/converge/init/reset/report + --mcp flag
-├── mcp-server.ts       # MCP server (13 tools via JSON-RPC stdio)
+├── mcp-server.ts       # MCP server (14 tools via JSON-RPC stdio)
 └── engine/
     ├── index.ts        # VibeTester orchestrator (run + converge, emits snapshot_diff)
     ├── converge.ts     # Iterative coverage loop (baseline + follow-up rounds)

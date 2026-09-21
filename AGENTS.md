@@ -16,7 +16,7 @@ The MCPB command performs its own package, handshake, and 13-tool checks. Do not
 ## Deployment configuration
 
 - Platform: GitHub Pages
-- Production URL: https://aishwaryshrivastav.github.io/vibe-testing/
+- Production URL: https://vibetesting.tfgstudio.com/
 - Pages workflow: `.github/workflows/pages.yml`
 - CI workflow: `.github/workflows/ci.yml`
 - Package release: a `v*` tag runs `.github/workflows/ci.yml`, which publishes npm and then the MCP Registry entry after verification passes.

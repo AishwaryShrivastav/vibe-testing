@@ -2,7 +2,7 @@
 
 ## Overview
 
-Vibe Test is a code-aware browser testing agent distributed as an npm package (`vibe-testing`, CLI command: `vibe-test`). It provides an MCP server with 13 tools that let AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) autonomously test web applications using Playwright.
+Vibe Test is a code-aware browser testing agent distributed as an npm package (`vibe-testing`, CLI command: `vibe-test`). It provides an MCP server with 14 tools that let AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) autonomously test web applications using Playwright.
 
 The core philosophy: **the editor LLM is the brain, Vibe Test is the hands.** Each tool returns structured JSON data plus screenshots as base64 images, allowing the LLM to see the page and reason about it visually. No internal LLM — pass/fail is determined by heuristics (URL changes, toasts, API errors).
 

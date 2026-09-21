@@ -9,7 +9,7 @@ npm ci
 npm run build:mcpb
 ```
 
-The command builds TypeScript, installs locked production dependencies in a clean staging directory, validates the manifest with `@anthropic-ai/mcpb@2.1.2`, checks the server handshake and all 13 tools, packs the bundle, and inspects the result. The artifact is written to `artifacts/vibe-testing-0.4.5.mcpb`.
+The command builds TypeScript, installs locked production dependencies in a clean staging directory, validates the manifest with `@anthropic-ai/mcpb@2.1.2`, checks the server handshake and all 14 tools, packs the bundle, and inspects the result. The artifact is written to `artifacts/vibe-testing-0.4.6.mcpb`.
 
 The package version comes from `package.json`. Keep `mcpb/manifest.json` on the same version; the test suite rejects version drift.
 

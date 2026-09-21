@@ -26,7 +26,7 @@ The live schema requires `maintainers` as an array of unique GitHub usernames. L
 1. Sign into Glama with the GitHub account `AishwaryShrivastav`.
 2. Open the listing and run **Claim ownership** again. Glama's documentation says the claim flow fetches the latest `glama.json`.
 3. Trigger inspection after the claim completes.
-4. Confirm that the listing shows 13 tools and a quality score.
+4. Confirm that the listing shows 14 tools and a quality score.
 5. Let the existing `punkpeye/awesome-mcp-servers` PR #14575 update from the evaluated listing. Its submission check already passes. Do not close it or open a replacement.
 
 No source-code or manifest blocker remains. Claiming and starting inspection require the owner's authenticated Glama session.

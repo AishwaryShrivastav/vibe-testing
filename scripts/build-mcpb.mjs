@@ -68,8 +68,8 @@ async function verifyHandshake() {
   if (initialized?.result?.serverInfo?.version !== packageJson.version) {
     throw new Error('Bundled server reported the wrong version')
   }
-  if (!Array.isArray(tools) || tools.length !== 13) {
-    throw new Error(`Bundled server reported ${tools?.length ?? 0} tools; expected 13`)
+  if (!Array.isArray(tools) || tools.length !== 14) {
+    throw new Error(`Bundled server reported ${tools?.length ?? 0} tools; expected 14`)
   }
 }
 

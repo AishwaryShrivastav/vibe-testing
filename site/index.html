@@ -3,16 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Code-aware browser testing for AI coding agents. Find regressions, preserve test memory, and get a release verdict with evidence.">
+  <meta name="description" content="Code-aware browser testing for AI coding agents. Detect routes, run Playwright checks, compare results, and review an evidence-based report.">
   <meta name="theme-color" content="#f3f0e8">
   <meta name="analytics-endpoint" content="">
-  <meta property="og:title" content="vibe-testing | Your agent's senior QA layer">
-  <meta property="og:description" content="Run browser tests against your real routes, remember what changed, and review the evidence before release.">
+  <meta property="og:title" content="vibe-testing | Code-aware browser testing">
+  <meta property="og:description" content="Detect real application routes, run Playwright checks, compare results, and review the evidence before release.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://aishwaryshrivastav.github.io/vibe-testing/">
-  <meta property="og:image" content="https://aishwaryshrivastav.github.io/vibe-testing/social-card.png">
-  <link rel="canonical" href="https://aishwaryshrivastav.github.io/vibe-testing/">
-  <title>vibe-testing | Your agent's senior QA layer</title>
+  <meta property="og:url" content="https://vibetesting.tfgstudio.com/">
+  <meta property="og:image" content="https://vibetesting.tfgstudio.com/social-card.png">
+  <link rel="canonical" href="https://vibetesting.tfgstudio.com/">
+  <link rel="sitemap" type="application/xml" href="https://vibetesting.tfgstudio.com/sitemap.xml">
+  <title>vibe-testing | Code-aware browser testing</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "vibe-testing",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Windows, Linux",
+    "url": "https://vibetesting.tfgstudio.com/",
+    "downloadUrl": "https://www.npmjs.com/package/vibe-testing",
+    "softwareVersion": "0.4.6",
+    "license": "https://opensource.org/licenses/MIT"
+  }
+  </script>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,11 +41,11 @@
     <a class="wordmark" href="#top" aria-label="vibe-testing home">
       <svg viewBox="0 0 30 30" aria-hidden="true"><path d="M4 5h22v20H4z"/><path d="M9 11h4v4H9zm8 0h4v4h-4zM9 19h12"/></svg>
       <span>vibe-testing</span>
-      <span class="version">v0.4.5</span>
+      <span class="version">v0.4.6</span>
     </a>
     <nav aria-label="Primary navigation">
       <a href="#report">Report</a>
-      <a href="#tools">13 tools</a>
+      <a href="#tools">14 tools</a>
       <a href="#install">Install</a>
       <a href="https://github.com/AishwaryShrivastav/vibe-testing" data-event="nav_github">GitHub</a>
     </nav>
@@ -41,9 +55,9 @@
   <main id="main">
     <section class="hero" id="top">
       <div class="hero-copy">
-        <p class="kicker">Release review / browser evidence / memory</p>
-        <h1>Your coding agent shipped it. <em>Now test what changed.</em></h1>
-        <p class="hero-intro">vibe-testing reads the routes and forms in your codebase, tests them in Playwright, and remembers the result. The next run tells you which fix held and which route regressed.</p>
+        <p class="kicker">Code-aware tests / browser evidence / regression history</p>
+        <h1>Test what your coding agent changed.</h1>
+        <p class="hero-intro">vibe-testing reads routes and forms from your codebase, runs Playwright checks, and compares each run with the previous result.</p>
 
         <div class="command" data-command-block>
           <code>npx vibe-testing@latest init</code>
@@ -58,7 +72,7 @@
         </div>
 
         <dl class="proof-strip" aria-label="Product facts">
-          <div><dt>13</dt><dd>testing tools</dd></div>
+          <div><dt>14</dt><dd>testing tools</dd></div>
           <div><dt>0</dt><dd>internal LLM calls</dd></div>
           <div><dt>3</dt><dd>ways to run</dd></div>
         </dl>
@@ -200,16 +214,17 @@
 
     <section class="tools-section" id="tools">
       <header class="section-heading split">
-        <div><p class="kicker">Thirteen tools, one QA workflow</p><h2>Use one check or run the whole release.</h2></div>
+        <div><p class="kicker">Fourteen MCP tools</p><h2>Inspect one route or run the full test.</h2></div>
         <p>The MCP server exposes each stage, so an agent can inspect context, test one route, examine evidence, fix the code, and rerun the affected flow.</p>
       </header>
 
       <div class="tool-ledger">
         <div class="tool-group">
           <h3>Understand</h3>
+          <div><code>configure</code><span>Detect the framework, server, and authentication method.</span></div>
           <div><code>scan_codebase</code><span>Map routes, forms, tests, and changes.</span></div>
           <div><code>get_context</code><span>Read the source behind one feature.</span></div>
-          <div><code>get_coverage</code><span>See tested routes and open gaps.</span></div>
+          <div><code>get_coverage</code><span>See source test references and open gaps.</span></div>
           <div><code>suggest_tests</code><span>Turn gaps into runnable scenarios.</span></div>
         </div>
         <div class="tool-group">
@@ -233,7 +248,7 @@
     <section class="install-section" id="install">
       <header class="section-heading compact">
         <p class="kicker">Pick your entry point</p>
-        <h2>Give your agent a QA shift.</h2>
+        <h2>Install vibe-testing.</h2>
         <p>Node 20 or newer. MIT licensed. The first run installs the matching Playwright Chromium build.</p>
       </header>
 
@@ -259,8 +274,8 @@
 
     <section class="first-users">
       <div>
-        <p class="kicker">Founding QA runs</p>
-        <h2>Bring one app you are about to ship.</h2>
+        <p class="kicker">Maintainer-assisted setup</p>
+        <h2>Run a release check on one app.</h2>
       </div>
       <div>
         <p>I am working with the first ten teams directly. We will install vibe-testing, run a release check, and use the report to improve the product. Thirty minutes.</p>

@@ -7,7 +7,7 @@ Last verified: 2026-09-17
 | Surface | State | Evidence |
 | --- | --- | --- |
 | Source | Product code baseline `77da8b3`; no open repository pull requests or issues | [Repository](https://github.com/AishwaryShrivastav/vibe-testing) |
-| Product site | Live over HTTPS; desktop and mobile layouts checked | [GitHub Pages](https://aishwaryshrivastav.github.io/vibe-testing/) |
+| Product site | `0.4.6` custom-domain files prepared; DNS and Pages activation remain with the release controller | [Canonical site](https://vibetesting.tfgstudio.com/) |
 | Continuous integration | Passing for `77da8b3` | [CI run](https://github.com/AishwaryShrivastav/vibe-testing/actions/runs/35201724028) |
 | Pages deployment | Passing for launch-site commit `0b600ac` | [Pages run](https://github.com/AishwaryShrivastav/vibe-testing/actions/runs/35199859372) |
 | npm | `0.4.5` is the `latest` release | [npm package](https://www.npmjs.com/package/vibe-testing) |
@@ -32,7 +32,7 @@ Cursor Marketplace, the Claude plugin directory, Smithery, PulseMCP, and mcp.so 
 
 ## Next GTM actions
 
-1. Sign into Glama as `AishwaryShrivastav`, claim the existing listing, start inspection, and verify that the page shows 13 tools and a quality score.
+1. Sign into Glama as `AishwaryShrivastav`, claim the existing listing, start inspection, and verify that the page shows 14 tools and a quality score.
 2. Leave the three upstream directory pull requests open. Act only on maintainer feedback; do not open replacement pull requests.
 3. Submit the prepared listings for Cursor, Claude, Smithery, PulseMCP, and mcp.so from the owner's accounts. Record each resulting URL here.
 4. Recruit three founding QA runs through the product site's existing GitHub issue flow. Record framework, setup friction, first useful result, blocker, and whether the user would run it again. Do not store credentials or private application data.

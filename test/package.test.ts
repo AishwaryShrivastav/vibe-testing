@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import packageJson from '../package.json'
 import serverJson from '../server.json'
+import pluginJson from '../plugin.json'
+import mcpbManifest from '../mcpb/manifest.json'
 import fs from 'fs'
 import path from 'path'
 
@@ -27,5 +29,14 @@ describe('MCP distribution metadata', () => {
     expect(serverJson.packages[0].identifier).toBe(packageJson.name)
     expect(serverJson.packages[0].version).toBe(packageJson.version)
     expect(serverJson.description).toContain('14 Playwright tools')
+  })
+
+  it('keeps release identity and canonical links aligned', () => {
+    expect(packageJson.version).toBe('0.4.6')
+    expect(packageJson.homepage).toBe('https://vibetesting.tfgstudio.com/')
+    expect(pluginJson.version).toBe(packageJson.version)
+    expect(pluginJson.homepage).toBe(packageJson.homepage)
+    expect(mcpbManifest.version).toBe(packageJson.version)
+    expect(mcpbManifest.homepage).toBe(packageJson.homepage)
   })
 })
