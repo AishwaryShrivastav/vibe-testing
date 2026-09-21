@@ -4,11 +4,25 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
-## Unreleased
+## [0.4.6] — 2026-09-22
 
 ### Added
 
 - **Portable Agent Plugin packaging.** The repository now bundles the MCP server with a `release-qa` Agent Skill for evidence-backed browser testing and release verdicts. It includes Agent Plugins 1.0, Claude Code, and marketplace manifests so the same QA workflow can be distributed beyond MCP directories.
+- **Project configuration over MCP.** The new `configure` tool detects the framework, active local server, and authentication method before a run. The server now exposes 14 tools.
+- **TanStack Router support.** Static discovery understands pathless route groups, index routes, and dynamic segments. A bounded same-origin crawl can recover safe smoke scenarios when static discovery has no runnable scenarios.
+- **Canonical product site.** Package and site metadata now use `https://vibetesting.tfgstudio.com`, with a Pages CNAME, canonical tags, robots, sitemap, and SoftwareApplication structured data.
+
+### Fixed
+
+- **Installed CLI execution.** Package-manager symlinks now run `help` and `init` correctly through `npx`-style installs.
+- **Truthful report metrics.** Reports separate static routes, live pages, and executed scenario outcomes. Source test files are labeled as source evidence and are never presented as browser-tested routes.
+- **Bounded server and authentication detection.** Configuration probes loopback HTML servers, recognizes Google OAuth and password flows, and returns diagnostics instead of stack traces when no safe scenario can run.
+
+### Verification
+
+- The release candidate was installed into a disposable copy of AI Astrology Guru. `npx vibe-testing --help` and project-only `init` completed, TanStack Router was detected, port `8080` was selected, and Google OAuth at `/auth` was identified.
+- The packed MCP server listed 14 tools and configured the project. Static analysis found 22 routes. A focused public-home scenario attempted 1 check, passed 1, failed 0, skipped 0, and generated `.vibe/report.html`. The original Guruji working tree was unchanged.
 
 ## [0.4.5] — 2026-09-15
 
