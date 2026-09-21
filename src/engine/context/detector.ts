@@ -2,6 +2,7 @@ import { Framework } from '../../types/index.js'
 import { readJSON, fileExists, glob } from '../../utils/file.js'
 import fs from 'fs/promises'
 import path from 'path'
+import { detectProjectPortHints } from './server-detector.js'
 
 type PackageManifest = {
   dependencies?: Record<string, string>
@@ -96,7 +97,12 @@ export async function detectBaseUrl(codebasePath: string, framework: Framework):
     } catch { /* file doesn't exist */ }
   }
 
-  // 3. Framework defaults
+  // 3. Explicit package-script ports, before framework defaults.
+  const scriptHint = (await detectProjectPortHints(codebasePath))
+    .find(evidence => evidence.source === 'script')
+  if (scriptHint) return `http://localhost:${scriptHint.value}`
+
+  // 4. Framework defaults
   if (framework === 'tanstack-router') {
     const pkg = await readJSON<PackageManifest>(path.join(codebasePath, 'package.json'))
     const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {}

@@ -9,6 +9,60 @@ export type Framework =
   | 'express'
   | 'unknown'
 
+export type ServerCandidateSource =
+  | 'explicit-url'
+  | 'configured-url'
+  | 'script'
+  | 'config'
+  | 'active-port'
+  | 'common-port'
+
+export interface ServerEvidence {
+  source: ServerCandidateSource
+  value: string
+  description: string
+}
+
+export interface ServerCandidateAttempt {
+  url: string
+  source: ServerCandidateSource
+  outcome: 'selected' | 'non-html' | 'unreachable' | 'rejected'
+  detail?: string
+}
+
+export interface ServerDiscoveryDiagnostic {
+  stage: 'active-port-discovery'
+  status: 'available' | 'unavailable'
+  detail: string
+}
+
+export interface ServerDetection {
+  url?: string
+  evidence: ServerEvidence[]
+  attemptedCandidates: ServerCandidateAttempt[]
+  diagnostics: ServerDiscoveryDiagnostic[]
+}
+
+export type AuthMethod = 'oauth' | 'password' | 'unknown' | 'none'
+export type AuthProvider = 'google' | 'github' | 'microsoft' | 'other'
+
+export interface AuthDetection {
+  method: AuthMethod
+  provider?: AuthProvider
+  loginPath?: string
+  evidence: string[]
+  action?: string
+}
+
+export interface AuthVisibleControl {
+  kind: 'button' | 'link' | 'input' | 'other'
+  text?: string
+  type?: string
+  name?: string
+  placeholder?: string
+  href?: string
+}
+
 export interface Route {
   path: string
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
