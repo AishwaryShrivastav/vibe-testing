@@ -13,7 +13,7 @@ import {
 import path from 'path'
 import fs from 'fs/promises'
 import { createRequire } from 'module'
-import { fileURLToPath } from 'url'
+import { isDirectExecution } from './utils/direct-execution.js'
 const require = createRequire(import.meta.url)
 const PKG_VERSION: string = require('../package.json').version
 
@@ -200,12 +200,8 @@ const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
 
 > Edit this file with your project's details. Vibe Test reads it automatically on every run.
 
-## Login URL
-/login
-
-## Test Credentials
-- Email: your-test-user@example.com
-- Password: your-test-password
+## Authentication
+Unknown until detected. If authentication is required, describe the test-safe sign-in method here.
 
 ## Never Automate
 - delete account
@@ -217,7 +213,7 @@ const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
 
 ## Notes
 - Add any project-specific testing notes here
-- e.g. "Admin panel lives at /admin, use admin@example.com / adminpass"
+- Add authentication details only after confirming the app's actual sign-in flow
 `
 
 const AGENTS_MD_CONTENT = `# AGENTS.md — Vibe Test Integration
@@ -375,6 +371,19 @@ async function writeIfMissing(filePath: string, content: string): Promise<boolea
   return true
 }
 
+async function ensureGitignoreEntry(filePath: string, entry: string): Promise<boolean> {
+  let content = ''
+  try {
+    content = await fs.readFile(filePath, 'utf-8')
+  } catch { /* file doesn't exist */ }
+
+  if (content.split(/\r?\n/).includes(entry)) return false
+
+  const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
+  await fs.writeFile(filePath, `${content}${separator}${entry}\n`, 'utf-8')
+  return true
+}
+
 function printFeedbackNudge(): void {
   logger.dim('Feedback or bugs: https://github.com/AishwaryShrivastav/vibe-testing/issues (a star helps others find it)')
 }
@@ -407,7 +416,7 @@ export function buildInitCompletionPrompt(input: { appUrl: string }): string {
     '})',
     '',
     'This includes explicit assertions so the result is reported as outcome verified when it passes.',
-  ].join('\\n')
+  ].join('\n')
 }
 
 async function requireChromium(): Promise<boolean> {
@@ -447,7 +456,7 @@ if (process.argv.includes('--mcp')) {
 const program = new Command()
 
 program
-  .name('vibe-test')
+  .name('vibe-testing')
   .description('Code-aware browser testing for AI coding agents — reads your code, tests your app in a real browser, reports regressions')
   .version(PKG_VERSION)
 
@@ -672,10 +681,19 @@ program
     // VIBE.md
     const vibeMdPath = path.join(cwd, 'VIBE.md')
     if (await writeIfMissing(vibeMdPath, VIBE_MD_TEMPLATE)) {
-      logger.success('    Created VIBE.md (edit with your test credentials)')
+      logger.success('    Created VIBE.md (edit with project-specific testing guidance)')
       created++
     } else {
       logger.dim('    VIBE.md already exists')
+      skipped++
+    }
+
+    const gitignorePath = path.join(cwd, '.gitignore')
+    if (await ensureGitignoreEntry(gitignorePath, '.vibe/')) {
+      logger.success('    Added .vibe/ to .gitignore')
+      created++
+    } else {
+      logger.dim('    .gitignore already excludes .vibe/')
       skipped++
     }
 
@@ -740,7 +758,7 @@ program
     const prompt = buildInitCompletionPrompt({ appUrl: promptUrl })
     logger.dim('  1. Open your editor and paste the starter flow below:')
     console.log('')
-    console.log(prompt.split('\\n').map(l => `     ${l}`).join('\\n'))
+    console.log(prompt.split('\n').map(l => `     ${l}`).join('\n'))
     console.log('')
     logger.dim('  Your editor will pick up vibe-test tools automatically in every project.')
     console.log('')
@@ -782,8 +800,13 @@ program
     }
   })
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  program.parse()
+function handleCliFailure(error: unknown): void {
+  logger.error(error instanceof Error ? error.message : String(error))
+  process.exitCode = 1
+}
+
+if (isDirectExecution(import.meta.url, process.argv[1])) {
+  program.parseAsync(process.argv).catch(handleCliFailure)
 }
 
 } // end if not --mcp

@@ -17,4 +17,11 @@ describe('buildInitCompletionPrompt', () => {
     const prompt = buildInitCompletionPrompt({ appUrl: 'http://localhost:3000/admin/dashboard' })
     expect(prompt).toContain('/admin/dashboard')
   })
+
+  it('renders the starter flow with actual line breaks', () => {
+    const prompt = buildInitCompletionPrompt({ appUrl: 'http://localhost:3000' })
+
+    expect(prompt).toContain('\n2) get_context')
+    expect(prompt).not.toContain('\\n')
+  })
 })
