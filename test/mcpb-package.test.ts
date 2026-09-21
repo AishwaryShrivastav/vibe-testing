@@ -20,6 +20,7 @@ const expectedTools = [
   'run_converge',
   'get_context',
   'cleanup',
+  'configure',
 ]
 
 describe('MCPB package', () => {

@@ -21,10 +21,17 @@ vi.mock('playwright', async () => {
   return { chromium: { launch: async () => ({ newContext: async () => makeContext(), close: async () => {}, isConnected: () => true }) } }
 })
 vi.mock('../src/engine/browser/explorer.js', () => ({ exploreAllPages: async () => [], explorePage: vi.fn() }))
+vi.mock('../src/engine/browser/live-routes.js', () => ({
+  crawlLiveRoutes: async () => ({ status: 'unavailable', routes: [], scenarios: [], attemptedPaths: ['/'], reason: 'fixture unavailable' }),
+}))
 vi.mock('child_process', () => ({ exec: vi.fn() }))
 let dir: string
 let client: Client
 beforeAll(async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><title>Fixture</title>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  })))
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibe-scenario-'))
   await fs.writeFile(path.join(dir, 'upload.txt'), 'file content')
   await import('../src/mcp-server.js')
@@ -36,6 +43,7 @@ afterAll(async () => {
   await client?.callTool({ name: 'cleanup', arguments: {} })
   await client?.close()
   await fs.rm(dir, { recursive: true, force: true })
+  vi.unstubAllGlobals()
 })
 beforeEach(() => {
   fixture.body = 'Welcome to the application. This page contains enough content for the smoke verifier.'
@@ -147,10 +155,13 @@ describe.each(['CLI', 'MCP'] as const)('%s scenario reliability', via => {
   })
 })
 
-it.each(['run_full_test', 'run_converge'])('MCP %s signals empty discovery as an error', async name => {
-  const result = await client.callTool({ name, arguments: { url: 'http://example.test', codebase_path: dir } })
+it('MCP run_full_test returns a structured diagnostic for empty discovery', async () => {
+  const result = await client.callTool({ name: 'run_full_test', arguments: { url: 'http://example.test', codebase_path: dir } })
   expect(result.isError).toBe(true)
-  expect((result.content as any[])[0].text).toMatch(/no.*scenarios/i)
+  const diagnostic = JSON.parse((result.content as any[])[0].text)
+  expect(diagnostic).toMatchObject({ outcome: 'no-safe-scenarios', framework: 'unknown', static_route_count: 0 })
+  expect(diagnostic.next_action).toBeTruthy()
+  expect((result.content as any[])[0].text).not.toContain(' at ')
 })
 
 it('rejects an empty batch at the execution entry point', async () => {

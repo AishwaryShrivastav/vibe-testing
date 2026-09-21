@@ -40,7 +40,8 @@
     { "name": "run_full_test", "description": "Scan the app, run generated scenarios, and write a report." },
     { "name": "run_converge", "description": "Repeat testing and compare the current run with the previous run." },
     { "name": "get_context", "description": "Return current session, product-model, and result state." },
-    { "name": "cleanup", "description": "Close browser sessions and release test resources." }
+    { "name": "cleanup", "description": "Close browser sessions and release test resources." },
+    { "name": "configure", "description": "Idempotently configure a project and detect its framework, server, and authentication method." }
   ],
   "tools_generated": false,
   "keywords": ["testing", "playwright", "qa", "browser", "vibe-coding"],

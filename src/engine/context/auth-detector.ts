@@ -104,6 +104,7 @@ async function readAuthSourceFiles(codebasePath: string): Promise<SourceFile[]> 
 }
 
 function hasAuthSourceHint(filePath: string, content: string): boolean {
+  if (classifyOAuth(content) !== undefined) return true
   return AUTH_ROUTE.test(`/${filePath}`) ||
     /\boauth\b|\bopenid\b|\bsso\b|sign\s*in\s*\(|type\s*=\s*[{'"`]password|type\s*:\s*['"]password/i.test(content)
 }

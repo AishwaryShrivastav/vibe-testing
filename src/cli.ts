@@ -2,7 +2,6 @@
 import { Command } from 'commander'
 import { VibeTester } from './engine/index.js'
 import { readJSON, fileExists } from './utils/file.js'
-import { detectBaseUrl, detectMonorepo, findFrontendApp, detectFramework } from './engine/context/detector.js'
 import type { VibeConfig } from './types/config.js'
 import { logger } from './utils/logger.js'
 import {
@@ -14,6 +13,7 @@ import path from 'path'
 import fs from 'fs/promises'
 import { createRequire } from 'module'
 import { isDirectExecution } from './utils/direct-execution.js'
+import { configureProject } from './configure.js'
 const require = createRequire(import.meta.url)
 const PKG_VERSION: string = require('../package.json').version
 
@@ -196,26 +196,6 @@ See \`VIBE.md\` for:
 - Known flaky routes to skip
 `
 
-const VIBE_MD_TEMPLATE = `# VIBE.md — Project Testing Guidance
-
-> Edit this file with your project's details. Vibe Test reads it automatically on every run.
-
-## Authentication
-Unknown until detected. If authentication is required, describe the test-safe sign-in method here.
-
-## Never Automate
-- delete account
-- cancel subscription
-- [data-testid="danger-zone"]
-
-## Known Flaky
-- /notifications (if WebSocket dependent)
-
-## Notes
-- Add any project-specific testing notes here
-- Add authentication details only after confirming the app's actual sign-in flow
-`
-
 const AGENTS_MD_CONTENT = `# AGENTS.md — Vibe Test Integration
 
 This project uses **vibe-test**, a code-aware browser testing agent available as an MCP server. All AI coding assistants (Claude Code, Cursor, Copilot, Devin, Codex, Zed) should use these tools automatically for testing.
@@ -371,19 +351,6 @@ async function writeIfMissing(filePath: string, content: string): Promise<boolea
   return true
 }
 
-async function ensureGitignoreEntry(filePath: string, entry: string): Promise<boolean> {
-  let content = ''
-  try {
-    content = await fs.readFile(filePath, 'utf-8')
-  } catch { /* file doesn't exist */ }
-
-  if (content.split(/\r?\n/).includes(entry)) return false
-
-  const separator = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
-  await fs.writeFile(filePath, `${content}${separator}${entry}\n`, 'utf-8')
-  return true
-}
-
 function printFeedbackNudge(): void {
   logger.dim('Feedback or bugs: https://github.com/AishwaryShrivastav/vibe-testing/issues (a star helps others find it)')
 }
@@ -506,8 +473,8 @@ program
 
     printFeedbackNudge()
 
-    if (result.summary.failed > 0 || result.summary.errors > 0) {
-      process.exit(1)
+    if (result.diagnostic || result.summary.failed > 0 || result.summary.errors > 0) {
+      process.exitCode = 1
     }
   })
 
@@ -678,9 +645,10 @@ program
       skipped++
     }
 
-    // VIBE.md
-    const vibeMdPath = path.join(cwd, 'VIBE.md')
-    if (await writeIfMissing(vibeMdPath, VIBE_MD_TEMPLATE)) {
+    const projectConfiguration = await configureProject({ codebasePath: cwd })
+    initializedUrl = projectConfiguration.server.configuredUrl
+
+    if (projectConfiguration.files.vibe_md === 'created') {
       logger.success('    Created VIBE.md (edit with project-specific testing guidance)')
       created++
     } else {
@@ -688,8 +656,7 @@ program
       skipped++
     }
 
-    const gitignorePath = path.join(cwd, '.gitignore')
-    if (await ensureGitignoreEntry(gitignorePath, '.vibe/')) {
+    if (projectConfiguration.files.gitignore === 'updated') {
       logger.success('    Added .vibe/ to .gitignore')
       created++
     } else {
@@ -697,40 +664,11 @@ program
       skipped++
     }
 
-    // vibe.config.json — auto-detect port from .env / vite.config / framework defaults
-    const configPath = path.join(cwd, 'vibe.config.json')
-    if (await fileExists(configPath)) {
-      try {
-        const existingConfig = await readJSON<{ url?: string }>(configPath)
-        initializedUrl = existingConfig?.url?.trim() || ''
-      } catch { /* ignore parse failures */ }
+    if (projectConfiguration.config.status === 'preserved') {
       logger.dim('    vibe.config.json already exists')
       skipped++
     } else {
-      // Auto-detect monorepo and base URL
-      let scanPath = cwd
-      const isMonorepo = await detectMonorepo(cwd)
-      if (isMonorepo) {
-        const frontendApp = await findFrontendApp(cwd)
-        if (frontendApp) {
-          scanPath = frontendApp
-          logger.dim(`    Monorepo detected — scanning frontend app at ${path.relative(cwd, frontendApp)}`)
-        }
-      }
-
-      const framework = await detectFramework(scanPath)
-      const detectedUrl = await detectBaseUrl(scanPath, framework)
-      initializedUrl = detectedUrl
-      const defaultConfig = {
-        url: detectedUrl,
-        mode: 'deep',
-        auth: { strategy: 'skip' },
-        never_interact: ['delete account', 'cancel subscription'],
-        scope: { include: ['/**'], exclude: [], max_routes: 30 },
-        browser: { headed: true, slowMo: 40 },
-      }
-      await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2) + '\n', 'utf-8')
-      logger.success(`    Created vibe.config.json (detected URL: ${detectedUrl})`)
+      logger.success(`    Created vibe.config.json (detected URL: ${initializedUrl})`)
       created++
     }
 

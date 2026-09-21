@@ -1,4 +1,4 @@
-import type { VibeRunResult } from '../types/index.js'
+import type { RunDiagnostic, VibeRunResult } from '../types/index.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
@@ -8,6 +8,8 @@ import { generateHtmlReport } from './reporter/html.js'
 import { generateCoverageGaps } from './coverage-gaps.js'
 import { runConverge, type ConvergeOptions } from './converge.js'
 import { logger } from '../utils/logger.js'
+import { crawlLiveRoutes } from './browser/live-routes.js'
+import { detectAuthentication } from './context/auth-detector.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
@@ -37,7 +39,41 @@ export class VibeTester {
     const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
 
     if (productModel.scenarios.length === 0) {
-      throw new Error('No test scenarios generated. Check codebase path and scope config.')
+      const guidance = await import('../utils/vibe-md.js').then(module => module.readVibeGuidance(this.projectRoot))
+      const crawl = await crawlLiveRoutes({
+        baseUrl: this.config.url,
+        blockedPatterns: [
+          ...(this.config.never_interact ?? []),
+          ...(guidance?.never_automate ?? []),
+        ],
+      })
+      if (crawl.scenarios.length > 0) {
+        productModel.routes.push(...crawl.routes.filter(route =>
+          !productModel.routes.some(existing => existing.path === route.path)
+        ))
+        productModel.scenarios.push(...crawl.scenarios)
+      } else {
+        const auth = await detectAuthentication({
+          codebasePath: this.projectRoot,
+          routePaths: productModel.routes.map(route => route.path),
+        })
+        const diagnostic: RunDiagnostic = {
+          outcome: 'no-safe-scenarios',
+          framework: productModel.framework,
+          static_route_count: productModel.routes.filter(route => route.origin !== 'live-crawl').length,
+          crawl: {
+            status: crawl.status,
+            pages_observed: crawl.routes.length,
+            attempted_paths: crawl.attemptedPaths,
+            reason: crawl.reason,
+          },
+          auth,
+          next_action: auth.method === 'oauth'
+            ? auth.action ?? 'Open the OAuth flow interactively, then retry with a stored browser session.'
+            : 'Start the application, provide its URL, or add a safe public route and retry.',
+        }
+        return await this.writeDiagnosticResult(productModel, diagnostic, startTime)
+      }
     }
 
     const { results, explorations } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
@@ -111,6 +147,37 @@ export class VibeTester {
         removed_routes: snapshotDiff.removed_routes,
       } : undefined,
       summary: { total: results.length, passed, failed, errors, duration_ms: duration, elements_explored: elementsExplored, api_calls_observed: apiCallsObserved },
+    }
+  }
+
+  private async writeDiagnosticResult(
+    productModel: VibeRunResult['product_model'],
+    diagnostic: RunDiagnostic,
+    startTime: number,
+  ): Promise<VibeRunResult> {
+    const report = `${JSON.stringify(diagnostic, null, 2)}\n`
+    const reportPath = path.join(this.projectRoot, '.vibe', 'diagnostic.json')
+    await fs.mkdir(path.dirname(reportPath), { recursive: true })
+    await fs.writeFile(reportPath, report, 'utf8')
+    logger.warn('No safe scenarios could be executed.')
+    logger.info(`Next action: ${diagnostic.next_action}`)
+    logger.dim(`Diagnostic report saved to: ${reportPath}`)
+    return {
+      product_model: productModel,
+      results: [],
+      report,
+      report_path: reportPath,
+      coverage_gaps: [],
+      diagnostic,
+      summary: {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        errors: 0,
+        duration_ms: Date.now() - startTime,
+        elements_explored: 0,
+        api_calls_observed: 0,
+      },
     }
   }
 

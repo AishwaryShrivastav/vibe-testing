@@ -156,13 +156,16 @@ export async function detectLiveServer(
   }
 
   for (const candidate of dedupeCandidates(candidates)) {
-    const normalized = normalizeLoopbackHttpUrl(candidate.rawUrl)
+    const userSupplied = candidate.evidence.source === 'explicit-url' || candidate.evidence.source === 'configured-url'
+    const normalized = normalizeHttpUrl(candidate.rawUrl, userSupplied)
     if (!normalized) {
       attemptedCandidates.push({
         url: safeDisplayUrl(candidate.rawUrl),
         source: candidate.evidence.source,
         outcome: 'rejected',
-        detail: 'Only loopback HTTP URLs are eligible for probing',
+        detail: userSupplied
+          ? 'Explicit and configured URLs must use HTTP or HTTPS'
+          : 'Discovered server candidates must use loopback HTTP',
       })
       continue
     }
@@ -335,10 +338,15 @@ function portCandidate(port: number, evidence: ServerEvidence): Candidate {
   return { rawUrl: `http://localhost:${port}`, evidence }
 }
 
-function normalizeLoopbackHttpUrl(value: string): NormalizedCandidate | null {
+function normalizeHttpUrl(value: string, allowRemote: boolean): NormalizedCandidate | null {
   try {
     const url = new URL(value)
-    if (url.protocol !== 'http:' || !isLoopbackHostname(url.hostname)) return null
+    const isLoopback = isLoopbackHostname(url.hostname)
+    if (allowRemote) {
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    } else if (url.protocol !== 'http:' || !isLoopback) {
+      return null
+    }
     url.username = ''
     url.password = ''
     url.search = ''
@@ -385,7 +393,8 @@ function dedupeEvidence(evidence: ServerEvidence[]): ServerEvidence[] {
 function dedupeCandidates(candidates: Candidate[]): Candidate[] {
   const seen = new Set<string>()
   return candidates.filter(candidate => {
-    const normalized = normalizeLoopbackHttpUrl(candidate.rawUrl)
+    const allowRemote = candidate.evidence.source === 'explicit-url' || candidate.evidence.source === 'configured-url'
+    const normalized = normalizeHttpUrl(candidate.rawUrl, allowRemote)
     const key = normalized?.displayUrl ?? safeDisplayUrl(candidate.rawUrl)
     if (seen.has(key)) return false
     seen.add(key)

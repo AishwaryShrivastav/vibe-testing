@@ -61,14 +61,87 @@ describe('detectLiveServer', () => {
 
     const result = await detectLiveServer(
       { codebasePath, explicitUrl: 'https://example.com', configuredUrl },
-      { listActiveLoopbackPorts: async () => [], commonPorts: [] },
+      {
+        fetch: (async input => {
+          if (String(input).startsWith('https://example.com')) throw new Error('remote unavailable')
+          return fetch(input)
+        }) as typeof fetch,
+        listActiveLoopbackPorts: async () => [],
+        commonPorts: [],
+      },
     )
 
     expect(result.url).toBe(configuredUrl)
     expect(result.attemptedCandidates[0]).toMatchObject({
       source: 'explicit-url',
-      outcome: 'rejected',
+      outcome: 'unreachable',
     })
+  })
+
+  it('selects a reachable remote HTTPS URL only after an injected HTML probe', async () => {
+    const codebasePath = await makeProject()
+    const calls: string[] = []
+    const result = await detectLiveServer(
+      { codebasePath, explicitUrl: 'https://staging.example.test/app?token=secret#fragment' },
+      {
+        fetch: (async (input, init) => {
+          calls.push(String(input))
+          expect(init?.redirect).toBe('manual')
+          expect(init?.signal).toBeDefined()
+          return new Response('<!doctype html><title>Staging</title>', {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+          })
+        }) as typeof fetch,
+        listActiveLoopbackPorts: async () => [],
+        commonPorts: [],
+      },
+    )
+
+    expect(calls).toEqual(['https://staging.example.test/app'])
+    expect(result.url).toBe('https://staging.example.test')
+    expect(result.attemptedCandidates).toEqual([
+      expect.objectContaining({ outcome: 'selected', source: 'explicit-url' }),
+    ])
+    expect(JSON.stringify(result)).not.toContain('secret')
+  })
+
+  it('does not select an unreachable remote URL', async () => {
+    const codebasePath = await makeProject()
+    const result = await detectLiveServer(
+      { codebasePath, explicitUrl: 'https://offline.example.test' },
+      {
+        fetch: (async () => { throw new Error('connect timeout') }) as typeof fetch,
+        listActiveLoopbackPorts: async () => [],
+        commonPorts: [],
+        timeoutMs: 25,
+      },
+    )
+
+    expect(result.url).toBeUndefined()
+    expect(result.attemptedCandidates).toEqual([
+      expect.objectContaining({ url: 'https://offline.example.test', outcome: 'unreachable' }),
+    ])
+  })
+
+  it('does not select a remote URL that returns non-HTML content', async () => {
+    const codebasePath = await makeProject()
+    const result = await detectLiveServer(
+      { codebasePath, configuredUrl: 'https://api.example.test' },
+      {
+        fetch: (async () => new Response('{"ok":true}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })) as typeof fetch,
+        listActiveLoopbackPorts: async () => [],
+        commonPorts: [],
+      },
+    )
+
+    expect(result.url).toBeUndefined()
+    expect(result.attemptedCandidates).toEqual([
+      expect.objectContaining({ url: 'https://api.example.test', source: 'configured-url', outcome: 'non-html' }),
+    ])
   })
 
   it('detects a Vite --port script before active and common ports', async () => {
@@ -187,12 +260,19 @@ describe('detectLiveServer', () => {
         explicitUrl: 'https://user:password@example.com/auth?state=state-secret#token-secret',
         configuredUrl,
       },
-      { listActiveLoopbackPorts: async () => [], commonPorts: [] },
+      {
+        fetch: (async input => {
+          if (String(input).startsWith('https://example.com')) throw new Error('remote unavailable')
+          return fetch(input)
+        }) as typeof fetch,
+        listActiveLoopbackPorts: async () => [],
+        commonPorts: [],
+      },
     )
 
     expect(result.attemptedCandidates[0]).toEqual(expect.objectContaining({
       url: 'https://example.com/auth',
-      outcome: 'rejected',
+      outcome: 'unreachable',
     }))
     expect(JSON.stringify(result)).not.toMatch(/user|password|state-secret|token-secret/)
   })

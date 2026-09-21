@@ -70,6 +70,7 @@ export interface Route {
   requires_auth: boolean
   dynamic_segments: string[]
   file_path?: string
+  origin?: 'static' | 'live-crawl'
 }
 
 export interface FormField {
@@ -187,6 +188,15 @@ export interface TestScenario {
   is_gap: boolean
   generated_by: 'ai' | 'heuristic'
   requires_auth?: boolean
+  route_origin?: 'static' | 'live-crawl'
+}
+
+export interface LiveRouteCrawl {
+  status: 'completed' | 'unavailable' | 'failed'
+  routes: Route[]
+  scenarios: TestScenario[]
+  attemptedPaths: string[]
+  reason?: string
 }
 
 export type TestStatus = 'pass' | 'fail' | 'skip' | 'error'
@@ -294,6 +304,7 @@ export interface VibeRunResult {
   report: string
   report_path: string
   coverage_gaps: CoverageGapSuggestion[]
+  diagnostic?: RunDiagnostic
   snapshot_diff?: {
     newly_passing: string[]
     newly_failing: string[]
@@ -312,4 +323,18 @@ export interface VibeRunResult {
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
   }
+}
+
+export interface RunDiagnostic {
+  outcome: 'no-safe-scenarios' | 'server-unavailable'
+  framework: Framework
+  static_route_count: number
+  crawl: {
+    status: LiveRouteCrawl['status'] | 'not-started'
+    pages_observed: number
+    attempted_paths: string[]
+    reason?: string
+  }
+  auth?: AuthDetection
+  next_action: string
 }

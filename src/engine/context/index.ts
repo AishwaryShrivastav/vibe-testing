@@ -64,6 +64,7 @@ export async function buildProductModel(
   routes = routes
     .filter(r => matchesScope(r.path, include, exclude))
     .slice(0, max_routes)
+    .map(route => ({ ...route, origin: route.origin ?? 'static' }))
 
   spin2.succeed(`Found ${routes.length} routes`)
 
@@ -99,6 +100,7 @@ export async function buildProductModel(
   const spin6 = logger.spin(`Generating test scenarios (${mode} mode)...`)
   const configuredLoginUrl = config.auth?.login_url ?? guidance?.login_url
   const scenarios = await generateScenarios(gaps, behaviours, coverage, mode, recommendations, configuredLoginUrl)
+  for (const scenario of scenarios) scenario.route_origin = 'static'
   spin6.succeed(`Generated ${scenarios.length} test scenarios`)
 
   const projectName = path.basename(codebasePath)

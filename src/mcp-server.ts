@@ -20,6 +20,8 @@ import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
 import { createRequire } from 'module'
+import { configureProject } from './configure.js'
+import type { RunDiagnostic } from './types/index.js'
 
 const require = createRequire(import.meta.url)
 const PKG_VERSION: string = require('../package.json').version
@@ -75,7 +77,10 @@ async function screenshotToBase64(filepath: string): Promise<string | null> {
 
 const server = new Server(
   { name: 'vibe-test', version: PKG_VERSION },
-  { capabilities: { tools: {} } }
+  {
+    capabilities: { tools: {} },
+    instructions: 'Start with configure for project, framework, server, and auth detection. Then call run_full_test; use generate_report after granular tool runs.',
+  }
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -254,7 +259,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
           headed: { type: 'boolean', default: false, description: 'Show the browser window during testing. Defaults to headless (false) when used via MCP. Set true to watch the browser.' },
         },
-        required: ['url'],
+        required: [],
       },
     },
     {
@@ -302,6 +307,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: [],
       },
     },
+    {
+      name: 'configure',
+      description: 'Idempotently configure a project and detect its framework, running server, and authentication method. Existing VIBE.md and vibe.config.json files are preserved.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          codebase_path: { type: 'string', description: 'Absolute path to the project root directory.' },
+          url: { type: 'string', description: 'Optional application URL. If omitted, project configuration and bounded local server detection are used.' },
+        },
+        required: ['codebase_path'],
+      },
+    },
   ],
 }))
 
@@ -326,6 +343,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'run_converge': return await handleRunConverge(args)
       case 'get_context': return await handleGetContext(args)
       case 'cleanup': return await handleCleanup()
+      case 'configure': return await handleConfigure(args)
       default: throw new Error(`Unknown tool: ${name}`)
     }
   } catch (err) {
@@ -340,6 +358,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 })
 
 // ─── scan_codebase ────────────────────────────────────────────────────────────
+
+async function handleConfigure(args: Record<string, unknown>) {
+  const codebasePath = (args.codebase_path as string | undefined)?.trim()
+  if (!codebasePath) throw new Error('codebase_path is required')
+  const result = await configureProject({
+    codebasePath,
+    url: (args.url as string | undefined)?.trim() || undefined,
+  })
+  return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] }
+}
 
 async function handleScanCodebase(args: Record<string, unknown>) {
   const codebasePath = (args.codebase_path as string) ?? process.cwd()
@@ -1152,14 +1180,48 @@ async function handleTakeScreenshot(args: Record<string, unknown>) {
 // ─── run_full_test ────────────────────────────────────────────────────────────
 
 async function handleRunFullTest(args: Record<string, unknown>) {
+  const codebasePath = (args.codebase_path as string | undefined) ?? process.cwd()
+  const configured = await configureProject({
+    codebasePath,
+    url: (args.url as string | undefined)?.trim() || undefined,
+  })
+  if (!configured.server.url) {
+    const diagnostic: RunDiagnostic = {
+      outcome: 'server-unavailable',
+      framework: configured.framework,
+      static_route_count: configured.static_route_count,
+      crawl: {
+        status: 'not-started',
+        pages_observed: 0,
+        attempted_paths: configured.server.attemptedCandidates.map(candidate => candidate.url),
+        reason: 'No reachable HTML server was detected.',
+      },
+      auth: configured.auth,
+      next_action: `Start the application at ${configured.server.configuredUrl} or pass its active URL, then retry run_full_test.`,
+    }
+    const reportPath = path.join(codebasePath, '.vibe', 'diagnostic.json')
+    await ensureDir(path.dirname(reportPath))
+    await fs.writeFile(reportPath, `${JSON.stringify(diagnostic, null, 2)}\n`, 'utf8')
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify({ ...diagnostic, report_path: reportPath }, null, 2) }],
+      isError: true,
+    }
+  }
   const tester = new VibeTester({
-    url: args.url as string,
-    codebase_path: args.codebase_path as string | undefined,
+    url: configured.server.url,
+    codebase_path: codebasePath,
     mode: (args.mode as 'fast' | 'deep') ?? 'deep',
     browser: { headed: (args.headed as boolean) ?? false },
   })
 
   const result = await tester.run()
+
+  if (result.diagnostic) {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ...result.diagnostic, report_path: result.report_path }, null, 2) }],
+      isError: true,
+    }
+  }
 
   openInBrowser(result.report_path)
 
