@@ -90,7 +90,7 @@ export async function buildProductModel(
     const i = c.intelligence?.selectors
     return sum + (i ? i.by_text.length + i.by_role.length + i.by_placeholder.length + i.by_test_id.length : 0)
   }, 0)
-  spin4.succeed(`Coverage: ${coveredCount} routes tested, ${totalSelectors} selectors learned, ${totalFlows} user flows found`)
+  spin4.succeed(`Source test coverage: ${coveredCount} route references, ${totalSelectors} selectors learned, ${totalFlows} user flows found`)
 
   const spin5 = logger.spin('Analysing test gaps...')
   const gaps = analyzeGaps(routes, coverage, memory)

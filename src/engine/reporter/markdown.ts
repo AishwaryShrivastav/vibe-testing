@@ -1,12 +1,14 @@
 import { TestResult, ProductModel, StepLog } from '../../types/index.js'
 import { VibeConfig } from '../../types/config.js'
 import path from 'path'
+import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
 
 export function generateMarkdownReport(
   results: TestResult[],
   productModel: ProductModel,
   config: VibeConfig
 ): string {
+  const metrics = deriveReportMetrics(productModel, results)
   const passed  = results.filter(r => r.status === 'pass')
   const failed  = results.filter(r => r.status === 'fail')
   const errored = results.filter(r => r.status === 'error')
@@ -26,8 +28,12 @@ export function generateMarkdownReport(
   lines.push(`| **Mode** | ${config.mode ?? 'deep'} |`)
   lines.push(`| **Run at** | ${new Date().toLocaleString()} |`)
   lines.push(`| **Duration** | ${(totalMs / 1000).toFixed(1)}s |`)
-  lines.push(`| **Routes scanned** | ${productModel.routes.length} |`)
+  lines.push(`| **Static routes discovered** | ${metrics.staticRoutesDiscovered} |`)
+  lines.push(`| **Live pages observed** | ${metrics.livePagesObserved} |`)
+  lines.push(`| **Scenarios executed** | ${metrics.scenariosExecuted} |`)
   lines.push(`| **Gaps found** | ${productModel.gaps.length} (${productModel.gaps.filter(g => g.priority === 'high').length} high priority) |`)
+  lines.push(``)
+  lines.push(formatReportMetrics(metrics))
   lines.push(``)
 
   // ── Summary ─────────────────────────────────────────────────────────
@@ -38,6 +44,7 @@ export function generateMarkdownReport(
   lines.push(`| ✅ Passed | **${passed.length}** | ${passed.map(r => r.scenario.name).join(', ') || '—'} |`)
   lines.push(`| ❌ Failed | **${failed.length}** | ${failed.map(r => r.scenario.name).join(', ') || '—'} |`)
   lines.push(`| ⚠️ Error | **${errored.length}** | ${errored.map(r => r.scenario.name).join(', ') || '—'} |`)
+  lines.push(`| ⏭️ Skipped | **${metrics.scenariosSkipped}** | ${results.filter(r => r.status === 'skip').map(r => r.scenario.name).join(', ') || '—'} |`)
   lines.push(`| **Total** | **${results.length}** | |`)
   lines.push(``)
 
@@ -72,12 +79,12 @@ export function generateMarkdownReport(
   // Routes table
   lines.push(`### Routes Discovered`)
   lines.push(``)
-  lines.push(`| Route | Type | Auth Required | Tested |`)
+  lines.push(`| Route | Type | Auth Required | Source Test Reference |`)
   lines.push(`|-------|------|---------------|--------|`)
   for (const route of productModel.routes) {
     const covered = productModel.coverage[route.path]
-    const tested = covered?.tested ? '✅ Yes' : '❌ No'
-    lines.push(`| \`${route.path}\` | ${route.type} | ${route.requires_auth ? 'Yes' : 'No'} | ${tested} |`)
+    const sourceReference = covered?.tested ? 'Yes' : 'No'
+    lines.push(`| \`${route.path}\` | ${route.type} | ${route.requires_auth ? 'Yes' : 'No'} | ${sourceReference} |`)
   }
   lines.push(``)
 

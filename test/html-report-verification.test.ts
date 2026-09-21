@@ -93,6 +93,9 @@ describe('generateHtmlReport verification status classification', () => {
     expect(report).toMatch(/<div class="summary-stat outcome"><div class="num">1<\/div><div class="lbl">Outcome verified<\/div><\/div>/)
     expect(report).toMatch(/<div class="summary-stat smoke"><div class="num">1<\/div><div class="lbl">Smoke check passed<\/div><\/div>/)
     expect(report).toMatch(/<div class="summary-stat not"><div class="num">1<\/div><div class="lbl">Not verified<\/div><\/div>/)
+    expect(report).toContain('1 static route discovered')
+    expect(report).toContain('0 live pages observed')
+    expect(report).toContain('3 scenarios executed')
   })
 
   it('uses current package version in the footer', async () => {

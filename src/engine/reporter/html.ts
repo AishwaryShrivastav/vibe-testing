@@ -4,6 +4,7 @@ import type { MemoryRecommendations } from '../memory/index.js'
 import type { PageExploration, InteractionOutcome, ApiObservation } from '../browser/explorer.js'
 import packageJson from '../../../package.json' with { type: 'json' }
 import fs from 'fs/promises'
+import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
 
 export async function generateHtmlReport(
   results: TestResult[],
@@ -13,6 +14,7 @@ export async function generateHtmlReport(
   coverageGaps: CoverageGapSuggestion[],
   recommendations?: MemoryRecommendations
 ): Promise<string> {
+  const metrics = deriveReportMetrics(productModel, results)
   const passed  = results.filter(r => r.status === 'pass')
   const failed  = results.filter(r => r.status === 'fail')
   const errored = results.filter(r => r.status === 'error')
@@ -73,16 +75,20 @@ ${CSS}
   <p>${productModel.project_name} &middot; ${config.url} &middot; ${new Date().toLocaleString()}</p>
   <div class="meta-grid">
     <div class="meta-item"><div class="label">Framework</div><div class="value">${productModel.framework}</div></div>
-    <div class="meta-item"><div class="label">Routes</div><div class="value">${productModel.routes.length}</div></div>
+    <div class="meta-item"><div class="label">Static routes discovered</div><div class="value">${metrics.staticRoutesDiscovered}</div></div>
+    <div class="meta-item"><div class="label">Live pages observed</div><div class="value">${metrics.livePagesObserved}</div></div>
+    <div class="meta-item"><div class="label">Scenarios executed</div><div class="value">${metrics.scenariosExecuted}</div></div>
     <div class="meta-item"><div class="label">Elements</div><div class="value">${totalElements}</div></div>
     <div class="meta-item"><div class="label">API Calls</div><div class="value">${totalApis}${apiErrors > 0 ? ` <span style="color:var(--fail)">(${apiErrors} errors)</span>` : ''}</div></div>
     <div class="meta-item"><div class="label">Duration</div><div class="value">${(totalMs / 1000).toFixed(1)}s</div></div>
   </div>
+  <p class="metric-summary">${formatReportMetrics(metrics)}</p>
 </header>
 
 <div class="summary-bar">
-  <div class="summary-stat pass"><div class="num">${passed.length}</div><div class="lbl">Passed</div></div>
-  <div class="summary-stat fail"><div class="num">${failed.length}</div><div class="lbl">Failed</div></div>
+  <div class="summary-stat pass"><div class="num">${metrics.scenariosPassed}</div><div class="lbl">Passed</div></div>
+  <div class="summary-stat fail"><div class="num">${metrics.scenariosFailed}</div><div class="lbl">Failed</div></div>
+  <div class="summary-stat skip"><div class="num">${metrics.scenariosSkipped}</div><div class="lbl">Skipped</div></div>
   <div class="summary-stat error"><div class="num">${errored.length}</div><div class="lbl">Errors</div></div>
   <div class="summary-stat outcome"><div class="num">${outcomeVerified.length}</div><div class="lbl">Outcome verified</div></div>
   <div class="summary-stat smoke"><div class="num">${smokeChecks.length}</div><div class="lbl">Smoke check passed</div></div>
@@ -278,14 +284,14 @@ function renderCoverageTable(productModel: ProductModel): string {
       <td><code>${r.path}</code></td>
       <td>${r.type}</td>
       <td>${r.requires_auth ? 'Yes' : 'No'}</td>
-      <td>${covered?.tested ? '<span class="badge pass">Tested</span>' : '<span class="badge fail">No tests</span>'}</td>
+      <td>${covered?.tested ? '<span class="badge pass">Referenced</span>' : '<span class="badge fail">No source test</span>'}</td>
     </tr>`
   }).join('\n')
 
   return `<h2>Route Coverage</h2>
   <div class="section-table">
     <table>
-      <thead><tr><th>Route</th><th>Type</th><th>Auth</th><th>Tested</th></tr></thead>
+      <thead><tr><th>Route</th><th>Type</th><th>Auth</th><th>Source test reference</th></tr></thead>
       <tbody>${routeRows}</tbody>
     </table>
   </div>`
@@ -426,6 +432,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
 header h1 { font-size: 28px; font-weight: 700; color: #fff; }
 header p { color: var(--text-dim); font-size: 14px; }
+.metric-summary { margin-top: 14px; }
 .meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 20px; }
 .meta-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .meta-item .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
@@ -435,6 +442,7 @@ header p { color: var(--text-dim); font-size: 14px; }
 .summary-stat.pass { background: var(--pass-bg); border-color: rgba(34,197,94,0.2); }
 .summary-stat.fail { background: var(--fail-bg); border-color: rgba(239,68,68,0.2); }
 .summary-stat.error { background: var(--warn-bg); border-color: rgba(245,158,11,0.2); }
+.summary-stat.skip { background: var(--surface); }
 .summary-stat.outcome { background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.2); }
 .summary-stat.smoke { background: var(--accent-bg); border-color: rgba(99,102,241,0.2); }
 .summary-stat.not { background: var(--warn-bg); border-color: rgba(245,158,11,0.2); }
@@ -442,6 +450,7 @@ header p { color: var(--text-dim); font-size: 14px; }
 .summary-stat.pass .num { color: var(--pass); }
 .summary-stat.fail .num { color: var(--fail); }
 .summary-stat.error .num { color: var(--warn); }
+.summary-stat.skip .num { color: var(--text-dim); }
 .summary-stat.outcome .num { color: var(--pass); }
 .summary-stat.smoke .num { color: var(--accent); }
 .summary-stat.not .num { color: var(--warn); }
