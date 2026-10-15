@@ -25,9 +25,19 @@ npx vibe-testing@latest install-browser
 
 Playwright keeps Chromium outside the npm dependency tree. The current bundle omits that platform-specific download, which keeps one artifact usable on macOS, Windows, and Linux.
 
-## Smithery handoff
+## Smithery publication
 
-Smithery accepts a pre-built MCPB for local stdio servers. Build the artifact, sign in at `smithery.ai/new`, choose the local MCPB option, upload the file, and complete the listing. The upload is intentionally outside this repository workflow.
+Smithery accepts a pre-built MCPB for local stdio servers. Its current web form only accepts hosted HTTP URLs. For this local bundle, sign in to the official Smithery CLI and publish through the Smithery API:
+
+```bash
+npx smithery auth login
+npm run build:mcpb
+node scripts/publish-smithery.mjs aish/vibe-testing
+```
+
+The publisher reads the bundled manifest and asks the running server for its full tool schemas. Smithery requires those schemas in its server card, while the MCPB manifest schema only permits tool names and descriptions. It uploads the unchanged bundle with the full card as release metadata. Never add `inputSchema` to `mcpb/manifest.json`; that would invalidate the portable bundle.
+
+The first release was accepted on 2026-10-15: [aish/vibe-testing](https://smithery.ai/servers/aish/vibe-testing), release `c1db8194-5e67-49b6-9894-69e2e40c3ba4`. The public server record reports 14 tools and a downloadable stdio bundle.
 
 Use these listing facts:
 
@@ -35,7 +45,7 @@ Use these listing facts:
 - Transport: local stdio
 - Runtime: Node.js 20 or newer
 - Authentication: none
-- Tools: 13
+- Tools: 14
 - Browser prerequisite: one Playwright Chromium install
 
 ## Sources
