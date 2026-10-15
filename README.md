@@ -1,6 +1,8 @@
 # vibe-testing
 
 [![npm version](https://img.shields.io/npm/v/vibe-testing.svg)](https://www.npmjs.com/package/vibe-testing)
+[![npm downloads](https://img.shields.io/npm/dt/vibe-testing?label=npm%20downloads)](https://www.npmjs.com/package/vibe-testing)
+[![GitHub stars](https://img.shields.io/github/stars/AishwaryShrivastav/vibe-testing?style=flat)](https://github.com/AishwaryShrivastav/vibe-testing/stargazers)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -9,6 +11,8 @@
 **Code-aware browser testing for AI coding agents.**
 
 [Product site](https://testing.tfgstudio.com/) · [npm](https://www.npmjs.com/package/vibe-testing) · [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing) · [Privacy](PRIVACY.md) · [Launch status](https://github.com/AishwaryShrivastav/vibe-testing/blob/main/docs/distribution/launch-status.md)
+
+Listed in [Awesome MCP Servers](https://github.com/punkpeye/awesome-mcp-servers/pull/14575). The download badge shows npm's cumulative package downloads; `npx` package fetches contribute to that total.
 
 vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 14 testing tools, or as a standalone CLI.
 
