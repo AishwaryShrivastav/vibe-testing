@@ -30,13 +30,17 @@ These are external gates. Keep them open and do not create duplicates.
 | Awesome Playwright | Submitted 2026-10-15; PR open and mergeable | [PR #243](https://github.com/mxschmitt/awesome-playwright/pull/243) |
 | TheJambo awesome-testing | Submitted 2026-10-15; PR open and mergeable; dead-link check passed | [PR #301](https://github.com/TheJambo/awesome-testing/pull/301) |
 | mcpHQ awesome-mcp-servers | Submitted 2026-10-15; PR open and mergeable; local validation and generated-file checks passed | [PR #263](https://github.com/mcpHQ/awesome-mcp-servers/pull/263) |
+| MCP.Directory | Submitted 2026-10-15; accepted for review, with publication promised within 24 hours; no public listing URL yet | [Submission page](https://mcp.directory/submit) |
+| mcpservers.org | Submitted 2026-10-15 on the free plan; confirmation says review within 2 weeks; no public listing URL yet | [Submission page](https://mcpservers.org/submit) |
+| mcp.tc | Submitted 2026-10-15; server found, awaiting human approval; proposed listing URL is inactive until approval | [Submission status](https://mcp.tc/s/SIEStnNOmnwNesuW) |
+| Reddit r/SideProject | Published and verified by the founder on 2026-10-15; no repost or crosspost made here | [Launch post](https://www.reddit.com/r/SideProject/comments/1x6chh1/i_built_a_free_browser_testing_tool_that_shows/) |
 
-Cursor Marketplace, the Claude plugin directory, Smithery, and PulseMCP still require account or browser submission. The prepared copy and exact form steps are in [marketplace-listings.md](marketplace-listings.md). The current GTM campaign defers mcp.so's paid submission until user demand is established. No social post, direct message, or email was sent during this pass.
+Cursor Marketplace, the Claude plugin directory, Smithery, and PulseMCP still require account or browser submission. The prepared copy and exact form steps are in [marketplace-listings.md](marketplace-listings.md). The current GTM campaign defers mcp.so's paid submission until user demand is established. AgentoolRank's free form failed twice with a server error, and testingtools.ai's submission page rendered without a form. AllMCPs requires agreement to its binding Terms on submission, so it was left unsubmitted. MCPVault, MCP Market, MCP Harbor, and MCPRepository already list vibe-testing; no duplicate was sent. No individual outreach or paid placement was used.
 
 ## Next GTM actions
 
 1. Get the first external builder to run vibe-testing on a real app change and open a completed HTML report. Record framework, acquisition source, tested flow, useful result, setup friction, and whether they would run it again; do not count installs or downloads as activations.
-2. Monitor the seven open directory submissions above for maintainer feedback and merge decisions. Do not reopen or duplicate them.
+2. Monitor the seven earlier open directory submissions and the three new review queues above. Do not reopen or duplicate them. Check the mcp.tc status URL for its eventual public listing.
 3. From the owner's account, refresh the Glama inspection if possible and submit Cursor, Claude, Smithery, and PulseMCP listings where their forms accept the current package. Record each resulting URL.
 4. Use a real external report to choose a concrete example for later community publication. The existing GTM campaign reserves social and HN posts for the founder.
 
@@ -44,4 +48,4 @@ The acquisition gap remains first-user evidence: the current verified activated-
 
 ## Local verification for this update
 
-On 2026-10-15, `npm ci`, `npm test` (209 passed, 12 skipped), `npm run build`, and `npm run build:mcpb` completed successfully. The first test run failed three browser-dependent tests because this machine lacked the matching Chromium build; those tests passed after installing the required browser. The generated archive in `artifacts/` was not committed.
+On 2026-10-15, `npm ci`, `npm test` (209 passed, 12 skipped), `npm run build`, and `npm run build:mcpb` completed successfully for this note update. The generated archive in `artifacts/` was not committed.
