@@ -8,7 +8,7 @@
 
 **Code-aware browser testing for AI coding agents.**
 
-[Product site](https://vibetesting.tfgstudio.com/) · [npm](https://www.npmjs.com/package/vibe-testing) · [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing) · [Launch status](https://github.com/AishwaryShrivastav/vibe-testing/blob/main/docs/distribution/launch-status.md)
+[Product site](https://testing.tfgstudio.com/) · [npm](https://www.npmjs.com/package/vibe-testing) · [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing) · [Privacy](PRIVACY.md) · [Launch status](https://github.com/AishwaryShrivastav/vibe-testing/blob/main/docs/distribution/launch-status.md)
 
 vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 14 testing tools, or as a standalone CLI.
 
