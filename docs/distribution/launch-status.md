@@ -36,6 +36,8 @@ These are external gates. Keep them open and do not create duplicates.
 | mcp.tc | Submitted 2026-10-15; server found, awaiting human approval; proposed listing URL is inactive until approval | [Submission status](https://mcp.tc/s/SIEStnNOmnwNesuW) |
 | Reddit r/SideProject | Published and verified by the founder on 2026-10-15; no repost or crosspost made here | [Launch post](https://www.reddit.com/r/SideProject/comments/1x6chh1/i_built_a_free_browser_testing_tool_that_shows/) |
 | X personal profile | Published 2026-10-15; a single build note with a product link, no engagement request | [Post](https://x.com/aishshrivastava/status/2110778188058263700) |
+| X Build in Public community | Published 2026-10-15; a practical note on MCPB and Smithery tool schemas, with no product link or engagement request | [Community post](https://x.com/aishshrivastava/status/2110781857382171119) |
+| X source links | GitHub and npm links added as a reply to the existing personal launch post | [Reply](https://x.com/aishshrivastava/status/2110781956246143328) |
 | PulseMCP | New submissions temporarily paused by the operator; no submission made | [Submission page](https://www.pulsemcp.com/submit) |
 | Smithery | Published 2026-10-15; release `c1db8194-5e67-49b6-9894-69e2e40c3ba4` succeeded with 14 tools and a downloadable local bundle | [Live listing](https://smithery.ai/servers/aish/vibe-testing) |
 | Cursor Marketplace | Publisher application submitted 2026-10-15 under Tech For Good; on-screen receipt says review pending, with no public listing yet | [Publisher portal](https://cursor.com/marketplace/publish) |
@@ -48,7 +50,7 @@ Cursor Marketplace has a publisher application in review, but no public plugin l
 1. Get the first external builder to run vibe-testing on a real app change and open a completed HTML report. Record framework, acquisition source, tested flow, useful result, setup friction, and whether they would run it again; do not count installs or downloads as activations.
 2. Monitor the seven earlier open directory submissions and the three new review queues above. Do not reopen or duplicate them. Check the mcp.tc status URL for its eventual public listing.
 3. From the owner's account, refresh the Glama inspection if possible and correct Claude's captured privacy-policy field when an edit path or reviewer feedback appears. Follow up on Cursor's publisher review before requesting an actual plugin listing. Recheck PulseMCP when submissions reopen. Record each resulting URL.
-4. Use a real external report to choose a concrete example for later community publication. One X build note is live; further posts should respond to actual testing problems rather than repeat a launch announcement.
+4. Use a real external report to choose a concrete example for later community publication. The X profile post and Build in Public note are live; further posts should respond to actual testing problems rather than repeat a launch announcement.
 
 The acquisition gap remains first-user evidence: the current verified activated-external-user count is zero. Directory review is a distribution step, not an activation.
 
