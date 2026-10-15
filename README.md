@@ -10,7 +10,7 @@
 
 **Code-aware browser testing for AI coding agents.**
 
-[Product site](https://testing.tfgstudio.com/) · [npm](https://www.npmjs.com/package/vibe-testing) · [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing) · [Privacy](PRIVACY.md) · [Launch status](https://github.com/AishwaryShrivastav/vibe-testing/blob/main/docs/distribution/launch-status.md)
+[Product site](https://testing.tfgstudio.com/) · [npm](https://www.npmjs.com/package/vibe-testing) · [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.AishwaryShrivastav%2Fvibe-testing) · [Smithery](https://smithery.ai/servers/aish/vibe-testing) · [Privacy](PRIVACY.md) · [Launch status](https://github.com/AishwaryShrivastav/vibe-testing/blob/main/docs/distribution/launch-status.md)
 
 Listed in [Awesome MCP Servers](https://github.com/punkpeye/awesome-mcp-servers/pull/14575). The download badge shows npm's cumulative package downloads; `npx` package fetches contribute to that total.
 
