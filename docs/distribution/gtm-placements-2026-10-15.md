@@ -4,7 +4,7 @@ Owner: parallel GTM agent. Scope: new, non-LinkedIn placements for vibe-testing 
 
 ## Count and proof
 
-**Seven distinct new public submission pages were verified live on 2026-10-15.** All seven are awaiting maintainer review. **Zero new directory listings were verified published or merged.** An open PR or issue is a public submission, not an accepted listing. Forms without a public receipt, existing listings, and earlier submissions in [launch status](launch-status.md) are excluded.
+**Eight distinct new public submission pages were verified live on 2026-10-15.** All eight are awaiting maintainer review. **Zero new directory listings were verified published or merged.** An open PR or issue is a public submission, not an accepted listing. Forms without a public receipt, existing listings, and earlier submissions in [launch status](launch-status.md) are excluded.
 
 | Channel | Format and rule checked | Public submission | State at verification |
 | --- | --- | --- | --- |
@@ -15,6 +15,7 @@ Owner: parallel GTM agent. Scope: new, non-LinkedIn placements for vibe-testing 
 | YuzeHao Awesome MCP Servers | Existing [Development Tools section](https://github.com/YuzeHao2023/Awesome-MCP-Servers#category-development-tools-) and recent single-server PRs establish the format; checked for an existing entry | [PR #636](https://github.com/YuzeHao2023/Awesome-MCP-Servers/pull/636) | Open; development-tools entry |
 | Awesome Test Automation | [Contribution guide](https://github.com/atinfo/awesome-test-automation/blob/master/CONTRIBUTING.md) accepts one short linked entry per PR; JavaScript Web UI testing section contains Playwright | [PR #612](https://github.com/atinfo/awesome-test-automation/pull/612) | Open; JavaScript Web UI testing entry |
 | Best-of MCP Servers | [Contribution guide](https://github.com/tolkonepiu/best-of-mcp-servers/blob/main/CONTRIBUTING.md) requires one project in `projects.yaml`, not a README edit; checked project and issue duplicates | [PR #506](https://github.com/tolkonepiu/best-of-mcp-servers/pull/506) | Open; browser-automation category |
+| Awesome Claude Code Plugins | [Contributing section](https://github.com/ccplugins/awesome-claude-code-plugins#contributing) welcomes submitted plugins; its Code Quality Testing section includes external testing plugins. Checked the list and PRs for a duplicate; `git diff --check` passed | [PR #727](https://github.com/ccplugins/awesome-claude-code-plugins/pull/727) | Open; one README entry proposed under Code Quality Testing; no listing merged |
 
 Each linked page was re-read through GitHub after creation and still returned `open`. The two repository-local validators above are the only build checks run for external submissions. No vibe-testing product code changed.
 
@@ -30,8 +31,10 @@ Each linked page was re-read through GitHub after creation and still returned `o
 | [wong2 awesome-mcp-servers](https://github.com/wong2/awesome-mcp-servers) | README rejects PRs and routes submissions to mcpservers.org, already submitted in the earlier campaign. |
 | [VoltAgent official-mcp-servers](https://github.com/VoltAgent/official-mcp-servers/blob/main/CONTRIBUTING.md) | Its curation rules require real community usage; launch status records zero verified external activations. |
 | [malomarrec awesome-qa](https://github.com/malomarrec/awesome-qa/blob/main/CONTRIBUTING.md) | Requires tools the contributor has used or knows directly and rejects ads. Did not add a self-promotional entry. |
+| [Claude plugin directory](https://claude.ai/directory/manage) | TFG account had no existing submission. The [plugin bundle validator](https://claude.ai/directory/manage/new/plugin) read `main` at `c565812` and found one blocking issue: `.mcp.json` uses an unpinned `npx` package. It also reported four warnings and twelve policy holds. The allowed edit scope excludes that manifest, so no submission was sent. The repository URL remains in a browser draft only. |
+| [Smithery](https://smithery.ai/new) | Local MCPB publishing fits the existing `artifacts/vibe-testing-0.4.6.mcpb` bundle. TFG Google sign-in required device verification; the publishing form was not reached and no upload or submission receipt exists. |
 
-LinkedIn is excluded entirely by the owner. Earlier PRs, directories, and the existing r/SideProject post are listed in [launch status](launch-status.md) and are not repeated here. Remaining account-bound options (Claude, Smithery) have no verified submission receipt in this campaign and are not counted.
+LinkedIn is excluded entirely by the owner. Earlier PRs, directories, and the existing r/SideProject post are listed in [launch status](launch-status.md) and are not repeated here. Claude and Smithery have no verified submission receipt in this campaign and are not counted. Smaller or inactive general directories were left alone after the relevant plugin, MCP, browser, and testing channels above were checked.
 
 ## First-use measurement
 
