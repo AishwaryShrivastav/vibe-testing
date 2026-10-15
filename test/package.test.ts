@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import packageJson from '../package.json'
 import serverJson from '../server.json'
 import pluginJson from '../plugin.json'
+import pluginMcpJson from '../.mcp.json'
 import mcpbManifest from '../mcpb/manifest.json'
 import fs from 'fs'
 import path from 'path'
@@ -38,5 +39,6 @@ describe('MCP distribution metadata', () => {
     expect(pluginJson.homepage).toBe(packageJson.homepage)
     expect(mcpbManifest.version).toBe(packageJson.version)
     expect(mcpbManifest.homepage).toBe(packageJson.homepage)
+    expect(pluginMcpJson['vibe-testing'].args).toEqual(['-y', `${packageJson.name}@${packageJson.version}`, '--mcp'])
   })
 })

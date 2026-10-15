@@ -2,6 +2,6 @@
   "vibe-testing": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "vibe-testing@latest", "--mcp"]
+    "args": ["-y", "vibe-testing@0.4.6", "--mcp"]
   }
 }
