@@ -90,7 +90,7 @@ h1 em { color: var(--blue); font-weight: 400; }
 .button.text { padding: 0; color: var(--muted); }
 .button.text span { margin-left: 7px; }
 .button.large { min-height: 56px; padding: 0 26px; }
-.proof-strip { display: flex; gap: 34px; margin: 52px 0 0; }
+.proof-strip { display: flex; flex-wrap: wrap; gap: 24px 34px; margin: 52px 0 0; }
 .proof-strip div { display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 8px; }
 .proof-strip dt { font: 400 34px/1 var(--display); }
 .proof-strip dd { margin: 0; color: var(--muted); font: 500 10px/1.25 var(--mono); text-transform: uppercase; letter-spacing: .05em; }
