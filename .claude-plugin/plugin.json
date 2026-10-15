@@ -6,6 +6,7 @@
     "name": "Aishwary Shrivastav"
   },
   "homepage": "https://vibetesting.tfgstudio.com/",
+  "privacyPolicyUrl": "https://github.com/AishwaryShrivastav/vibe-testing/blob/main/PRIVACY.md",
   "repository": "https://github.com/AishwaryShrivastav/vibe-testing",
   "license": "MIT",
   "keywords": ["browser-testing", "qa", "playwright", "mcp"]
