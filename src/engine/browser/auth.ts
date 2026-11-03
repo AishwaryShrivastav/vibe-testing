@@ -80,8 +80,8 @@ export async function performLogin(
 
     await page.waitForNavigation({ timeout: 10000 }).catch(() => {})
 
-    const currentUrl = page.url()
-    const loginFailed = currentUrl.includes('login') || currentUrl.includes('auth')
+    // Judge by the path only — a host such as auth.example.com is not a login page
+    const loginFailed = isStillOnLoginPage(page.url())
 
     if (loginFailed) {
       logger.warn('Login may have failed — still on login page after submission')
@@ -96,6 +96,13 @@ export async function performLogin(
   } finally {
     await page.close()
   }
+}
+
+/** True when the URL's path is a login/auth page (the host is ignored). */
+export function isStillOnLoginPage(url: string): boolean {
+  let pathname: string
+  try { pathname = new URL(url).pathname } catch { pathname = url }
+  return /\/(login|log-in|signin|sign-in|auth)\b/i.test(pathname)
 }
 
 async function fillFirstMatch(page: Page, selectors: string[], value: string): Promise<void> {

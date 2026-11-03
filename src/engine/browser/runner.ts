@@ -496,7 +496,7 @@ async function executeStep(page: Page, step: TestStep, baseUrl: string, apiError
  * For submit buttons: uses the exact CSS selector first (button[type="submit"]).
  * For form fields: tries label, placeholder, then CSS.
  */
-async function resolveLocator(
+export async function resolveLocator(
   page: Page,
   step: TestStep,
   timeout: number
@@ -625,15 +625,16 @@ async function resolveLocator(
     }
   }
 
-  // Try each strategy — first one with a visible match wins
+  // Try each strategy — first one with a visible match wins. Check every match
+  // (up to a cap), not just the first: a hidden duplicate (mobile menu copy,
+  // collapsed panel) often comes before the visible element in the DOM.
   for (const { locator, name } of strategies) {
     try {
-      const count = await locator.count()
-      if (count > 0) {
-        const first = locator.first()
-        const visible = await first.isVisible().catch(() => false)
-        if (visible) {
-          return { locator: first, resolved: name }
+      const count = Math.min(await locator.count(), 10)
+      for (let i = 0; i < count; i++) {
+        const candidate = locator.nth(i)
+        if (await candidate.isVisible().catch(() => false)) {
+          return { locator: candidate, resolved: name }
         }
       }
     } catch {
@@ -650,18 +651,24 @@ async function resolveLocator(
     }
     const ph = firstSeg.match(/^placeholder=(.+)$/)
     if (ph) {
-      return { locator: page.getByPlaceholder(ph[1], { exact: false }), resolved: `fallback: getByPlaceholder("${ph[1]}")` }
+      return { locator: page.getByPlaceholder(ph[1], { exact: false }).first(), resolved: `fallback: getByPlaceholder("${ph[1]}")` }
     }
-    return { locator: page.locator(firstSeg), resolved: `fallback: ${firstSeg}` }
+    // .first() so several matches don't raise a strict-mode violation later
+    return { locator: page.locator(firstSeg).first(), resolved: `fallback: ${firstSeg}` }
   }
 
   throw new Error(`No valid selector for step: ${step.description}`)
 }
 
-/** Prefer real controls — getByLabel can match dialogs / sections titled like the field. */
+/**
+ * Prefer real controls — getByLabel can match dialogs / sections titled like the field.
+ * The labelled element is usually the control itself (<label for> + <input>), so
+ * match it directly, or else a control inside a labelled container.
+ */
 function fillableByLabel(page: Page, text: string, exact?: boolean): Locator {
   const base = exact ? page.getByLabel(text, { exact: true }) : page.getByLabel(text, { exact: false })
-  return base.locator('input, textarea, select, [contenteditable="true"]').first()
+  const fillable = 'input, textarea, select, [contenteditable="true"]'
+  return base.and(page.locator(fillable)).or(base.locator(fillable)).first()
 }
 
 /**

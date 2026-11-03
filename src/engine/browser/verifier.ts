@@ -40,10 +40,7 @@ export async function verifyResult(
 
   const isFormScenario = scenario.steps.some(s => s.action === 'fill')
   const hasProofAssertion = scenario.steps.some(hasStrongExplicitAssertion)
-  const expectsError = scenario.expected_outcome.toLowerCase().includes('error') ||
-    scenario.expected_outcome.toLowerCase().includes('validation') ||
-    scenario.name.toLowerCase().includes('invalid') ||
-    scenario.name.toLowerCase().includes('empty')
+  const expectsError = expectsErrorOutcome(scenario)
 
   // API errors are a strong signal of failure for form submissions
   if (apiErrors?.length && isFormScenario && !expectsError) {
@@ -66,6 +63,23 @@ export async function verifyResult(
   }
 
   return heuristicVerification(scenario, currentUrl, hasErrorMessage, hasSuccessIndicator, page, wasRedirected, toastInfo, apiErrors)
+}
+
+/**
+ * Does the scenario set out to trigger an error (validation, invalid input)?
+ * Negated phrases such as "no errors", "without errors" or "error-free"
+ * describe a SUCCESS outcome and must not count — otherwise a login that
+ * "succeeded — no errors" is treated as expecting an error and a form that
+ * never left the page is reported as passed.
+ */
+export function expectsErrorOutcome(scenario: Pick<TestScenario, 'name' | 'expected_outcome'>): boolean {
+  const outcome = scenario.expected_outcome
+    .toLowerCase()
+    .replace(/\b(no|without|zero|free of|not any)\s+(\w+\s+)?(errors?|validation\s+errors?)\b/g, ' ')
+    .replace(/\berror[-\s]?free\b/g, ' ')
+  const name = scenario.name.toLowerCase()
+  return /\berrors?\b|\bvalidations?\b/.test(outcome) ||
+    /\binvalid\b|\bempty\b/.test(name)
 }
 
 interface RedirectInfo {
@@ -155,10 +169,7 @@ async function heuristicVerification(
   const currentPath = extractPath(currentUrl)
   const isFormScenario = scenario.steps.some(s => s.action === 'fill')
 
-  const expectsError = scenario.expected_outcome.toLowerCase().includes('error') ||
-    scenario.expected_outcome.toLowerCase().includes('validation') ||
-    scenario.name.toLowerCase().includes('invalid') ||
-    scenario.name.toLowerCase().includes('empty')
+  const expectsError = expectsErrorOutcome(scenario)
 
   // API error check
   if (apiErrors?.length && isFormScenario) {

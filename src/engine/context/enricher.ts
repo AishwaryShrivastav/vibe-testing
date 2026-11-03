@@ -1,5 +1,6 @@
 import { Gap, RouteBehaviour, CoverageMap, TestScenario, TestStep, FormField, PageFunctionality, PageFeature, PageDialog, TestIntelligence, PageButton } from '../../types/index.js'
 import type { MemoryRecommendations } from '../memory/index.js'
+import { isIdentityField, isPasswordField } from '../../utils/login-fields.js'
 
 let scenarioCounter = 1
 
@@ -297,10 +298,10 @@ function generateAuthFlowScenarios(
       const loginForm = loginBehaviour.forms[0]
       for (const field of loginForm) {
         let value: string
-        const fieldText = [field.name, field.id, field.label].filter(Boolean).join(' ').toLowerCase()
-        if (field.type === 'password' || fieldText.includes('password')) {
+        const fieldText = [field.name, field.id, field.label].filter(Boolean).join(' ')
+        if (field.type === 'password' || isPasswordField(fieldText)) {
           value = testPassword
-        } else if (field.type === 'email' || /e-?mail|user(name)?|login|identifier|account/.test(fieldText)) {
+        } else if (field.type === 'email' || isIdentityField(fieldText)) {
           // The account identity — email or username, whichever the form asks for
           value = testEmail
         } else {

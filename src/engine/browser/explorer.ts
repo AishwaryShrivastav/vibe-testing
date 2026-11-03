@@ -50,8 +50,19 @@ export interface PageExploration {
 
 // ─── Patterns ─────────────────────────────────────────────────────────────────
 
-const DESTRUCTIVE_PATTERNS = /\b(delete|remove|destroy|logout|sign.?out|cancel.?account|deactivate|revoke|terminate|unsubscribe)\b/i
-const NAVIGATION_SKIP = /\b(login|register|signup|signin|logout|signout)\b/i
+// Separators like "Log out", "log-out", "sign_out" are allowed between word parts.
+const DESTRUCTIVE_PATTERNS = /\b(delete|remove|destroy|log.?out|sign.?out|cancel.?account|deactivate|revoke|terminate|unsubscribe)\b/i
+const NAVIGATION_SKIP = /\b(log.?in|register|sign.?up|sign.?in|log.?out|sign.?out)\b/i
+
+/** Buttons the explorer must never click on a real app (data loss, ending the session). */
+export function isDestructiveAction(text: string | undefined): boolean {
+  return DESTRUCTIVE_PATTERNS.test(text ?? '')
+}
+
+/** Links into auth flows the explorer skips so it doesn't log itself out or start sign-up. */
+export function isAuthNavigation(text: string | undefined, href: string | undefined): boolean {
+  return NAVIGATION_SKIP.test(text ?? '') || NAVIGATION_SKIP.test(href ?? '')
+}
 
 // ─── Element Discovery ───────────────────────────────────────────────────────
 
@@ -259,7 +270,7 @@ async function resolveAndClick(page: Page, element: DiscoveredElement, timeout =
 async function testButton(page: Page, element: DiscoveredElement, originalUrl: string): Promise<InteractionOutcome> {
   const start = Date.now()
 
-  if (DESTRUCTIVE_PATTERNS.test(element.text)) {
+  if (isDestructiveAction(element.text)) {
     return { element: element.text, elementType: 'button', action: 'click', result: 'skipped', details: 'Skipped — destructive action', duration_ms: 0 }
   }
 
@@ -357,7 +368,7 @@ async function testLink(page: Page, element: DiscoveredElement, originalUrl: str
     return { element: element.text, elementType: 'link', action: 'verify', result: 'skipped', details: 'No valid href', duration_ms: 0 }
   }
 
-  if (NAVIGATION_SKIP.test(element.text) || NAVIGATION_SKIP.test(element.href)) {
+  if (isAuthNavigation(element.text, element.href)) {
     return { element: element.text, elementType: 'link', action: 'verify', result: 'skipped', details: 'Skipped auth-related link', duration_ms: 0 }
   }
 

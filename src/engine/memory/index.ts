@@ -1,7 +1,21 @@
-import { Memory, TestResult, Bug } from '../../types/index.js'
+import { Memory, TestResult, TestStep, Bug } from '../../types/index.js'
 import { readJSON, writeJSON, ensureDir } from '../../utils/file.js'
 import { logger } from '../../utils/logger.js'
+import { isIdentityField, isPasswordField } from '../../utils/login-fields.js'
 import path from 'path'
+
+/**
+ * Find the identity (email or username) and password fill steps of a login or
+ * register scenario. Only the field part of the description ("Fill username")
+ * and the selector are inspected, never the typed value.
+ */
+function findCredentialSteps(result: TestResult): { emailStep?: TestStep; passwordStep?: TestStep } {
+  const fillSteps = result.scenario.steps.filter(s => s.action === 'fill')
+  const fieldText = (s: TestStep) => `${s.description.split(/\s+with\s+/i)[0]} ${s.selector ?? ''}`
+  const passwordStep = fillSteps.find(s => isPasswordField(fieldText(s)))
+  const emailStep = fillSteps.find(s => s !== passwordStep && isIdentityField(fieldText(s)))
+  return { emailStep, passwordStep }
+}
 
 export interface RouteIntel {
   path: string
@@ -302,15 +316,7 @@ export class MemoryManager {
     // Use register scenario as the source if login also passed, since register has the newest email
     const credSource = registerResult?.status === 'pass' ? registerResult : (loginResult.status === 'pass' ? loginResult : null)
     if (credSource && this.intel.auth?.session_established) {
-      const fillSteps = credSource.scenario.steps.filter(s => s.action === 'fill')
-      const emailStep = fillSteps.find(s => {
-        const desc = s.description.toLowerCase()
-        return desc.includes('email') || s.selector?.includes('email')
-      })
-      const passwordStep = fillSteps.find(s => {
-        const desc = s.description.toLowerCase()
-        return desc.includes('password') || s.selector?.includes('password')
-      })
+      const { emailStep, passwordStep } = findCredentialSteps(credSource)
 
       if (emailStep?.value && passwordStep?.value) {
         const isNewCreds = !this.intel.credentials || this.intel.credentials.email !== emailStep.value
@@ -328,15 +334,7 @@ export class MemoryManager {
       }
     } else if (credSource) {
       // Auth not verified — still save creds from successful register/login for next attempt
-      const fillSteps = credSource.scenario.steps.filter(s => s.action === 'fill')
-      const emailStep = fillSteps.find(s => {
-        const desc = s.description.toLowerCase()
-        return desc.includes('email') || s.selector?.includes('email')
-      })
-      const passwordStep = fillSteps.find(s => {
-        const desc = s.description.toLowerCase()
-        return desc.includes('password') || s.selector?.includes('password')
-      })
+      const { emailStep, passwordStep } = findCredentialSteps(credSource)
 
       if (emailStep?.value && passwordStep?.value && !this.intel.credentials) {
         this.intel.credentials = {

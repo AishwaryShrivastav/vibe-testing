@@ -115,7 +115,7 @@ export function scenarioFromGap(gap: CoverageGapSuggestion, baseUrl: string): Te
   const steps = gapStepsToTestSteps(gap.suggested_test.steps, gap.route, baseUrl)
   if (steps.length === 0) return null
 
-  const needsAuth = !/\/(login|register|forgot-password|reset-password|privacy)\b/i.test(gap.route)
+  const needsAuth = !/\/(log-?in|sign-?in|sign-?up|register|forgot-password|reset-password|privacy|terms)\b/i.test(gap.route)
 
   scenarioSeq += 1
   return {
@@ -131,7 +131,7 @@ export function scenarioFromGap(gap: CoverageGapSuggestion, baseUrl: string): Te
   }
 }
 
-function minimalLoginScenario(config: VibeConfig): TestScenario | null {
+export function minimalLoginScenario(config: VibeConfig): TestScenario | null {
   if (config.auth?.strategy !== 'credentials' || !config.auth.credentials) return null
   const loginPath = config.auth.login_url ?? '/login'
   const fieldSelector = (name: string | undefined, fallback: string) => {
@@ -176,7 +176,10 @@ function severityOrder(g: CoverageGapSuggestion): number {
   return 2
 }
 
-function buildFollowUpBatch(
+const RETEST_ID_SUFFIX = /(-retest)+$/
+const RETEST_NAME_SUFFIX = /(\s\(retest\))+$/
+
+export function buildFollowUpBatch(
   gaps: CoverageGapSuggestion[],
   failed: TestResult[],
   config: VibeConfig,
@@ -195,16 +198,23 @@ function buildFollowUpBatch(
     fromGaps.push(sc)
   }
 
+  // Retest each failing scenario once per round. `failed` accumulates across
+  // rounds, so strip earlier "-retest" suffixes and de-duplicate by the base
+  // scenario; otherwise retests of retests pile up ("X (retest) (retest)").
   const retests: TestScenario[] = []
+  const retested = new Set<string>()
   for (const r of failed) {
     if (retests.length + fromGaps.length >= limit + 8) break
     if (r.status === 'pass') continue
     const s = r.scenario
     if (s.id.startsWith('VTC-') && s.name.includes('[converge]')) continue
+    const baseId = s.id.replace(RETEST_ID_SUFFIX, '')
+    if (retested.has(baseId)) continue
+    retested.add(baseId)
     retests.push({
       ...s,
-      id: `${s.id}-retest`,
-      name: `${s.name} (retest)`,
+      id: `${baseId}-retest`,
+      name: `${s.name.replace(RETEST_NAME_SUFFIX, '')} (retest)`,
     })
   }
 
