@@ -66,4 +66,21 @@ describe('readExistingTests', () => {
       await fs.rm(dir, { recursive: true, force: true })
     }
   })
+
+  it('reads JavaScript, ESM and CommonJS test files, not just TypeScript', async () => {
+    const t = (name: string, route: string) => `test('${name}', async () => { await page.goto('${route}') })`
+    const dir = await withTestFiles({
+      'src/login.test.jsx': t('jsx unit', '/jsx'),
+      'src/cart.spec.mjs': t('mjs spec', '/mjs'),
+      'src/legacy.test.cjs': t('cjs unit', '/cjs'),
+      'cypress/e2e/checkout.cy.js': t('cypress js', '/cypress-js'),
+      'e2e/profile.mjs': t('playwright mjs', '/pw-mjs'),
+    })
+    try {
+      const coverage = await readExistingTests(dir)
+      expect(Object.keys(coverage).sort()).toEqual(['/cjs', '/cypress-js', '/jsx', '/mjs', '/pw-mjs'])
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
 })

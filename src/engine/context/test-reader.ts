@@ -6,9 +6,9 @@ export async function readExistingTests(codebasePath: string): Promise<CoverageM
   const coverage: CoverageMap = {}
 
   const [jestFiles, cypressFiles, playwrightFiles] = await Promise.all([
-    glob('**/*.{test,spec}.{ts,tsx,js,jsx}', codebasePath),
-    glob('cypress/e2e/**/*.{ts,js,cy.ts,cy.js}', codebasePath),
-    glob('{playwright/,e2e/,tests/}**/*.{ts,js}', codebasePath),
+    glob('**/*.{test,spec}.{ts,tsx,js,jsx,mts,mjs,cts,cjs}', codebasePath),
+    glob('cypress/e2e/**/*.{ts,tsx,js,jsx,mjs,cjs}', codebasePath),
+    glob('{playwright/,e2e/,tests/}**/*.{ts,js,mts,mjs,cts,cjs}', codebasePath),
   ])
 
   await Promise.all([

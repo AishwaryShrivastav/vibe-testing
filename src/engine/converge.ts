@@ -3,6 +3,7 @@ import type { CoverageGapSuggestion, TestResult, TestScenario, TestStep } from '
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
 import { MemoryManager } from './memory/index.js'
+import { mergeConfigCredentials } from './credentials.js'
 import { generateCoverageGaps } from './coverage-gaps.js'
 import { readVibeGuidance } from '../utils/vibe-md.js'
 import { logger } from '../utils/logger.js'
@@ -133,6 +134,13 @@ export function scenarioFromGap(gap: CoverageGapSuggestion, baseUrl: string): Te
 function minimalLoginScenario(config: VibeConfig): TestScenario | null {
   if (config.auth?.strategy !== 'credentials' || !config.auth.credentials) return null
   const loginPath = config.auth.login_url ?? '/login'
+  const fieldSelector = (name: string | undefined, fallback: string) => {
+    const f = name ?? fallback
+    const parts = [`[name="${f}"]`]
+    if (/^[A-Za-z][\w-]*$/.test(f)) parts.push(`#${f}`)
+    parts.push(`[type="${fallback}"]`, `[name="${fallback}"]`)
+    return [...new Set(parts)].join(', ')
+  }
   return {
     id: 'vibe-converge-session-login',
     name: 'Converge — establish session (login)',
@@ -143,13 +151,13 @@ function minimalLoginScenario(config: VibeConfig): TestScenario | null {
       { action: 'navigate', url: loginPath, description: 'Open login page' },
       {
         action: 'fill',
-        selector: '[type="email"], [name="email"]',
+        selector: fieldSelector(config.auth.fields?.email, 'email'),
         value: config.auth.credentials.email,
-        description: 'Fill email',
+        description: `Fill ${config.auth.fields?.email ?? 'email'}`,
       },
       {
         action: 'fill',
-        selector: '[type="password"], [name="password"]',
+        selector: fieldSelector(config.auth.fields?.password, 'password'),
         value: config.auth.credentials.password,
         description: 'Fill password',
       },
@@ -247,7 +255,7 @@ export async function runConverge(
   const projectRoot = config.codebase_path ?? process.cwd()
   const memory = new MemoryManager(projectRoot)
   await memory.load()
-  const recs = memory.getRecommendations()
+  const recs = mergeConfigCredentials(memory.getRecommendations(), config)
   const guidance = await readVibeGuidance(projectRoot)
 
   logger.section('Converge — iterative coverage expansion')

@@ -16,6 +16,7 @@ import { ActionBlocklist } from './utils/blocklist.js'
 import { VibeConfigSchema, type VibeConfig, type VibeGuidance } from './types/config.js'
 import type { ProductModel, TestScenario, TestResult } from './types/index.js'
 import { ensureDir, fileExists } from './utils/file.js'
+import { isSourceFile } from './utils/source-files.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
@@ -1331,7 +1332,7 @@ async function handleGetContext(args: Record<string, unknown>) {
       if (!stat) continue
       if (stat.isDirectory()) {
         await walk(full, depth + 1)
-      } else if (/\.(tsx?|jsx?|vue|svelte)$/.test(entry)) {
+      } else if (isSourceFile(entry)) {
         rootFiles.push(full)
       }
     }
