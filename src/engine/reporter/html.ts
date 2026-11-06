@@ -39,7 +39,7 @@ export async function generateHtmlReport(
   recommendations?: MemoryRecommendations,
   findings: ReportFindings = {},
 ): Promise<string> {
-  const metrics = deriveReportMetrics(productModel, results)
+  const metrics = deriveReportMetrics(productModel, results, explorations)
   const explorerFailures = groupExplorerFailures(explorations)
   const explorerWarnings = collectExplorerWarnings(explorations)
   const retryFindings = findings.retryFindings ?? collectRetryFindings(results)

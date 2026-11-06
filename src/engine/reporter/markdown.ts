@@ -2,13 +2,19 @@ import { TestResult, ProductModel, StepLog } from '../../types/index.js'
 import { VibeConfig } from '../../types/config.js'
 import path from 'path'
 import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
+import type { PageExploration } from '../browser/explorer.js'
+import {
+  collectAppChanges, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings, groupExplorerFailures,
+} from '../findings.js'
 
 export function generateMarkdownReport(
   results: TestResult[],
   productModel: ProductModel,
-  config: VibeConfig
+  config: VibeConfig,
+  explorations: PageExploration[] = [],
+  findings: { retryFindings?: string[] } = {},
 ): string {
-  const metrics = deriveReportMetrics(productModel, results)
+  const metrics = deriveReportMetrics(productModel, results, explorations)
   const passed  = results.filter(r => r.status === 'pass')
   const failed  = results.filter(r => r.status === 'fail')
   const errored = results.filter(r => r.status === 'error')
@@ -47,6 +53,8 @@ export function generateMarkdownReport(
   lines.push(`| ⏭️ Skipped | **${metrics.scenariosSkipped}** | ${results.filter(r => r.status === 'skip').map(r => r.scenario.name).join(', ') || '—'} |`)
   lines.push(`| **Total** | **${results.length}** | |`)
   lines.push(``)
+
+  renderFindings(lines, results, explorations, findings.retryFindings)
 
   // ── Detailed results ────────────────────────────────────────────────
   lines.push(`---`)
@@ -103,6 +111,31 @@ export function generateMarkdownReport(
   }
 
   return lines.join('\n')
+}
+
+function renderFindings(lines: string[], results: TestResult[], explorations: PageExploration[], retryOverride?: string[]): void {
+  const failedScenarios = collectFailedScenarios(results)
+  const problems = groupExplorerFailures(explorations)
+  const retries = retryOverride ?? collectRetryFindings(results)
+  const warnings = collectExplorerWarnings(explorations)
+  const changes = collectAppChanges(explorations)
+  if (failedScenarios.length + problems.length + retries.length + warnings.length + changes.length === 0) return
+
+  lines.push(`## Findings`)
+  lines.push(``)
+  const list = (title: string, items: string[]) => {
+    if (items.length === 0) return
+    lines.push(`### ${title} (${items.length})`)
+    lines.push(``)
+    for (const item of items) lines.push(`- ${item}`)
+    lines.push(``)
+  }
+  list('Failed scenarios', failedScenarios.map(f => `${f.status === 'error' ? '[error] ' : ''}${f.name} (\`${f.route}\`): ${f.reason}`))
+  list('Problems found while exploring', problems.map(({ finding, routes }) =>
+    `\`${routes[0]}\`${routes.length > 1 ? ` (+${routes.length - 1} more page${routes.length > 2 ? 's' : ''})` : ''}: ${finding}`))
+  list('Needs attention: only succeeded on retry (not counted as a failure)', retries)
+  list('Warnings (possible missing data, not counted as failures)', warnings)
+  list('Changes made to the app while exploring (clean up if needed)', changes)
 }
 
 function renderScenarioDetail(lines: string[], result: TestResult, reportDir: string): void {

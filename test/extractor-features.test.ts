@@ -36,3 +36,25 @@ describe('extractBehaviours → search/filter features need real search or tab c
     expect(await featureTypes(`<div role="tablist"></div>`)).toContain('filter')
   })
 })
+
+describe('extractBehaviours → prose is not evidence of controls', () => {
+  it('a privacy policy that mentions search terms, pagination and uploads has no interactive features', async () => {
+    const types = await featureTypes(`
+      export default function Privacy() {
+        const [branding, setBranding] = useState(null)
+        return (<div><h1>Privacy Policy Notice</h1>
+          <p>We also track frequently used search terms and selected keywords to prioritise content.</p>
+          <p>Search engines may index this page. Use filters in your browser; pagination of the log is not stored.</p>
+          <p>Do not upload personal data; any file you upload is deleted.</p></div>)
+      }`)
+    expect(types).not.toContain('search')
+    expect(types).not.toContain('filter')
+    expect(types).not.toContain('pagination')
+    expect(types).not.toContain('upload')
+  })
+
+  it('real pagination and file inputs are still detected', async () => {
+    expect(await featureTypes(`const [page, setPage] = useState(1)`)).toContain('pagination')
+    expect(await featureTypes(`<input type="file" />`)).toContain('upload')
+  })
+})

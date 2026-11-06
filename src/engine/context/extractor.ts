@@ -75,6 +75,10 @@ function extractPageFunctionality(content: string, routePath: string): PageFunct
 const SEARCH_SIGNAL = /\bset[A-Z]?\w*Search\w*\b|\bsearch(?:Term|Query|Text|Value|Input|Params)\b|\bonSearch\b|type=["']search["']|placeholder=["'][^"']*\bsearch\b/i
 const FILTER_SIGNAL = /\b(?:statusFilter|setFilter\w*|statusTab|filterBy\w*|activeTab|setActiveTab|selectedTab)\b|role=["']tab(?:list)?["']|<Tabs?\b/
 
+// Identifiers and elements only: prose such as "pagination" or "upload your photo" is not a control.
+const PAGINATION_SIGNAL = /\b(?:setPage|setCurrentPage|nextPage|prevPage|totalPages|onPageChange)\b|<Pagination\b|aria-label=["']pagination["']|\bpage\s*\+\s*1\b/
+const UPLOAD_SIGNAL = /type=["']file["']|<(?:Dropzone|FileInput|FileUpload)\b|\buseDropzone\b|\bonDrop\b/
+
 function extractFeatures(content: string, routePath: string): PageFeature[] {
   const features: PageFeature[] = []
 
@@ -119,12 +123,12 @@ function extractFeatures(content: string, routePath: string): PageFeature[] {
   }
 
   // Pagination
-  if (/pagination|setPage|page\s*\+\s*1|nextPage|prevPage|totalPages/i.test(content)) {
+  if (PAGINATION_SIGNAL.test(content)) {
     features.push({ name: 'Pagination', type: 'pagination', description: 'Has pagination controls' })
   }
 
   // File upload
-  if (/type=["']file["']|upload|dropzone|FileInput|onDrop/i.test(content)) {
+  if (UPLOAD_SIGNAL.test(content)) {
     features.push({ name: 'File upload', type: 'upload', description: 'Has file upload capability' })
   }
 

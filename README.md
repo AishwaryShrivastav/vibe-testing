@@ -243,15 +243,19 @@ Add to `.roo/mcp.json`:
 | `get_context` | Before writing test steps. Returns source files for a feature | Actual source code with real field names and selectors |
 | `login` | When app requires authentication | Post-login screenshot, token state, API calls observed |
 | `scan_page_elements` | To see all interactive elements on a page | Element list with selectors plus page screenshot |
-| `explore_page` | Broad "does everything work?" testing | Interaction results, API calls, errors, screenshot |
+| `explore_page` | Broad "does everything work?" testing | Interaction results, API calls, `problems`, `diagnostics`, `warnings`, `changes_made_to_app`, screenshot. `isError` when `problems` is non-empty |
 | `execute_scenario` | Run specific test steps | Step-by-step logs plus screenshots |
 | `get_coverage` | View coverage map and untested routes | Coverage entries, gaps, available scenarios |
 | `suggest_tests` | Find coverage gaps after exploration | Prioritized, ready-to-run scenarios with steps |
 | `take_screenshot` | Quick visual verification | Screenshot of any URL |
 | `generate_report` | Build HTML report (auto-opens) | Report path plus summary |
-| `run_full_test` | One-shot: scan, execute, explore, report | Full results plus `snapshot_diff` vs last run |
-| `run_converge` | Iterative testing until thresholds | Summary across all rounds plus `snapshot_diff` vs last run |
+| `run_full_test` | One-shot: scan, execute, explore, report | Full results, `summary.failed_scenarios` (name, route, reason) plus `snapshot_diff` vs last run |
+| `run_converge` | Iterative testing until thresholds | Summary across all rounds (incl. `summary.failed_scenarios`) plus `snapshot_diff` vs last run |
 | `cleanup` | Close browsers, free resources | - |
+
+`explore_page` replaces the old `errors` field with `problems` (real app failures: server errors, console errors, broken values, functional failures) and `diagnostics` (vibe-test's own notes, such as navigation or discovery issues). It also returns `warnings` (possible missing data such as "Category: Unknown"; not failures) and `changes_made_to_app` (data-changing requests it sent, per `explore.writes`), and sets `isError` when there are `problems`.
+
+Run results (`run_full_test`, `run_converge`, `generate_report`) carry `summary.failed_scenarios`, a list of `{ name, route, status, reason }` for every failed or errored scenario, alongside `explorer_failures`, `explorer_warnings`, `retry_findings` and `app_changes`. The Markdown and HTML reports list the same findings.
 
 ### Tool inputs
 
