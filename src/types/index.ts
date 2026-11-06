@@ -344,6 +344,8 @@ export interface VibeRunResult {
     retry_findings?: string[]
     /** Data-changing requests exploration made in the app (page, action, request, values): what to clean up. */
     app_changes?: string[]
+    /** Scenarios that failed or errored, each with a one-line reason (verdict, else failure reason). */
+    failed_scenarios?: Array<{ name: string; route: string; status: 'fail' | 'error'; reason: string }>
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
   }

@@ -13,6 +13,8 @@ import { loadRunConfig } from './utils/run-config.js'
 import { waitForLoginOutcome } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import { describeChange } from './engine/browser/write-policy.js'
+import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings, isExplorerFailure } from './engine/findings.js'
+import { formatRunFindings, runHasFailures, type RunFindings } from './run-findings-text.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
 import { readVibeGuidance } from './utils/vibe-md.js'
@@ -52,6 +54,8 @@ interface Session {
   unauthContext: BrowserContext | null
   results: TestResult[]
   explorations: PageExploration[]
+  /** Logins (login tool) that only succeeded on a retry, for generate_report. */
+  loginFindings: string[]
   projectRoot: string
   screenshotsDir: string
 }
@@ -67,6 +71,7 @@ const session: Session = {
   unauthContext: null,
   results: [],
   explorations: [],
+  loginFindings: [],
   projectRoot: process.cwd(),
   screenshotsDir: '',
 }
@@ -150,7 +155,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'explore_page',
-      description: `Perform a full interactive exploration of a page: discover all elements, click buttons, fill inputs, test tabs, observe API calls, and report what happened. Returns detailed interaction outcomes, API observations, and screenshots. This is the "senior tester" mode — it tries every element and reports what works and what breaks.`,
+      description: `Perform a full interactive exploration of a page: discover all elements, click buttons, fill inputs, test tabs, observe API calls, and report what happened. Returns detailed interaction outcomes, API observations, "problems" (real failures in the app: server errors, console errors, broken values, functional failures — these mark the result as an error), "diagnostics" (vibe-test's own notes, e.g. navigation issues), "warnings", "changes_made_to_app" (data-changing requests it sent), and a screenshot. This is the "senior tester" mode — it tries every element and reports what works and what breaks.`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -222,7 +227,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'generate_report',
-      description: `Generate a self-contained HTML test report with embedded screenshots from all collected results, explorations, and coverage data. Returns the report file path and a text summary. The report includes: pass/fail results per scenario, step-by-step screenshots, element exploration findings, API error monitoring, and coverage gap suggestions. Call this after executing scenarios and explorations. The report auto-opens in the browser.`,
+      description: `Generate a self-contained HTML test report with embedded screenshots from all collected results, explorations, and coverage data. Returns the report path and a summary listing failed scenarios (with reasons), problems found while exploring, retries that need attention, warnings, and changes made to the app — the same findings as run_full_test; it is an error result when a scenario failed or a problem was found. The report includes: pass/fail results per scenario, step-by-step screenshots, element exploration findings, API error monitoring, and coverage gap suggestions. Call this after executing scenarios and explorations. The report auto-opens in the browser.`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -257,7 +262,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'run_full_test',
-      description: `Run a complete end-to-end test suite: scan codebase → generate scenarios → execute all → explore pages → generate report. This is the all-in-one command. For more granular control, use the individual tools (scan_codebase, login, explore_page, execute_scenario, generate_report).`,
+      description: `Run a complete end-to-end test suite: scan codebase → generate scenarios → execute all → explore pages → generate report. This is the all-in-one command. Returns a summary listing failed scenarios (with reasons), problems found while exploring, retries that need attention, warnings, and changes made to the app; it is an error result when a scenario failed or a problem was found. For more granular control, use the individual tools (scan_codebase, login, explore_page, execute_scenario, generate_report).`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -548,6 +553,10 @@ async function handleLogin(args: Record<string, unknown>) {
     await ctx.close()
   }
 
+  if (loginSuccess && attempts > 1) {
+    session.loginFindings.push(`Login tool: login with valid credentials only succeeded on attempt ${attempts} (first attempt: ${firstFailure})`)
+  }
+
   const result = {
     success: loginSuccess,
     final_url: finalUrl,
@@ -726,7 +735,9 @@ async function handleExplorePage(args: Record<string, unknown>) {
       response_time_ms: a.responseTime_ms,
       is_error: a.isError,
     })),
-    errors: exploration.errors,
+    // Real problems in the app vs vibe-test's own notes (navigation, discovery).
+    problems: exploration.errors.filter(isExplorerFailure),
+    diagnostics: exploration.errors.filter(error => !isExplorerFailure(error)),
     ...(exploration.warnings?.length ? { warnings: exploration.warnings } : {}),
     // Data-changing requests this exploration made — what to clean up.
     changes_made_to_app: (exploration.changes ?? []).map(describeChange),
@@ -752,7 +763,8 @@ async function handleExplorePage(args: Record<string, unknown>) {
     })
   }
 
-  return { content }
+  // Same rule as a full run: a real problem found on the page fails the call.
+  return { content, isError: result.problems.length > 0 }
 }
 
 // ─── execute_scenario ─────────────────────────────────────────────────────────
@@ -837,6 +849,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
     })
   }
 
+  // Same rule as a full run: a scenario that didn't pass fails the call.
   return { content, isError: result.status !== 'pass' }
 }
 
@@ -931,23 +944,46 @@ async function handleGenerateReport(args: Record<string, unknown>) {
   const passed = session.results.filter(r => r.status === 'pass').length
   const failed = session.results.filter(r => r.status === 'fail').length
   const errors = session.results.filter(r => r.status === 'error').length
+  const findings = sessionFindings()
+
+  const text = `**Vibe Test Report Generated**
+- Scenarios: ${session.results.length} (passed ${passed}, failed ${failed}, errors ${errors})
+- Pages explored: ${session.explorations.length}
+- Coverage gaps: ${coverageGaps.length}
+- Report: ${reportPath} (opened in browser)${formatRunFindings(findings)}`
 
   return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        report_path: reportPath,
-        report_opened_in_browser: true,
-        summary: {
-          total_scenarios: session.results.length,
-          passed,
-          failed,
-          errors,
-          pages_explored: session.explorations.length,
-          coverage_gaps_found: coverageGaps.length,
-        },
-      }, null, 2),
-    }],
+    content: [
+      { type: 'text', text },
+      {
+        type: 'text',
+        text: JSON.stringify({
+          report_path: reportPath,
+          report_opened_in_browser: true,
+          summary: {
+            total_scenarios: session.results.length,
+            passed,
+            failed,
+            errors,
+            pages_explored: session.explorations.length,
+            coverage_gaps_found: coverageGaps.length,
+            ...findings,
+          },
+        }, null, 2),
+      },
+    ],
+    isError: runHasFailures(findings),
+  }
+}
+
+/** Findings from everything this session ran (granular tools), in run_full_test's shape. */
+function sessionFindings(): RunFindings {
+  return {
+    failed_scenarios: collectFailedScenarios(session.results),
+    explorer_failures: collectExplorerFailures(session.explorations),
+    explorer_warnings: collectExplorerWarnings(session.explorations),
+    retry_findings: collectRetryFindings(session.results, session.loginFindings),
+    app_changes: collectAppChanges(session.explorations),
   }
 }
 
@@ -1279,11 +1315,11 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}${formatAppChanges(result.summary.app_changes)}`
+- Report: ${result.report_path} (opened in browser)${formatRunFindings(result.summary)}`
 
   return {
     content: [{ type: 'text', text: summary }],
-    isError: result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0,
+    isError: runHasFailures(result.summary),
   }
 }
 
@@ -1321,40 +1357,12 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}${formatAppChanges(result.summary.app_changes)}`
+- Report: ${result.report_path} (opened in browser)${formatRunFindings(result.summary)}`
 
   return {
     content: [{ type: 'text', text: roundsLine }],
-    isError: result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0,
+    isError: runHasFailures(result.summary),
   }
-}
-
-function formatExplorerFailures(failures: string[] | undefined): string {
-  if (!failures?.length) return ''
-  const shown = failures.slice(0, 10).map(failure => `  - ${failure.slice(0, 220)}`).join('\n')
-  const more = failures.length > 10 ? `\n  - …and ${failures.length - 10} more (see report)` : ''
-  return `\n- Problems found while exploring (server errors, console errors, broken values, functional failures): ${failures.length}\n${shown}${more}`
-}
-
-function formatExplorerWarnings(warnings: string[] | undefined): string {
-  if (!warnings?.length) return ''
-  const shown = warnings.slice(0, 10).map(warning => `  - ${warning.slice(0, 220)}`).join('\n')
-  const more = warnings.length > 10 ? `\n  - …and ${warnings.length - 10} more (see report)` : ''
-  return `\n- Warnings (possible missing data, not counted as failures): ${warnings.length}\n${shown}${more}`
-}
-
-function formatRetryFindings(findings: string[] | undefined): string {
-  if (!findings?.length) return ''
-  const shown = findings.slice(0, 10).map(finding => `  - ${finding.slice(0, 260)}`).join('\n')
-  const more = findings.length > 10 ? `\n  - …and ${findings.length - 10} more (see report)` : ''
-  return `\n- Only succeeded on retry (inconsistent behaviour worth a look): ${findings.length}\n${shown}${more}`
-}
-
-function formatAppChanges(changes: string[] | undefined): string {
-  if (!changes?.length) return ''
-  const shown = changes.slice(0, 10).map(change => `  - ${change.slice(0, 260)}`).join('\n')
-  const more = changes.length > 10 ? `\n  - …and ${changes.length - 10} more (see report)` : ''
-  return `\n- Changes made to the app while exploring (data-changing requests; clean up if needed): ${changes.length}\n${shown}${more}`
 }
 
 // ─── get_context ─────────────────────────────────────────────────────────────
@@ -1490,6 +1498,7 @@ async function handleCleanup() {
   session.unauthContext = null
   session.results = []
   session.explorations = []
+  session.loginFindings = []
   session.productModel = null
   session.config = null
 

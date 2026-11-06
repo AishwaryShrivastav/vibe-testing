@@ -87,6 +87,27 @@ export function collectRetryFindings(results: TestResult[], operationFindings: s
   return [...new Set([...operationFindings, ...scenarioFindings])]
 }
 
+/** A scenario that failed or errored, with a one-line reason. */
+export interface FailedScenario {
+  name: string
+  route: string
+  status: 'fail' | 'error'
+  reason: string
+}
+
+/** Failed and errored scenarios, failures first, each with a one-line reason (verdict, else failure reason). */
+export function collectFailedScenarios(results: TestResult[]): FailedScenario[] {
+  return results
+    .filter((r): r is TestResult & { status: 'fail' | 'error' } => r.status === 'fail' || r.status === 'error')
+    .sort((a, b) => (a.status === b.status ? 0 : a.status === 'fail' ? -1 : 1))
+    .map(r => {
+      const base = (r.ai_verdict ?? r.failure_reason ?? 'no reason recorded').replace(/\s+/g, ' ').trim()
+      const retry = r.retry && r.retry.attempts > 1 && !r.retry.passed_on_retry ? ` (failed on all ${r.retry.attempts} attempts)` : ''
+      const reason = base.length > 200 ? `${base.slice(0, 199)}…` : base
+      return { name: r.scenario.name, route: r.scenario.route, status: r.status, reason: `${reason}${retry}` }
+    })
+}
+
 /**
  * Data-changing requests exploration made, one line each: "<page>: <action>:
  * POST /path (201) — values". Repeats of the same request from the same
