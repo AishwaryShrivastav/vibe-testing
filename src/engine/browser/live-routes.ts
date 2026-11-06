@@ -1,16 +1,23 @@
 import { chromium, type Browser, type BrowserContext } from 'playwright'
 import type { LiveRouteCrawl, Route, TestScenario } from '../../types/index.js'
+import type { AuthConfig } from '../../types/config.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
+import { performLoginDetailed } from './auth.js'
+import { DESTRUCTIVE_PATH } from '../../utils/destructive-path.js'
 
-const DESTRUCTIVE_PATH = /(?:^|\/)(?:logout|log-out|signout|sign-out|delete|remove|destroy|cancel|unsubscribe|revoke)(?:\/|$)/i
 const ASSET_PATH = /\.(?:css|js|mjs|map|json|xml|txt|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|pdf|zip)(?:$|\?)/i
 
 export interface LiveRouteCrawlInput {
   baseUrl: string
+  /** Page budget per crawl pass (the logged-in pass gets its own budget). */
   maxPages?: number
   maxDepth?: number
   timeoutMs?: number
   blockedPatterns?: string[]
+  /** With credentials, also crawl logged in; pages only reachable then are marked requires_auth. */
+  auth?: AuthConfig
+  /** Extra attempts for the crawl login (same page) and for page loads that fail. Default 1. */
+  retries?: number
 }
 
 export interface LiveRouteCrawlDependencies {
@@ -41,48 +48,43 @@ export async function crawlLiveRoutes(
     const context = dependencies.context ?? await browser!.newContext({ baseURL: origin })
     ownedContext = dependencies.context ? undefined : context
     context.setDefaultTimeout(timeoutMs)
-    const page = await context.newPage()
-    const queue: Array<{ path: string; depth: number }> = [{ path: '/', depth: 0 }]
-    const queued = new Set(['/'])
-    const attemptedPaths: string[] = []
-    const routes: Route[] = []
+    const retries = clamp(input.retries ?? 1, 0, 2)
+    const options = { origin, maxPages, maxDepth, timeoutMs, blocklist, retries }
+    const publicPass = await crawlPass(context, options)
+    const routes: Route[] = publicPass.paths.map(path => liveRoute(path, false))
+    const attemptedPaths = [...publicPass.attempted]
 
-    while (queue.length > 0 && attemptedPaths.length < maxPages) {
-      const next = queue.shift()!
-      attemptedPaths.push(next.path)
-      try {
-        const response = await page.goto(new URL(next.path, origin).href, {
-          waitUntil: 'domcontentloaded',
-          timeout: timeoutMs,
-        })
-        const finalUrl = new URL(page.url())
-        if (finalUrl.origin !== origin || (response && response.status() >= 400)) continue
-        const canonicalPath = normalizePath(finalUrl.pathname)
-        if (!routes.some(route => route.path === canonicalPath)) {
-          routes.push({
-            path: canonicalPath,
-            type: 'page',
-            requires_auth: false,
-            dynamic_segments: [],
-            origin: 'live-crawl',
-          })
+    let auth: LiveRouteCrawl['auth']
+    if (input.auth?.strategy === 'credentials' && input.auth.credentials) {
+      // Crawl again in a separate, logged-in context so pages behind the
+      // sign-in are discovered too. Logout links stay blocked (DESTRUCTIVE_PATH).
+      const authBrowser = browser ?? context.browser()
+      if (!authBrowser) {
+        auth = { status: 'unavailable', pages: 0 }
+      } else {
+        const authContext = await authBrowser.newContext({ baseURL: origin })
+        try {
+          authContext.setDefaultTimeout(timeoutMs)
+          const login = await performLoginDetailed(authContext, origin, input.auth, retries)
+          const loginDetails = { login_attempts: login.attempts, ...(login.firstFailure ? { first_failure: login.firstFailure } : {}) }
+          if (login.ok) {
+            // Start from where the login landed as well as from /: on many apps
+            // the signed-in area is only linked from that landing page.
+            const landing = login.landingUrl ? safeSameOriginPath(login.landingUrl, origin, blocklist) : undefined
+            const authPass = await crawlPass(authContext, options, landing && landing !== '/' ? [landing, '/'] : ['/'])
+            const publicPaths = new Set(publicPass.paths)
+            const added = authPass.paths.filter(path => !publicPaths.has(path))
+            routes.push(...added.map(path => liveRoute(path, true)))
+            attemptedPaths.push(...authPass.attempted)
+            auth = { status: 'logged-in', pages: added.length, ...loginDetails }
+          } else {
+            auth = { status: 'login-failed', pages: 0, ...loginDetails }
+          }
+        } finally {
+          await authContext.close().catch(() => {})
         }
-        if (next.depth >= maxDepth) continue
-
-        const hrefs = await page.locator('a[href]').evaluateAll(elements =>
-          elements.map(element => (element as HTMLAnchorElement).href)
-        )
-        for (const href of hrefs) {
-          const safePath = safeSameOriginPath(href, origin, blocklist)
-          if (!safePath || queued.has(safePath)) continue
-          queued.add(safePath)
-          queue.push({ path: safePath, depth: next.depth + 1 })
-        }
-      } catch {
-        // A failed page is evidence for diagnostics, not a reason to abort the bounded crawl.
       }
     }
-    await page.close().catch(() => {})
 
     const scenarios = routes.map(toSmokeScenario)
     return {
@@ -91,6 +93,7 @@ export async function crawlLiveRoutes(
       scenarios,
       attemptedPaths,
       reason: scenarios.length > 0 ? undefined : 'No safe same-origin HTML pages were reachable.',
+      ...(auth ? { auth } : {}),
     }
   } catch (error) {
     return {
@@ -106,17 +109,124 @@ export async function crawlLiveRoutes(
   }
 }
 
+interface CrawlPassOptions {
+  origin: string
+  maxPages: number
+  maxDepth: number
+  timeoutMs: number
+  blocklist: ActionBlocklist
+  retries: number
+}
+
+/** Breadth-first crawl from `/` within one browser context. Returns canonical page paths in visit order. */
+async function crawlPass(
+  context: BrowserContext,
+  { origin, maxPages, maxDepth, timeoutMs, blocklist, retries }: CrawlPassOptions,
+  seeds: string[] = ['/'],
+): Promise<{ paths: string[]; attempted: string[] }> {
+  const page = await context.newPage()
+  const queue: Array<{ path: string; depth: number }> = seeds.map(path => ({ path, depth: 0 }))
+  const queued = new Set(seeds.map(basePath))
+  // Paths only linked with a query string (/reservation/1?checkin=…) get one
+  // representative URL each, crawled after every plain link: query variants
+  // must not multiply or crowd out ordinary pages.
+  const deferred = new Map<string, { path: string; depth: number }>()
+  const attempted: string[] = []
+  const paths: string[] = []
+
+  try {
+    while ((queue.length > 0 || deferred.size > 0) && attempted.length < maxPages) {
+      const next = queue.shift() ?? takeFirst(deferred)!
+      attempted.push(next.path)
+      try {
+        // A page load that throws (timeout, connection reset) gets `retries` more tries.
+        let response = null
+        for (let attempt = 0; ; attempt++) {
+          try {
+            response = await page.goto(new URL(next.path, origin).href, {
+              waitUntil: 'domcontentloaded',
+              timeout: timeoutMs,
+            })
+            break
+          } catch (error) {
+            if (attempt >= retries) throw error
+          }
+        }
+        const finalUrl = new URL(page.url())
+        if (finalUrl.origin !== origin || (response && response.status() >= 400)) continue
+        const canonicalPath = normalizePath(finalUrl.pathname) + (next.path.includes('?') ? finalUrl.search : '')
+        if (!paths.includes(canonicalPath)) paths.push(canonicalPath)
+        if (next.depth >= maxDepth) continue
+
+        // Client-rendered apps add their navigation after scripts run and data
+        // (e.g. a session check) loads; reading links at DOMContentLoaded misses them.
+        await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => {})
+        const hrefs = await page.locator('a[href]').evaluateAll(elements =>
+          elements.map(element => (element as HTMLAnchorElement).href)
+        )
+        for (const href of hrefs) {
+          const safePath = safeSameOriginPath(href, origin, blocklist)
+          if (!safePath) continue
+          const base = basePath(safePath)
+          if (queued.has(base)) continue
+          if (safePath.includes('?')) {
+            if (!deferred.has(base)) deferred.set(base, { path: safePath, depth: next.depth + 1 })
+            continue
+          }
+          deferred.delete(base)
+          queued.add(base)
+          queue.push({ path: safePath, depth: next.depth + 1 })
+        }
+      } catch {
+        // A failed page is evidence for diagnostics, not a reason to abort the bounded crawl.
+      }
+    }
+  } finally {
+    await page.close().catch(() => {})
+  }
+  return { paths, attempted }
+}
+
+function liveRoute(path: string, requiresAuth: boolean): Route {
+  return {
+    path,
+    type: 'page',
+    requires_auth: requiresAuth,
+    dynamic_segments: [],
+    origin: 'live-crawl',
+  }
+}
+
 function safeSameOriginPath(href: string, origin: string, blocklist: ActionBlocklist): string | undefined {
   try {
     const url = new URL(href, origin)
     if (url.origin !== origin || !['http:', 'https:'].includes(url.protocol)) return undefined
-    if (url.hash || url.search || ASSET_PATH.test(url.pathname)) return undefined
+    if (url.hash || ASSET_PATH.test(url.pathname)) return undefined
     const path = normalizePath(url.pathname)
     if (DESTRUCTIVE_PATH.test(path) || blocklist.isBlocked(path, path)) return undefined
-    return path
+    if (!url.search) return path
+    // A query can act too (?action=delete, ?logout=1): skip those.
+    let query = url.search
+    try { query = decodeURIComponent(url.search) } catch { /* keep raw */ }
+    if (DESTRUCTIVE_QUERY.test(query) || blocklist.isBlocked(query, query)) return undefined
+    return path + url.search
   } catch {
     return undefined
   }
+}
+
+/** Query words that make opening a link an action rather than a page view. */
+const DESTRUCTIVE_QUERY = /(?:^|[?&=_\-/])(?:logout|log-out|signout|sign-out|delete|remove|destroy|cancel|unsubscribe|revoke)(?:$|[&=_\-/])/i
+
+function basePath(value: string): string {
+  return value.split('?')[0]
+}
+
+function takeFirst<K, V>(map: Map<K, V>): V | undefined {
+  const first = map.entries().next()
+  if (first.done) return undefined
+  map.delete(first.value[0])
+  return first.value[1]
 }
 
 function normalizePath(value: string): string {
@@ -127,7 +237,7 @@ function normalizePath(value: string): string {
 function toSmokeScenario(route: Route, index: number): TestScenario {
   return {
     id: `live-smoke-${index + 1}`,
-    name: `Live page health: ${route.path}`,
+    name: `Live page health: ${route.path}${route.requires_auth ? ' (logged in)' : ''}`,
     route: route.path,
     route_origin: 'live-crawl',
     priority: 'medium',
@@ -138,7 +248,7 @@ function toSmokeScenario(route: Route, index: number): TestScenario {
     expected_outcome: 'The page loads on the same origin without visible fatal errors.',
     is_gap: true,
     generated_by: 'heuristic',
-    requires_auth: false,
+    requires_auth: route.requires_auth,
   }
 }
 

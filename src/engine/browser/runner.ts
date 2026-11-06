@@ -1,26 +1,39 @@
-import { chromium, BrowserContext, Page, Locator } from 'playwright'
+import { chromium, BrowserContext, Page, Locator, type Response } from 'playwright'
 import { TestScenario, TestResult, TestStep, StepLog, ApiError } from '../../types/index.js'
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
-import { performLogin } from './auth.js'
+import { describeLoginRetry, performLoginDetailed, waitForLoginOutcome, type LoginOutcome } from './auth.js'
+import { readLoginError } from './login-form.js'
+import { checkLogoutRoundTrip } from './session-checks.js'
+import { checkCrossUserAccess } from './access-checks.js'
 import { verifyResult } from './verifier.js'
-import { exploreAllPages, PageExploration } from './explorer.js'
+import { exploreAllPages, PageExploration, type ExploreAllOptions } from './explorer.js'
+import { basicPlan, type TestPlan } from '../test-plan.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
 import { logger } from '../../utils/logger.js'
 import { ensureDir } from '../../utils/file.js'
 import path from 'path'
 import fs from 'fs/promises'
 import { assertPage, AssertionFailure, stepLocator } from './assertions.js'
+import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
 
 export interface ExecutionResult {
   results: TestResult[]
   explorations: PageExploration[]
+  /** Operations that only succeeded on a retry (e.g. a login accepted on the second submission). */
+  retry_findings: string[]
+  /** Pages the plan left out (mode "changed"). */
+  skipped_routes?: string[]
+  /** Why the logout round-trip / cross-user checks didn't run, when they didn't. */
+  session_checks_note?: string
 }
 
 export async function executeScenarios(
   scenarios: TestScenario[],
   config: VibeConfig,
   projectRoot: string,
-  guidance?: VibeGuidance | null
+  guidance?: VibeGuidance | null,
+  /** Depth per page (see test-plan.ts). Default: from config.mode, fast → light, else thorough. */
+  plan: TestPlan = basicPlan(config.mode === 'fast' ? 'fast' : 'deep'),
 ): Promise<ExecutionResult> {
   if (scenarios.length === 0) throw new Error('No scenarios to execute: empty scenario batch')
   const screenshotsDir = path.join(projectRoot, '.vibe', 'screenshots')
@@ -33,6 +46,28 @@ export async function executeScenarios(
 
   const results: TestResult[] = []
   const explorations: PageExploration[] = []
+  const retryFindings = new Set<string>()
+  const noteLogin = (outcome: LoginOutcome) => {
+    const finding = describeLoginRetry(outcome, 'Configured login')
+    if (finding) retryFindings.add(finding)
+  }
+  const skippedRoutes = new Set<string>()
+  let sessionChecksNote: string | undefined
+  const done = (): ExecutionResult => ({
+    results, explorations, retry_findings: [...retryFindings],
+    ...(skippedRoutes.size > 0 ? { skipped_routes: [...skippedRoutes] } : {}),
+    ...(sessionChecksNote ? { session_checks_note: sessionChecksNote } : {}),
+  })
+  // Pages are explored at the plan's depth; a page whose scenario failed is
+  // explored thoroughly whatever was planned.
+  const exploreOptions = (): ExploreAllOptions => ({
+    writes: config.explore?.writes,
+    decide: plan.decide,
+    templateOf: plan.templateOf,
+    recheck: plan.recheck,
+    failedRoutes: new Set(results.filter(result => result.status !== 'pass').map(result => result.scenario.route)),
+    onSkip: route => skippedRoutes.add(route),
+  })
 
   const unauthScenarios = scenarios.filter(s => !s.requires_auth)
   const authScenarios = scenarios.filter(s => s.requires_auth)
@@ -44,21 +79,23 @@ export async function executeScenarios(
       slowMo: config.browser?.slowMo ?? 100,
     })
 
-    const unauthCtx = await browser1.newContext({
-      baseURL: config.url,
-      viewport: { width: 1280, height: 800 },
-    })
-    unauthCtx.setDefaultTimeout(config.browser?.timeout ?? 30000)
-
-    if (config.auth?.strategy === 'credentials') {
-      await performLogin(unauthCtx, config.url, config.auth)
+    const newUnauthContext = async () => {
+      const ctx = await browser1.newContext({
+        baseURL: config.url,
+        viewport: { width: 1280, height: 800 },
+      })
+      ctx.setDefaultTimeout(config.browser?.timeout ?? 30000)
+      return ctx
     }
+    let unauthCtx = await newUnauthContext()
 
+    // This phase stays logged out: its scenarios check public pages, login
+    // forms and "redirects to login" behaviour, which a session would mask.
     logger.section(`Executing ${unauthScenarios.length} scenarios (unauthenticated)`)
     for (const scenario of unauthScenarios) {
       logger.info(`Running: ${scenario.name}`)
       try {
-        const result = await runOneScenario(scenario, unauthCtx, config, screenshotsDir, projectRoot)
+        const result = await runScenarioWithRetry(scenario, unauthCtx, config, screenshotsDir, projectRoot)
         results.push(result)
         logResult(result)
       } catch (err) {
@@ -69,13 +106,19 @@ export async function executeScenarios(
           step_logs: [],
         })
       }
+      // A login scenario that succeeded leaves a session behind; later
+      // scenarios and the public-page exploration must start logged out.
+      if (fillsPassword(scenario)) {
+        await unauthCtx.close().catch(() => {})
+        unauthCtx = await newUnauthContext()
+      }
     }
 
     // Explore public pages
     const publicRoutes = [...new Set(unauthScenarios.map(s => s.route).filter(r => !r.includes('redirect')))]
     if (publicRoutes.length > 0) {
       logger.section(`Exploring ${publicRoutes.length} public pages (element-by-element)`)
-      const publicExplorations = await exploreAllPages(unauthCtx, publicRoutes, config.url, screenshotsDir, blocklist)
+      const publicExplorations = await exploreAllPages(unauthCtx, publicRoutes, config.url, screenshotsDir, blocklist, exploreOptions())
       explorations.push(...publicExplorations)
     }
 
@@ -104,7 +147,28 @@ export async function executeScenarios(
     let authEstablished = false
     let authCtx: BrowserContext | null = null
 
-    if (loginScenario) {
+    // Configured credentials (vibe.config.json) come first: they work even when
+    // no login scenario was generated, e.g. for routes found by the live crawl.
+    if (config.auth?.strategy === 'credentials' && config.auth.credentials) {
+      logger.info('Establishing authenticated session from configured credentials...')
+      const ctx = await browser2.newContext({
+        baseURL: config.url,
+        viewport: { width: 1280, height: 800 },
+      })
+      ctx.setDefaultTimeout(config.browser?.timeout ?? 30000)
+      const outcome = await performLoginDetailed(ctx, config.url, config.auth, config.retries)
+      noteLogin(outcome)
+      if (outcome.ok) {
+        authCtx = ctx
+        authEstablished = true
+        logger.success('  Auth established with configured credentials')
+      } else {
+        await ctx.close().catch(() => {})
+        logger.warn('  Configured credentials did not log in; trying a generated login scenario')
+      }
+    }
+
+    if (!authEstablished && loginScenario) {
       logger.info('Establishing authenticated session (fresh browser)...')
 
       let tempCtx: BrowserContext
@@ -125,7 +189,7 @@ export async function executeScenarios(
           })
         }
         await browser2.close().catch(() => {})
-        return { results, explorations }
+        return done()
       }
       try {
         const stepsToRun = loginScenario.steps.filter(s => s.action !== 'assert')
@@ -243,7 +307,7 @@ export async function executeScenarios(
       for (const scenario of authScenarios) {
         logger.info(`Running: ${scenario.name}`)
         try {
-          const result = await runOneScenario(scenario, authCtx, config, screenshotsDir, projectRoot)
+          const result = await runScenarioWithRetry(scenario, authCtx, config, screenshotsDir, projectRoot)
           results.push(result)
           logResult(result)
         } catch (err) {
@@ -260,8 +324,41 @@ export async function executeScenarios(
       const protectedRoutes = [...new Set(authScenarios.map(s => s.route))]
       if (protectedRoutes.length > 0) {
         logger.section(`Exploring ${protectedRoutes.length} pages (element-by-element)`)
-        const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist)
-        explorations.push(...authExplorations)
+        const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist, exploreOptions())
+        // Signed in, a bounce to sign-in means the session was lost, not that the page is protected.
+        explorations.push(...authExplorations.map(exploration => ({
+          ...exploration,
+          signed_in: true,
+          errors: exploration.redirected_to
+            ? [`Redirected to ${exploration.redirected_to} while signed in — the session expired or login did not stick`]
+            : exploration.errors,
+        })))
+      }
+
+      // Session checks belong to thorough testing: skipped when no page was
+      // tested thoroughly (mode fast, or auto with only light pages).
+      if (plan.sessionChecks(explorations)) {
+        // ── Phase 4a: Cross-user access (only with two configured accounts; own sessions) ──
+        const crossUser = await checkCrossUserAccess(browser2, config, protectedRoutes, screenshotsDir, blocklist)
+        if (crossUser) {
+          results.push(crossUser)
+          logResult(crossUser)
+        }
+
+        // ── Phase 4b: Logout round-trip (own session, so the others stay signed in) ──
+        // The check confirms which of these really asks a signed-out visitor to sign in.
+        const protectedPages = protectedRoutes.filter(route => !/[:[*]/.test(route))
+        if (protectedPages.length > 0) {
+          const logout = await checkLogoutRoundTrip(browser2, config, protectedPages, screenshotsDir, blocklist)
+          if (logout) {
+            results.push(logout)
+            logResult(logout)
+          }
+        }
+      } else {
+        // fast mode says so in its own plan note.
+        if (plan.mode !== 'fast') sessionChecksNote = `logout round-trip and cross-user checks skipped: no page was tested thoroughly (mode ${plan.mode})`
+        logger.dim('  Session checks (logout round-trip, cross-user) skipped for this mode')
       }
 
       await authCtx.close().catch(() => {})
@@ -281,7 +378,7 @@ export async function executeScenarios(
     await browser2.close().catch(() => {})
   }
 
-  return { results, explorations }
+  return done()
 }
 
 function logResult(result: TestResult): void {
@@ -299,6 +396,42 @@ function extractUrlPath(url: string): string {
   try { return new URL(url).pathname } catch { return url }
 }
 
+/**
+ * Run a scenario, and run it again (up to config.retries times) when it fails
+ * or errors. A pass on a retry is kept as a pass but carries `retry` with the
+ * first failure, so it is reported as "only passed on retry" instead of being
+ * hidden. When every attempt fails, the first attempt's result (the original
+ * evidence) is returned with the attempt count.
+ */
+export async function runScenarioWithRetry(
+  scenario: TestScenario,
+  context: BrowserContext,
+  config: VibeConfig,
+  screenshotsDir: string,
+  projectRoot = config.codebase_path ?? process.cwd(),
+): Promise<TestResult> {
+  const first = await runOneScenario(scenario, context, config, screenshotsDir, projectRoot)
+  if (first.status === 'pass' || (config.retries ?? 0) < 1) return first
+
+  const firstFailure = (first.failure_reason ?? first.ai_verdict ?? first.status).slice(0, 200)
+  let attempts = 1
+  while (attempts <= (config.retries ?? 0)) {
+    attempts++
+    logger.dim(`  Retrying (attempt ${attempts}): ${scenario.name}`)
+    const again = await runOneScenario(scenario, context, config, screenshotsDir, projectRoot)
+    if (again.status === 'pass') {
+      return { ...again, retry: { attempts, passed_on_retry: true, first_failure: firstFailure } }
+    }
+  }
+  return { ...first, retry: { attempts, passed_on_retry: false, first_failure: firstFailure } }
+}
+
+/** Finding text for a scenario that only passed on a retry, or undefined. */
+export function describeScenarioRetry(result: TestResult): string | undefined {
+  if (!result.retry?.passed_on_retry) return undefined
+  return `${result.scenario.name} (${result.scenario.route}): only passed on attempt ${result.retry.attempts} (first attempt: ${result.retry.first_failure})`
+}
+
 export async function runOneScenario(
   scenario: TestScenario,
   context: BrowserContext,
@@ -312,6 +445,29 @@ export async function runOneScenario(
   const stepLogs: StepLog[] = []
   const apiErrors: ApiError[] = []
   let navigatedUrl: string | undefined
+  // Server crashes (5xx page loads, form posts, fetch/XHR) fail the scenario
+  // without needing an assertion; crash text counts when an action caused it.
+  const serverWatch = watchServerErrors(page)
+  const crashSignals: ServerErrorSignal[] = []
+  const serverErrors = () => uniqueSignals([...serverWatch.signals, ...crashSignals])
+  const withServerErrors = async (result: TestResult): Promise<TestResult> => {
+    await settleSignals(serverWatch.signals)
+    const errors = serverErrors()
+    if (errors.length === 0) return result
+    const evidence = describeSignal(errors[0])
+    return {
+      ...result,
+      status: result.status === 'error' ? 'error' : 'fail',
+      server_errors: errors,
+      failure_reason: result.failure_reason ? `${evidence}. ${result.failure_reason}` : evidence,
+      ai_verdict: result.ai_verdict === undefined
+        ? undefined
+        : result.status === 'pass'
+          ? `${evidence} (page checks passed, but the server failed)`
+          : `${evidence}. ${result.ai_verdict}`,
+      verification_status: 'not_verified',
+    }
+  }
 
   // Decide which steps deserve a screenshot: state-changing steps (fill, click, navigate, select, upload)
   const isScreenshotWorthy = (action: string) => ['fill', 'click', 'navigate', 'select', 'upload'].includes(action)
@@ -320,6 +476,12 @@ export async function runOneScenario(
     if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
       throw new Error('No steps to execute: scenario must contain at least one step')
     }
+    // A login submit that leaves the login form showing is resubmitted on the
+    // same page (like the configured login): some apps only accept a later
+    // submit, and page state is lost on a fresh page.
+    let fillsSinceNavigate: TestStep[] = []
+    let passwordFilled = false
+    let loginRetry: NonNullable<TestResult['retry']> | undefined
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const urlBefore = page.url()
@@ -328,7 +490,22 @@ export async function runOneScenario(
       let stepScreenshotPath: string | undefined
 
       try {
+        const crashBefore = step.action === 'click' ? await detectCrashText(page) : undefined
         selectorUsed = await executeStep(page, step, config.url, apiErrors, projectRoot)
+        if (step.action === 'navigate') { fillsSinceNavigate = []; passwordFilled = false }
+        if (step.action === 'fill' && step.value) {
+          fillsSinceNavigate.push(step)
+          if (await hasPasswordValue(page, step.value)) passwordFilled = true
+        }
+        if (step.action === 'click' && passwordFilled && isSubmitStep(step) && !loginRetry) {
+          loginRetry = await resubmitRejectedLogin(page, step, fillsSinceNavigate, urlBefore, config, apiErrors, projectRoot)
+        }
+        if (step.action === 'click') {
+          const crashAfter = await detectCrashText(page)
+          if (crashAfter && crashAfter !== crashBefore) {
+            crashSignals.push({ url: page.url(), evidence: crashAfter })
+          }
+        }
 
         if (step.action === 'navigate' && !navigatedUrl) {
           navigatedUrl = step.url?.startsWith('http')
@@ -384,8 +561,9 @@ export async function runOneScenario(
 
     const verdict = await verifyResult(page, scenario, screenshotPath, navigatedUrl, apiErrors)
 
-    return {
+    return await withServerErrors({
       scenario,
+      retry: verdict.passed ? loginRetry : undefined,
       status: verdict.passed ? 'pass' : 'fail',
       duration_ms: Date.now() - startTime,
       screenshot_path: screenshotPath,
@@ -395,11 +573,11 @@ export async function runOneScenario(
       verification_status: verdict.verification,
       step_logs: stepLogs,
       api_errors: apiErrors.length > 0 ? apiErrors : undefined,
-    }
+    })
   } catch (err: unknown) {
     try { await page.screenshot({ path: screenshotPath, fullPage: false }) } catch { /* ignore */ }
 
-    return {
+    return await withServerErrors({
       scenario,
       status: err instanceof AssertionFailure ? 'fail' : 'error',
       duration_ms: Date.now() - startTime,
@@ -410,10 +588,63 @@ export async function runOneScenario(
       verification_status: 'not_verified',
       step_logs: stepLogs,
       api_errors: apiErrors.length > 0 ? apiErrors : undefined,
-    }
+    })
   } finally {
+    serverWatch.stop()
     await page.close()
   }
+}
+
+/** True when a scenario types into a password field (a login or sign-up flow). */
+function fillsPassword(scenario: TestScenario): boolean {
+  return scenario.steps.some(step => step.action === 'fill' && /password/i.test(`${step.selector ?? ''} ${step.description}`))
+}
+
+/** A click step that executeStep treats as a form submit. */
+function isSubmitStep(step: TestStep): boolean {
+  return !!(step.selector?.includes('submit') || step.description.toLowerCase().includes('submit'))
+}
+
+/** True when a visible password field holds `value` (the step just filled a password). */
+async function hasPasswordValue(page: Page, value: string): Promise<boolean> {
+  return page.evaluate(
+    expected => Array.from(document.querySelectorAll('input[type="password"]')).some(el => (el as HTMLInputElement).value === expected),
+    value,
+  ).catch(() => false)
+}
+
+/**
+ * After a submit that filled a password: while the page is still the login
+ * form, refill and resubmit it, up to config.retries more times. Returns retry
+ * info when a later submit got past the login form (the scenario passes, but
+ * the inconsistent login is reported); undefined when the first submit worked
+ * or none did.
+ */
+async function resubmitRejectedLogin(
+  page: Page,
+  submit: TestStep,
+  fills: TestStep[],
+  loginUrl: string,
+  config: VibeConfig,
+  apiErrors: ApiError[] | undefined,
+  projectRoot: string,
+): Promise<NonNullable<TestResult['retry']> | undefined> {
+  const retries = config.retries ?? 0
+  if (retries < 1 || !await waitForLoginOutcome(page, loginUrl)) return undefined
+  const firstFailure = await readLoginError(page) ?? 'stayed on the login page'
+  let attempts = 1
+  while (attempts <= retries) {
+    attempts++
+    logger.dim(`  Login still shown; resubmitting (attempt ${attempts})`)
+    for (const fill of fills) await executeStep(page, fill, config.url, apiErrors, projectRoot)
+    await executeStep(page, submit, config.url, apiErrors, projectRoot)
+    if (!await waitForLoginOutcome(page, loginUrl)) {
+      // The rejected submits' responses are the retry finding, not extra failures.
+      apiErrors?.splice(0, apiErrors.length)
+      return { attempts, passed_on_retry: true, first_failure: firstFailure }
+    }
+  }
+  return undefined
 }
 
 async function executeStep(page: Page, step: TestStep, baseUrl: string, apiErrors?: ApiError[], projectRoot = process.cwd()): Promise<string | undefined> {
@@ -441,19 +672,24 @@ async function executeStep(page: Page, step: TestStep, baseUrl: string, apiError
 
       if (isSubmit) {
         const urlBefore = page.url()
-        // Click and capture API response in parallel (3s grace for API to respond)
-        const responsePromise = page.waitForResponse(
-          resp => (resp.url().includes('/api') || resp.url().includes('/auth')) && resp.status() > 0,
-          { timeout: 8000 }
-        ).catch(() => null)
+        // Collect API responses while the submit settles. (Waiting separately
+        // for one with an 8s timeout stalled every submit whose form posts
+        // somewhere other than /api or /auth, e.g. a server-rendered app.)
+        const apiResponses: Response[] = []
+        const onResponse = (resp: Response) => {
+          if ((resp.url().includes('/api') || resp.url().includes('/auth')) && resp.status() > 0) apiResponses.push(resp)
+        }
+        page.on('response', onResponse)
+        try {
+          await locator.click({ timeout })
+          // Wait for the page to settle (URL change, network idle, or toast)
+          await waitForSubmitSettled(page, urlBefore, timeout)
+        } finally {
+          page.off('response', onResponse)
+        }
 
-        await locator.click({ timeout })
-
-        // Wait for the page to settle (URL change, network idle, or toast)
-        await waitForSubmitSettled(page, urlBefore, timeout)
-
-        // Check if we got an API response
-        const apiResp = await responsePromise
+        // Check the first API response the submit produced
+        const apiResp = apiResponses[0]
         if (apiResp && apiResp.status() >= 400 && apiErrors) {
           const body = await apiResp.text().catch(() => '')
           apiErrors.push({ url: apiResp.url(), status: apiResp.status(), body: body.slice(0, 200) })

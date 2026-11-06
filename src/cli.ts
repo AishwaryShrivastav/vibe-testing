@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
 import { VibeTester } from './engine/index.js'
-import { readJSON, fileExists } from './utils/file.js'
-import type { VibeConfig } from './types/config.js'
+import { fileExists } from './utils/file.js'
+import { loadRunConfig } from './utils/run-config.js'
 import { logger } from './utils/logger.js'
 import {
   chromiumInstallCommand,
@@ -422,6 +422,14 @@ if (process.argv.includes('--mcp')) {
 
 const program = new Command()
 
+/** Validate -m/--mode; undefined keeps the config file's mode. */
+function parseMode(value: string | undefined): 'fast' | 'deep' | 'auto' | 'changed' | undefined {
+  if (value === undefined) return undefined
+  if (value === 'fast' || value === 'deep' || value === 'auto' || value === 'changed') return value
+  logger.error(`Unknown mode "${value}": use fast, deep, auto or changed`)
+  process.exit(1)
+}
+
 program
   .name('vibe-testing')
   .description('Code-aware browser testing for AI coding agents — reads your code, tests your app in a real browser, reports regressions')
@@ -430,13 +438,15 @@ program
 program
   .command('run [url]')
   .description('Run vibe tests against a URL')
-  .option('-m, --mode <mode>', 'fast or deep (default: deep)', 'deep')
+  .option('-m, --mode <mode>', 'fast | deep | auto | changed (default: the config file, else deep)')
+  .option('--since <ref>', 'for auto/changed: compare against this branch, tag or commit (default: the last run)')
   .option('--no-headed', 'run browser headless')
   .option('-c, --config <path>', 'path to vibe.config.json')
   .option('--codebase <path>', 'path to codebase root (default: cwd)')
   .option('--scope <routes...>', 'limit to specific routes e.g. /login /checkout')
   .action(async (urlArg: string | undefined, opts: {
-    mode: string
+    mode?: string
+    since?: string
     headed: boolean
     config?: string
     codebase?: string
@@ -447,33 +457,27 @@ program
       return
     }
 
-    const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
-    const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
-
-    const url = urlArg ?? fileConfig.url
-    if (!url) {
+    const config = await loadRunConfig({
+      projectRoot: process.cwd(),
+      configPath: opts.config,
+      codebasePath: opts.codebase,
+      url: urlArg,
+      mode: parseMode(opts.mode),
+      since: opts.since,
+      headed: opts.headed !== false,
+      scopeInclude: opts.scope,
+    })
+    if (!config.url) {
       logger.error('URL required — pass as argument or set in vibe.config.json')
       process.exit(1)
     }
 
-    const config = {
-      ...fileConfig,
-      url,
-      mode: opts.mode as 'fast' | 'deep',
-      codebase_path: opts.codebase ?? fileConfig.codebase_path,
-      browser: {
-        ...fileConfig.browser,
-        headed: opts.headed !== false,
-      },
-      ...(opts.scope?.length ? { scope: { ...fileConfig.scope, include: opts.scope } } : {}),
-    }
-
-    const tester = new VibeTester(config)
+    const tester = new VibeTester({ ...config, url: config.url })
     const result = await tester.run()
 
     printFeedbackNudge()
 
-    if (result.diagnostic || result.summary.failed > 0 || result.summary.errors > 0) {
+    if (result.diagnostic || result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0) {
       process.exitCode = 1
     }
   })
@@ -481,7 +485,8 @@ program
 program
   .command('converge [url]')
   .description('Iterative coverage: baseline run, then follow-up rounds from gaps + failures until thresholds (or max rounds)')
-  .option('-m, --mode <mode>', 'fast or deep (default: deep)', 'deep')
+  .option('-m, --mode <mode>', 'fast | deep | auto | changed (default: the config file, else deep)')
+  .option('--since <ref>', 'for auto/changed: compare against this branch, tag or commit (default: the last run)')
   .option('--no-headed', 'run browser headless')
   .option('-c, --config <path>', 'path to vibe.config.json')
   .option('--codebase <path>', 'path to codebase root (default: cwd)')
@@ -489,7 +494,8 @@ program
   .option('--target-pass-rate <r>', 'stop when last batch pass rate reaches this (0-1)', '0.92')
   .option('--max-gaps <n>', 'stop when critical+important gaps <= this', '2')
   .action(async (urlArg: string | undefined, opts: {
-    mode: string
+    mode?: string
+    since?: string
     headed: boolean
     config?: string
     codebase?: string
@@ -502,27 +508,21 @@ program
       return
     }
 
-    const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
-    const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
-
-    const url = urlArg ?? fileConfig.url
-    if (!url) {
+    const config = await loadRunConfig({
+      projectRoot: process.cwd(),
+      configPath: opts.config,
+      codebasePath: opts.codebase,
+      url: urlArg,
+      mode: parseMode(opts.mode),
+      since: opts.since,
+      headed: opts.headed !== false,
+    })
+    if (!config.url) {
       logger.error('URL required — pass as argument or set in vibe.config.json')
       process.exit(1)
     }
 
-    const config = {
-      ...fileConfig,
-      url,
-      mode: opts.mode as 'fast' | 'deep',
-      codebase_path: opts.codebase ?? fileConfig.codebase_path,
-      browser: {
-        ...fileConfig.browser,
-        headed: opts.headed !== false,
-      },
-    }
-
-    const tester = new VibeTester(config)
+    const tester = new VibeTester({ ...config, url: config.url })
     const result = await tester.converge({
       max_followup_rounds: parseInt(opts.maxRounds, 10) || 4,
       target_pass_rate: parseFloat(opts.targetPassRate) || 0.92,
@@ -533,7 +533,7 @@ program
 
     printFeedbackNudge()
 
-    if (result.summary.failed > 0 || result.summary.errors > 0) {
+    if (result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0) {
       process.exit(1)
     }
   })

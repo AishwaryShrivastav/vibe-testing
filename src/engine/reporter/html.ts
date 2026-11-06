@@ -1,10 +1,36 @@
-import { TestResult, ProductModel, CoverageGapSuggestion, VerificationStatus } from '../../types/index.js'
+import { TestResult, ProductModel, CoverageGapSuggestion, VerificationStatus, type PlanSummary } from '../../types/index.js'
 import { VibeConfig } from '../../types/config.js'
 import type { MemoryRecommendations } from '../memory/index.js'
 import type { PageExploration, InteractionOutcome, ApiObservation } from '../browser/explorer.js'
 import packageJson from '../../../package.json' with { type: 'json' }
 import fs from 'fs/promises'
 import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
+import { collectExplorerWarnings, collectRetryFindings, findingKind, groupExplorerFailures, isExplorerFailure, type GroupedFinding } from '../findings.js'
+import { PAGE_THUMB, STEP_THUMB, prepareReportImages, type ReportImage } from './images.js'
+import path from 'path'
+
+export interface ReportFindings {
+  /**
+   * Logins and scenarios that only succeeded on a retry. Defaults to the
+   * scenario retries in `results`; pass it to include login/crawl retries.
+   */
+  retryFindings?: string[]
+  /**
+   * Wall-clock duration of the whole run (scan, scenarios, exploration and
+   * checks). Without it the header shows the time spent in scenarios only,
+   * labelled as such.
+   */
+  durationMs?: number
+  /**
+   * Folder the report is written to. Full-size screenshots under it are linked
+   * relative to the report; defaults to <codebase>/.vibe.
+   */
+  reportDir?: string
+  /** How deeply each page was tested and why (mode fast/deep/auto/changed). */
+  plan?: PlanSummary
+}
+
+type ImageMap = Map<string, ReportImage>
 
 export async function generateHtmlReport(
   results: TestResult[],
@@ -12,9 +38,13 @@ export async function generateHtmlReport(
   config: VibeConfig,
   explorations: PageExploration[],
   coverageGaps: CoverageGapSuggestion[],
-  recommendations?: MemoryRecommendations
+  recommendations?: MemoryRecommendations,
+  findings: ReportFindings = {},
 ): Promise<string> {
-  const metrics = deriveReportMetrics(productModel, results)
+  const metrics = deriveReportMetrics(productModel, results, explorations)
+  const explorerFailures = groupExplorerFailures(explorations)
+  const explorerWarnings = collectExplorerWarnings(explorations)
+  const retryFindings = findings.retryFindings ?? collectRetryFindings(results)
   const passed  = results.filter(r => r.status === 'pass')
   const failed  = results.filter(r => r.status === 'fail')
   const errored = results.filter(r => r.status === 'error')
@@ -28,34 +58,20 @@ export async function generateHtmlReport(
   const apiErrors = explorations.reduce((s, e) => s + e.api_calls.filter(a => a.isError).length, 0)
   const brokenElements = explorations.reduce((s, e) => s + e.interactions.filter(i => i.result === 'error').length, 0)
 
-  const screenshotCache: Record<string, string> = {}
-  const stepScreenshotCache: Record<string, string> = {}
-  for (const result of results) {
-    if (result.screenshot_path) {
-      try {
-        const buf = await fs.readFile(result.screenshot_path)
-        screenshotCache[result.scenario.id] = buf.toString('base64')
-      } catch { /* skip */ }
-    }
-    for (const log of result.step_logs ?? []) {
-      if (log.screenshot_path) {
-        try {
-          const buf = await fs.readFile(log.screenshot_path)
-          stepScreenshotCache[log.screenshot_path] = buf.toString('base64')
-        } catch { /* skip */ }
-      }
-    }
-  }
+  // Screenshots: small embedded JPEG thumbnails, full-size files linked.
+  const reportDir = findings.reportDir ?? (config.codebase_path ? path.join(config.codebase_path, '.vibe') : undefined)
+  const images = await prepareReportImages([
+    ...results.flatMap(r => [
+      ...(r.screenshot_path ? [{ path: r.screenshot_path, size: PAGE_THUMB }] : []),
+      ...(r.step_logs ?? []).flatMap(log => log.screenshot_path ? [{ path: log.screenshot_path, size: STEP_THUMB }] : []),
+    ]),
+    ...explorations.flatMap(e => e.screenshot_path ? [{ path: e.screenshot_path, size: PAGE_THUMB }] : []),
+  ], reportDir)
 
-  const explorationScreenshots: Record<string, string> = {}
-  for (const exp of explorations) {
-    if (exp.screenshot_path) {
-      try {
-        const buf = await fs.readFile(exp.screenshot_path)
-        explorationScreenshots[exp.route] = buf.toString('base64')
-      } catch { /* skip */ }
-    }
-  }
+  const changesCount = explorations.reduce((sum, e) => sum + (e.changes?.length ?? 0), 0)
+  const durationTile = findings.durationMs !== undefined
+    ? `<div class="meta-item"><div class="label">Duration</div><div class="value">${formatDuration(findings.durationMs)}</div><div class="sub">scenarios ${formatDuration(totalMs)}</div></div>`
+    : `<div class="meta-item"><div class="label">Scenario time</div><div class="value">${formatDuration(totalMs)}</div><div class="sub">excludes exploration</div></div>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -80,26 +96,52 @@ ${CSS}
     <div class="meta-item"><div class="label">Scenarios executed</div><div class="value">${metrics.scenariosExecuted}</div></div>
     <div class="meta-item"><div class="label">Elements</div><div class="value">${totalElements}</div></div>
     <div class="meta-item"><div class="label">API Calls</div><div class="value">${totalApis}${apiErrors > 0 ? ` <span style="color:var(--fail)">(${apiErrors} errors)</span>` : ''}</div></div>
-    <div class="meta-item"><div class="label">Duration</div><div class="value">${(totalMs / 1000).toFixed(1)}s</div></div>
+    ${durationTile}
   </div>
   <p class="metric-summary">${formatReportMetrics(metrics)}</p>
 </header>
 
-<div class="summary-bar">
-  <div class="summary-stat pass"><div class="num">${metrics.scenariosPassed}</div><div class="lbl">Passed</div></div>
-  <div class="summary-stat fail"><div class="num">${metrics.scenariosFailed}</div><div class="lbl">Failed</div></div>
-  <div class="summary-stat skip"><div class="num">${metrics.scenariosSkipped}</div><div class="lbl">Skipped</div></div>
-  <div class="summary-stat error"><div class="num">${errored.length}</div><div class="lbl">Errors</div></div>
-  <div class="summary-stat outcome"><div class="num">${outcomeVerified.length}</div><div class="lbl">Outcome verified</div></div>
-  <div class="summary-stat smoke"><div class="num">${smokeChecks.length}</div><div class="lbl">Smoke check passed</div></div>
-  <div class="summary-stat not"><div class="num">${notVerified.length}</div><div class="lbl">Not verified</div></div>
+${renderBugsFound([...failed, ...errored], explorerFailures, { warnings: explorerWarnings.length, retries: retryFindings.length, changes: changesCount })}
+
+<div class="summary-groups">
+  <div class="summary-group">
+    <div class="group-label">Scenarios</div>
+    <div class="summary-bar">
+      <div class="summary-stat pass"><div class="num">${metrics.scenariosPassed}</div><div class="lbl">Passed</div></div>
+      <div class="summary-stat fail"><div class="num">${metrics.scenariosFailed}</div><div class="lbl">Failed</div></div>
+      <div class="summary-stat error"><div class="num">${errored.length}</div><div class="lbl">Errors</div></div>
+      <div class="summary-stat skip"><div class="num">${metrics.scenariosSkipped}</div><div class="lbl">Skipped</div></div>
+    </div>
+  </div>
+  <div class="summary-group">
+    <div class="group-label">How passes were verified</div>
+    <div class="summary-bar">
+      <div class="summary-stat outcome"><div class="num">${outcomeVerified.length}</div><div class="lbl">Outcome verified</div></div>
+      <div class="summary-stat smoke"><div class="num">${smokeChecks.length}</div><div class="lbl">Smoke check passed</div></div>
+      <div class="summary-stat not"><div class="num">${notVerified.length}</div><div class="lbl">Not verified</div></div>
+    </div>
+  </div>
+  <div class="summary-group">
+    <div class="group-label">Exploration</div>
+    <div class="summary-bar">
+      <div class="summary-stat ${explorerFailures.length > 0 ? 'fail' : 'skip'}"><div class="num">${explorerFailures.length}</div><div class="lbl">Problems found</div></div>
+      <div class="summary-stat ${explorerWarnings.length + retryFindings.length > 0 ? 'error' : 'skip'}"><div class="num">${explorerWarnings.length + retryFindings.length}</div><div class="lbl">Warnings</div></div>
+      <div class="summary-stat ${changesCount > 0 ? 'smoke' : 'skip'}"><div class="num">${changesCount}</div><div class="lbl">Changes made</div></div>
+    </div>
+  </div>
 </div>
 
-${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
+${findings.plan ? renderPlanSection(findings.plan) : ''}
 
-${passed.length > 0 ? `<h2>Passed Scenarios</h2>\n${passed.map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
+${renderWarningsSection(retryFindings, explorerWarnings)}
 
-${explorations.length > 0 ? renderExplorationSection(explorations, explorationScreenshots) : ''}
+${renderAppChangesSection(explorations)}
+
+${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, images)).join('\n')}` : ''}
+
+${passed.length > 0 ? `<h2>Passed Scenarios</h2>\n${passed.map(r => renderScenarioCard(r, images)).join('\n')}` : ''}
+
+${explorations.length > 0 ? renderExplorationSection(explorations, images) : ''}
 
 ${coverageGaps.length > 0 ? renderCoverageGapsSection(coverageGaps) : ''}
 
@@ -120,12 +162,15 @@ ${renderIntelligenceSection(recommendations)}
 document.querySelectorAll('.card-header').forEach(h => {
   h.addEventListener('click', () => h.closest('.card').classList.toggle('open'))
 })
-// Enlarge step screenshots on click
-document.querySelectorAll('.step-thumb').forEach(img => {
+// Enlarge a screenshot on click: load the full-size file (falls back to the thumbnail)
+document.querySelectorAll('.zoomable').forEach(img => {
   img.addEventListener('click', e => {
+    e.preventDefault()
     e.stopPropagation()
     const modal = document.getElementById('screenshotModal')
-    document.getElementById('modalImg').src = img.src
+    const modalImg = document.getElementById('modalImg')
+    modalImg.onerror = () => { modalImg.onerror = null; modalImg.src = img.src }
+    modalImg.src = img.dataset.full || img.src
     modal.classList.add('active')
   })
 })
@@ -137,16 +182,205 @@ document.getElementById('screenshotModal').addEventListener('click', () => {
 </html>`
 }
 
+// ─── Bugs Found (top of the report) ───────────────────────────────────────────
+
+/** The kind badge already names it: "Console error: X" reads as "X", "Checkout (click): Empty-state action: X" as "Checkout (click): X". */
+function withoutKind(finding: string, kind: string): string {
+  return finding.replace(new RegExp(`(^|: )${kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: `), '$1')
+}
+
+/** A verdict as one trimmed line for the summary. */
+function oneLine(text: string, max = 220): string {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
+
+/**
+ * Everything that is a bug, in one place, first: failed and errored scenarios
+ * (name, route, one-line reason) and explorer problems grouped by kind with the
+ * pages they were seen on. Details stay in the sections below.
+ */
+function renderBugsFound(
+  failedScenarios: TestResult[],
+  failures: GroupedFinding[],
+  counts: { warnings: number; retries: number; changes: number },
+): string {
+  const total = failedScenarios.length + failures.length
+  const pointers = [
+    counts.retries > 0 ? `${counts.retries} passed only on retry` : '',
+    counts.warnings > 0 ? `${counts.warnings} warning${counts.warnings > 1 ? 's' : ''}` : '',
+    counts.changes > 0 ? `${counts.changes} change${counts.changes > 1 ? 's' : ''} made to the app` : '',
+  ].filter(Boolean)
+  const pointerLine = pointers.length > 0
+    ? `<p class="section-note bugs-also">Also: ${pointers.map(p => esc(p)).join(' &middot; ')} (see below).</p>`
+    : ''
+
+  if (total === 0) {
+    return `<h2 id="bugs-found">Bugs Found</h2>
+  <div class="bugs-none">No failing scenarios and no problems found while exploring.</div>
+  ${pointerLine}`
+  }
+
+  const scenarioRows = failedScenarios.map(r => `<tr>
+      <td><span class="badge ${r.status === 'error' ? 'error' : 'fail'}">${r.status === 'error' ? 'Scenario error' : 'Scenario failed'}</span></td>
+      <td class="finding-text"><strong>${esc(r.scenario.name)}</strong><br>${esc(oneLine(r.ai_verdict ?? r.failure_reason ?? ''))}</td>
+      <td><code>${esc(r.scenario.route)}</code></td>
+    </tr>`)
+
+  const byKind = new Map<string, GroupedFinding[]>()
+  for (const failure of failures) {
+    const kind = findingKind(failure.finding)
+    byKind.set(kind, [...(byKind.get(kind) ?? []), failure])
+  }
+  const problemRows = [...byKind].flatMap(([kind, group]) => group.map(({ finding, routes }) => `<tr>
+      <td><span class="badge fail">${esc(kind)}</span></td>
+      <td class="finding-text">${esc(withoutKind(finding, kind))}</td>
+      <td>${routes.map(r => `<code>${esc(r)}</code>`).join(' ')}</td>
+    </tr>`))
+
+  const parts = [
+    failedScenarios.length > 0 ? `${failedScenarios.length} failing scenario${failedScenarios.length > 1 ? 's' : ''}` : '',
+    failures.length > 0 ? `${failures.length} problem${failures.length > 1 ? 's' : ''} found while exploring` : '',
+  ].filter(Boolean).join(' and ')
+
+  return `<h2 id="bugs-found">Bugs Found (${total})</h2>
+  <p class="section-note">${esc(parts)}. Explorer problems come from built-in checks (server errors, console errors, broken values and resources, empty-state actions, created values that never appear, totals that don't add up) outside the scripted scenarios.</p>
+  <div class="section-table findings-table bugs-table"><table>
+    <thead><tr><th>Kind</th><th>Finding</th><th>Pages</th></tr></thead>
+    <tbody>${[...scenarioRows, ...problemRows].join('\n')}</tbody>
+  </table></div>
+  ${pointerLine}`
+}
+
+// ─── Warnings ────────────────────────────────────────────────────────────────
+
+/** Operations that only passed on a retry, and lower-confidence findings. They don't fail the run. */
+function renderWarningsSection(retryFindings: string[], warnings: string[]): string {
+  const rows = [
+    ...retryFindings.map(finding => ({ kind: 'Passed on retry', finding })),
+    ...warnings.map(finding => ({ kind: findingKind(finding), finding })),
+  ]
+  if (rows.length === 0) return ''
+  return `<h2 class="warn-heading">Warnings (${rows.length})</h2>
+  <p class="section-note">Inconsistent behaviour and lower-confidence findings. They do not fail the run but are worth a look.</p>
+  <div class="section-table findings-table"><table>
+    <thead><tr><th>Kind</th><th>Finding</th></tr></thead>
+    <tbody>${rows.map(({ kind, finding }) => `<tr>
+      <td><span class="badge medium">${esc(kind)}</span></td>
+      <td class="finding-text">${esc(withoutKind(finding, kind))}</td>
+    </tr>`).join('\n')}</tbody>
+  </table></div>`
+}
+
+/** A thumbnail linked to the full-size screenshot; clicking enlarges it. */
+function screenshotFigure(image: ReportImage | undefined, label: string, alt: string): string {
+  if (!image) return ''
+  return `
+    <div class="screenshot-container">
+      <div class="screenshot-label">${esc(label)} &middot; <a href="${esc(image.full)}" target="_blank" rel="noopener">full size</a></div>
+      <img src="${esc(image.thumb ?? image.full)}" data-full="${esc(image.full)}" alt="${esc(alt)}" class="zoomable screenshot-thumb" loading="lazy">
+    </div>`
+}
+
+function formatDuration(ms: number): string {
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`
+}
+
+// ─── Changes Made to the App ──────────────────────────────────────────────────
+
+/**
+ * Every data-changing request exploration made (records created, forms saved),
+ * so the user knows what to clean up. Repeats of the same request by the same
+ * action on a page are one row with a count.
+ */
+function renderAppChangesSection(explorations: PageExploration[]): string {
+  const rows = new Map<string, { route: string; action: string; request: string; status?: number; values?: string; count: number }>()
+  for (const exp of explorations) {
+    for (const change of exp.changes ?? []) {
+      const key = `${exp.route} ${change.action} ${change.method} ${change.path}`
+      const row = rows.get(key)
+      if (row) { row.count++; continue }
+      rows.set(key, { route: exp.route, action: change.action, request: `${change.method} ${change.path}`, status: change.status, values: change.values, count: 1 })
+    }
+  }
+  if (rows.size === 0) return ''
+  const body = [...rows.values()].map(row => `<tr>
+      <td><code>${esc(row.route)}</code></td>
+      <td>${esc(row.action)}${row.count > 1 ? ` <span class="badge session">×${row.count}</span>` : ''}</td>
+      <td><code>${esc(row.request)}</code>${row.status ? ` <span class="badge ${row.status >= 400 ? 'fail' : 'pass'}">${row.status}</span>` : ''}</td>
+      <td class="finding-text">${esc(row.values ?? '')}</td>
+    </tr>`).join('\n')
+  return `<h2>Changes Made to the App</h2>
+  <p class="section-note">Data-changing requests the explorer sent while testing (${rows.size}). Records it created and forms it saved stay in the app, so clean them up on a shared environment. Set <code>explore.writes</code> to <code>"none"</code> to avoid them, or <code>"all"</code> to also test forms that edit existing data.</p>
+  <div class="section-table findings-table"><table>
+    <thead><tr><th>Page</th><th>Action</th><th>Request</th><th>Values sent</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`
+}
+
+// ─── Test Plan Section ────────────────────────────────────────────────────────
+
+function formatTimings(timings: Record<string, number>): string {
+  return Object.entries(timings)
+    .filter(([, ms]) => ms >= 50)
+    .map(([phase, ms]) => `${phase} ${(ms / 1000).toFixed(1)}s`)
+    .join(' · ') || 'under 0.1s'
+}
+
+const DEPTH_ORDER: Record<string, number> = { thorough: 0, standard: 1, light: 2, skipped: 3 }
+
+/** Mode, what the depths were based on, and each page's depth with its reason. */
+function renderPlanSection(plan: PlanSummary): string {
+  const counts = (['thorough', 'standard', 'light', 'skipped'] as const)
+    .filter(depth => plan.counts[depth] > 0)
+    .map(depth => `${plan.counts[depth]} ${depth}`)
+    .join(' · ')
+  const rows = [...plan.pages]
+    .sort((a, b) => DEPTH_ORDER[a.depth] - DEPTH_ORDER[b.depth] || a.route.localeCompare(b.route))
+    .map(page => `<tr>
+      <td><code>${esc(page.route)}</code></td>
+      <td><span class="badge depth-${page.depth}">${page.depth}</span></td>
+      <td>${esc(page.reason)}</td>
+    </tr>`).join('\n')
+  const changed = plan.changed_files?.length
+    ? `<p class="section-note">Changed files (${plan.changed_files.length}): ${plan.changed_files.slice(0, 12).map(file => `<code>${esc(file)}</code>`).join(' ')}${plan.changed_files.length > 12 ? ' …' : ''}</p>`
+    : ''
+  const notes = plan.notes.length ? `<ul class="plan-notes">${plan.notes.map(note => `<li>${esc(note)}</li>`).join('')}</ul>` : ''
+  return `<h2>Test Plan</h2>
+  <p class="section-note">Mode <strong>${esc(plan.mode)}</strong>, based on ${esc(plan.basis)}${plan.since ? ` since <code>${esc(plan.since.slice(0, 24))}</code>` : ''}: ${esc(counts || 'no pages')}.</p>
+  ${changed}
+  ${notes}
+  ${rows ? `<div class="section-table"><table>
+    <thead><tr><th>Page</th><th>Depth</th><th>Why</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>` : ''}`
+}
+
 // ─── Exploration Section ──────────────────────────────────────────────────────
 
-function renderExplorationSection(explorations: PageExploration[], screenshots: Record<string, string>): string {
+function renderExplorationSection(explorations: PageExploration[], images: ImageMap): string {
+  const bothSessions = explorations.some(e => e.signed_in) && explorations.some(e => !e.signed_in)
   const cards = explorations.map(exp => {
     const working = exp.interactions.filter(i => ['success', 'content_updated', 'dialog_opened', 'navigated', 'toast_shown'].includes(i.result)).length
     const broken = exp.interactions.filter(i => i.result === 'error').length
     const skipped = exp.interactions.filter(i => i.result === 'skipped').length
     const noChange = exp.interactions.filter(i => i.result === 'no_change').length
+    const problems = exp.errors.filter(isExplorerFailure)
+    const diagnostics = exp.errors.filter(e => !isExplorerFailure(e))
+    const warnings = exp.warnings ?? []
 
-    const statusClass = broken > 0 ? 'fail' : 'pass'
+    // Logged out, a bounce to sign-in is the page being protected — expected, not broken.
+    const signInWall = !!exp.redirected_to && !exp.signed_in
+    const statusClass = broken > 0 || problems.length > 0 ? 'fail'
+      : warnings.length > 0 || (exp.redirected_to && exp.signed_in) ? 'error'
+      : signInWall ? 'skip' : 'pass'
+    const sessionTag = bothSessions ? `<span class="badge session">${exp.signed_in ? 'signed in' : 'logged out'}</span>` : ''
+    const findingList = (items: string[], cls: string) => items.length === 0 ? '' :
+      `<ul class="page-findings ${cls}">${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>`
+    const findingsHtml = findingList(problems, 'fail') + findingList(warnings, 'warn') + findingList(diagnostics, 'dim')
 
     const interactionRows = exp.interactions.map(i => {
       const icon = i.result === 'success' || i.result === 'content_updated' ? '✅' :
@@ -161,23 +395,23 @@ function renderExplorationSection(explorations: PageExploration[], screenshots: 
         <td>${esc(i.element)}</td>
         <td>${esc(i.action)}</td>
         <td><span class="badge ${i.result === 'error' ? 'fail' : i.result === 'skipped' ? 'medium' : 'pass'}">${i.result}</span></td>
-        <td style="font-size:12px;color:var(--text-dim)">${esc(i.details.slice(0, 80))}</td>
+        <td style="font-size:12px;color:${i.result === 'error' ? 'var(--fail)' : 'var(--text-dim)'}">${esc(i.result === 'error' ? i.details.slice(0, 240) : i.details.slice(0, 80))}</td>
       </tr>`
     }).join('\n')
 
-    const screenshotHtml = screenshots[exp.route] ? `
-      <div class="screenshot-container">
-        <div class="screenshot-label">Page screenshot</div>
-        <img src="data:image/png;base64,${screenshots[exp.route]}" alt="${esc(exp.route)}" loading="lazy">
-      </div>` : ''
+    const screenshotHtml = screenshotFigure(exp.screenshot_path ? images.get(exp.screenshot_path) : undefined, 'Page screenshot', exp.route)
 
-    return `<div class="card${broken > 0 ? ' open' : ''}">
+    return `<div class="card${broken > 0 || problems.length > 0 ? ' open' : ''}">
     <div class="card-header">
       <div class="status-dot ${statusClass}"></div>
       <div class="title">${esc(exp.route)}</div>
       <div class="meta-tags">
-        <span class="badge pass">${working} working</span>
+        ${exp.depth ? `<span class="badge depth-${exp.depth}" title="${esc(exp.depth_reason ?? '')}">${exp.depth}</span>` : ''}
+        ${sessionTag}
+        ${signInWall ? `<span class="badge session">sign-in required</span>` : `<span class="badge pass">${working} working</span>`}
         ${broken > 0 ? `<span class="badge fail">${broken} broken</span>` : ''}
+        ${problems.length > 0 ? `<span class="badge fail">${problems.length} problem${problems.length > 1 ? 's' : ''}</span>` : ''}
+        ${warnings.length > 0 ? `<span class="badge medium">${warnings.length} warning${warnings.length > 1 ? 's' : ''}</span>` : ''}
         <span style="font-size:12px;color:var(--text-dim)">${exp.elements_discovered} elements, ${exp.duration_ms}ms</span>
       </div>
       <span class="chevron">▶</span>
@@ -186,7 +420,10 @@ function renderExplorationSection(explorations: PageExploration[], screenshots: 
       <div class="info-grid">
         <div class="info-item"><span class="info-label">Elements</span><span>${Object.entries(exp.elements_by_type).map(([k, v]) => `${v} ${k}s`).join(', ')}</span></div>
         <div class="info-item"><span class="info-label">API Calls</span><span>${exp.api_calls.length}${exp.api_calls.filter(a => a.isError).length > 0 ? ` (${exp.api_calls.filter(a => a.isError).length} errors)` : ''}</span></div>
+        ${exp.depth ? `<div class="info-item"><span class="info-label">Depth</span><span>${esc(exp.depth)}${exp.depth_reason ? ` — ${esc(exp.depth_reason)}` : ''}</span></div>` : ''}
+        ${exp.timings ? `<div class="info-item"><span class="info-label">Time per phase</span><span>${esc(formatTimings(exp.timings))}</span></div>` : ''}
       </div>
+      ${findingsHtml}
       ${interactionRows ? `<table class="step-table">
         <thead><tr><th></th><th>Type</th><th>Element</th><th>Action</th><th>Result</th><th>Details</th></tr></thead>
         <tbody>${interactionRows}</tbody>
@@ -299,7 +536,7 @@ function renderCoverageTable(productModel: ProductModel): string {
 
 // ─── Scenario Card ────────────────────────────────────────────────────────────
 
-function renderScenarioCard(result: TestResult, screenshots: Record<string, string>, stepScreenshots: Record<string, string>): string {
+function renderScenarioCard(result: TestResult, images: ImageMap): string {
   const s = result.scenario
   const status = result.status
   const verdictClass = status === 'pass' ? 'pass-verdict' : status === 'fail' ? 'fail-verdict' : 'error-verdict'
@@ -316,9 +553,9 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
     const sel = log.selector_used ? `<code>${esc(log.selector_used)}</code>` : '—'
     const urlPath = extractPath(log.url_after)
     const err = log.error ? `<br><span style="color:var(--fail);font-size:11px">${esc(log.error.slice(0, 80))}</span>` : ''
-    const stepScreenB64 = log.screenshot_path ? stepScreenshots[log.screenshot_path] : undefined
-    const screenshotCell = stepScreenB64
-      ? `<td class="step-screenshot-cell"><img src="data:image/png;base64,${stepScreenB64}" alt="step" class="step-thumb" loading="lazy"></td>`
+    const stepImage = log.screenshot_path ? images.get(log.screenshot_path) : undefined
+    const screenshotCell = stepImage
+      ? `<td class="step-screenshot-cell"><img src="${esc(stepImage.thumb ?? stepImage.full)}" data-full="${esc(stepImage.full)}" alt="step" class="step-thumb zoomable" loading="lazy"></td>`
       : `<td></td>`
     return `<tr>
       <td>${icon}</td>
@@ -331,12 +568,7 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
     </tr>`
   }).join('\n')
 
-  const screenshotB64 = screenshots[s.id]
-  const screenshotHtml = screenshotB64 ? `
-    <div class="screenshot-container">
-      <div class="screenshot-label">Screenshot at end of test</div>
-      <img src="data:image/png;base64,${screenshotB64}" alt="${esc(s.name)}" loading="lazy">
-    </div>` : ''
+  const screenshotHtml = screenshotFigure(result.screenshot_path ? images.get(result.screenshot_path) : undefined, 'Screenshot at end of test', s.name)
 
   const redirectNote = wasRedirected ? `
     <div class="redirect-note">
@@ -344,13 +576,25 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
       ${finalPath.includes('login') ? ' — requires authentication' : ''}
     </div>` : ''
 
-  return `<div class="card${status !== 'pass' ? ' open' : ''}">
+  const serverErrors = result.server_errors ?? []
+  const serverErrorHtml = serverErrors.length === 0 ? '' : `
+    <ul class="page-findings fail">${serverErrors.map(e => {
+      const where = `${e.method ?? 'GET'} ${extractPath(e.url)}`
+      return `<li>${e.status ? `Server error ${e.status} on ${esc(where)}` : `Crash text on ${esc(extractPath(e.url))}`}${e.evidence ? `: ${esc(e.evidence)}` : ''}</li>`
+    }).join('')}</ul>`
+  const retryHtml = !result.retry || result.retry.attempts <= 1 ? '' : `
+    <div class="redirect-note">${result.retry.passed_on_retry
+      ? `Only passed on attempt ${result.retry.attempts}`
+      : `Failed on all ${result.retry.attempts} attempts`}${result.retry.first_failure ? ` (first attempt: ${esc(result.retry.first_failure)})` : ''}</div>`
+
+  return `<div class="card${status !== 'pass' || result.retry?.passed_on_retry ? ' open' : ''}">
   <div class="card-header">
       <div class="status-dot ${status}"></div>
       <div class="title">${esc(s.name)}</div>
       <div class="meta-tags">
         <span class="badge ${s.priority}">${s.priority}</span>
         <span class="badge ${status}">${status}</span>
+        ${result.retry?.passed_on_retry ? '<span class="badge medium">passed on retry</span>' : ''}
         <span class="badge ${verification}">${verificationLabel}</span>
         <span style="font-size:12px;color:var(--text-dim)">${result.duration_ms}ms</span>
       </div>
@@ -358,6 +602,8 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
   </div>
   <div class="card-body">
     <div class="verdict ${verdictClass}">${esc(explanation)}</div>
+    ${retryHtml}
+    ${serverErrorHtml}
     ${redirectNote}
     <div class="info-grid">
       <div class="info-item"><span class="info-label">Route</span><code>${esc(s.route)}</code></div>
@@ -464,6 +710,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; }
 .card-header .status-dot.pass { background: var(--pass); }
 .card-header .status-dot.fail { background: var(--fail); }
 .card-header .status-dot.error { background: var(--warn); }
+.card-header .status-dot.skip { background: var(--text-dim); }
 .card-header .title { font-weight: 600; flex: 1; font-size: 14px; }
 .card-header .meta-tags { display: flex; gap: 8px; align-items: center; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
@@ -475,6 +722,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; }
 .badge.not_verified { background: var(--warn-bg); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
 .badge.high { background: var(--fail-bg); color: var(--fail); border: 1px solid rgba(239,68,68,0.2); }
 .badge.low { background: var(--pass-bg); color: var(--pass); border: 1px solid rgba(34,197,94,0.2); }
+.badge.session { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
 .card-body { display: none; padding: 0 20px 20px; }
 .card.open .card-body { display: block; }
 .card.open .chevron { transform: rotate(90deg); }
@@ -504,6 +752,34 @@ code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-s
 .section-table { margin-bottom: 8px; }
 .section-table table { background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 .redirect-note { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 10px 14px; border-radius: 0 6px 6px 0; margin-bottom: 16px; font-size: 13px; color: var(--warn); }
+.section-note { color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
+.meta-item .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+#bugs-found { margin-top: 8px; }
+.bugs-table table { border-color: rgba(239,68,68,0.35); }
+.bugs-none { background: var(--pass-bg); border: 1px solid rgba(34,197,94,0.25); border-left: 3px solid var(--pass); border-radius: 8px; padding: 12px 16px; font-size: 14px; margin-bottom: 12px; }
+.bugs-also { margin-top: 8px; }
+.summary-groups { display: flex; gap: 16px; flex-wrap: wrap; margin: 24px 0; }
+.summary-group { flex: 1 1 260px; }
+.summary-group .group-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.summary-group .summary-bar { margin: 0; gap: 8px; }
+.summary-group .summary-stat { min-width: 0; padding: 12px 8px; }
+.summary-group .summary-stat .num { font-size: 26px; }
+.screenshot-label a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
+.screenshot-thumb { cursor: zoom-in; max-width: 480px; }
+.screenshot-container:has(.screenshot-thumb) { display: inline-block; max-width: 100%; }
+.warn-heading { color: var(--warn); margin-top: 20px; }
+.findings-table td:first-child { white-space: nowrap; width: 1%; }
+.findings-table .finding-text { word-break: break-word; }
+.findings-table td:last-child code { display: inline-block; margin: 0 4px 4px 0; }
+.page-findings { list-style: none; margin: 0 0 12px; font-size: 13px; }
+.page-findings li { padding: 6px 12px; border-left: 3px solid; margin-bottom: 4px; border-radius: 0 6px 6px 0; word-break: break-word; }
+.page-findings.fail li { background: var(--fail-bg); border-color: var(--fail); }
+.page-findings.warn li { background: var(--warn-bg); border-color: var(--warn); }
+.page-findings.dim li { background: var(--surface2); border-color: var(--border); color: var(--text-dim); }
+.badge.depth-thorough { background: var(--accent-bg); color: var(--accent); border: 1px solid rgba(99,102,241,0.3); }
+.badge.depth-standard { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.badge.depth-light, .badge.depth-skipped { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+.plan-notes { margin: 0 0 12px 18px; color: var(--text-dim); font-size: 13px; }
 footer { margin-top: 48px; padding: 20px 0; border-top: 1px solid var(--border); text-align: center; font-size: 12px; color: var(--text-dim); }
 ol { color: var(--text); }
 `

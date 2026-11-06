@@ -260,6 +260,8 @@ export async function runConverge(
   last_pass_rate: number
   total_results: TestResult[]
   explorations: PageExploration[]
+  /** Operations that only succeeded on a retry, across all rounds. */
+  retry_findings: string[]
 }> {
   const o = { ...DEFAULTS, ...opts }
   const projectRoot = config.codebase_path ?? process.cwd()
@@ -279,12 +281,14 @@ export async function runConverge(
   let explorations: PageExploration[] = []
   let allResults: TestResult[] = []
   let lastGaps: CoverageGapSuggestion[] = []
+  const retryFindings = new Set<string>()
 
   // Round 1: baseline (full scenario list)
   logger.section('Round 1 — baseline scenarios')
   const first = await executeScenarios(productModel.scenarios, config, projectRoot, guidance)
   const baselinePr = passRate(first.results)
   explorations = first.explorations
+  first.retry_findings?.forEach(finding => retryFindings.add(finding))
   allResults.push(...first.results)
   await memory.updateFromResults(first.results)
   lastGaps = generateCoverageGaps(productModel.behaviours, explorations)
@@ -309,6 +313,7 @@ export async function runConverge(
       const ex = await executeScenarios(followUp, config, projectRoot, guidance)
       const pr = passRate(ex.results)
       explorations = mergeExplorations(explorations, ex.explorations)
+      ex.retry_findings?.forEach(finding => retryFindings.add(finding))
       allResults.push(...ex.results)
       await memory.updateFromResults(ex.results)
 
@@ -333,5 +338,6 @@ export async function runConverge(
     last_pass_rate: passRate(allResults),
     total_results: allResults,
     explorations,
+    retry_findings: [...retryFindings],
   }
 }

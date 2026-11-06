@@ -301,6 +301,168 @@ describe('parseRoutes - express', () => {
   })
 })
 
+describe('parseRoutes - express routes anywhere in the source', () => {
+  const describeRoutes = (routes: Awaited<ReturnType<typeof parseRoutes>>) =>
+    routes.map(r => `${r.method} ${r.path} ${r.type}${r.requires_auth ? ' auth' : ''}`).sort()
+
+  it('finds routes registered from a non-conventional file, typed from handlers in other modules', async () => {
+    const dir = await withTempProject({
+      'server.js': "const express = require('express')\nconst app = express()\nrequire('./app/routes')(app)",
+      'app/routes/index.js': `
+        const SessionHandler = require('./session')
+        module.exports = (app) => {
+          const session = new SessionHandler()
+          const isLoggedIn = session.isLoggedInMiddleware
+          // app.get('/commented', isLoggedIn, session.home)
+          /* app.post('/also-commented', session.home) */
+          app.get('/', session.home)
+          app.get('/login', session.loginPage)
+          app.post('/login', session.handleLogin)
+          app.get('/profile', isLoggedIn, session.profile)
+          app.get('/stats', isLoggedIn, session.stats)
+          app.get('/learn', isLoggedIn, (req, res) => res.redirect(req.query.url))
+        }`,
+      'app/routes/session.js': `
+        function SessionHandler() {
+          this.isLoggedInMiddleware = (req, res, next) => req.session.userId ? next() : res.redirect('/login')
+          this.home = (req, res) => {
+            if (!req.session.userId) return res.redirect('/login')
+            res.render('dashboard')
+          }
+          this.loginPage = (req, res) => { res.render('login') }
+          this.handleLogin = (req, res) => { res.redirect('/dashboard') }
+          this.profile = (req, res) => { res.render('profile', { user: req.user }) }
+          this.stats = (req, res) => { res.status(200).json({ visits: 1 }) }
+        }
+        module.exports = SessionHandler`,
+    })
+    const routes = await parseRoutes('express', dir)
+    expect(describeRoutes(routes)).toEqual([
+      // "/" redirects signed-out users to /login in its handler
+      'GET / page auth',
+      'GET /learn page auth',
+      'GET /login page',
+      'GET /profile page auth',
+      'GET /stats api auth',
+      'POST /login api',
+    ])
+    expect(routes.find(r => r.path === '/profile')?.file_path).toBe(path.join(dir, 'app/routes/index.js'))
+    await cleanup(dir)
+  })
+
+  it('applies mount prefixes and mount-level auth across files, including nested and inline mounts', async () => {
+    const dir = await withTempProject({
+      'src/app.ts': `
+        import express from 'express'
+        import adminRouter from './admin/router'
+        import { requireAuth } from './middleware/auth'
+        const app = express()
+        app.use('/admin', requireAuth, adminRouter)
+        app.use('/docs', require('./docs'))
+        app.get('/health', (req, res) => res.json({ ok: true }))`,
+      'src/admin/router.ts': `
+        import { Router } from 'express'
+        import usersRouter from './users'
+        const router = Router()
+        router.get('/', (req, res) => res.render('admin/home'))
+        router.use('/users', usersRouter)
+        export default router`,
+      'src/admin/users.ts': `
+        import express from 'express'
+        const users = express.Router()
+        users.get('/:id', (req, res) => res.render('admin/user'))
+        users.delete('/:id', (req, res) => res.sendStatus(204))
+        export default users`,
+      'src/docs.js': `
+        const router = require('express').Router()
+        const pages = ['intro', 'faq']
+        for (const page of pages) router.get(\`/\${page}\`, (req, res) => res.render(page))
+        module.exports = router`,
+      'src/middleware/auth.ts': 'export const requireAuth = (req, res, next) => next()',
+    })
+    const routes = await parseRoutes('express', dir)
+    expect(describeRoutes(routes)).toEqual([
+      'DELETE /admin/users/:id api auth',
+      'GET /admin page auth',
+      'GET /admin/users/:id page auth',
+      'GET /docs/:page page',
+      'GET /health api',
+    ])
+    expect(routes.find(r => r.path === '/admin/users/:id')?.dynamic_segments).toEqual(['id'])
+    await cleanup(dir)
+  })
+
+  it('reads app.route() chains and router-level auth from router.use()', async () => {
+    const dir = await withTempProject({
+      'lib/books.js': `
+        const express = require('express')
+        const router = express.Router()
+        router.get('/books/public', (req, res) => res.render('public'))
+        router.use(ensureLoggedIn)
+        router.route('/books')
+          .get((req, res) => res.render('books'))
+          .post((req, res) => res.redirect('/books'))
+        module.exports = router`,
+    })
+    const routes = await parseRoutes('express', dir)
+    expect(describeRoutes(routes)).toEqual([
+      'GET /books page auth',
+      'GET /books/public page',
+      'POST /books api auth',
+    ])
+    await cleanup(dir)
+  })
+
+  it('types JSON and /api routes as APIs', async () => {
+    const dir = await withTempProject({
+      'server.js': `
+        const app = require('express')()
+        app.get('/api/items', listItems)
+        app.get('/items.json', listItems)
+        app.get('/report', (req, res) => { res.json(build()) })
+        app.get('/home', (req, res) => { res.sendFile(__dirname + '/index.html') })`,
+    })
+    expect(describeRoutes(await parseRoutes('express', dir))).toEqual([
+      'GET /api/items api',
+      'GET /home page',
+      'GET /items.json api',
+      'GET /report api',
+    ])
+    await cleanup(dir)
+  })
+
+  it('does not treat a local-strategy login as an auth-protected route', async () => {
+    const dir = await withTempProject({
+      'app.js': `
+        const app = express()
+        app.post('/login', passport.authenticate('local'), (req, res) => res.redirect('/'))
+        app.get('/me', passport.authenticate('jwt', { session: false }), (req, res) => res.json(req.user))`,
+    })
+    expect(describeRoutes(await parseRoutes('express', dir))).toEqual(['GET /me api auth', 'POST /login api'])
+    await cleanup(dir)
+  })
+
+  it('ignores HTTP clients, browser code, tests, settings getters and comments', async () => {
+    const dir = await withTempProject({
+      'server.js': `
+        const app = express()
+        const env = app.get('env')
+        const url = "http://example.com//not-a-comment"
+        // app.get('/commented-out', h)
+        app.get('/real', (req, res) => res.render('real'))
+        axios.get('/api/client-call', config)
+        api.post('/api/client-post', body)
+        $.get('/jquery', function (data) {})`,
+      'public/js/app.js': "router.get('/browser-router', h)",
+      'assets/vendor/lib.js': "app.get('/vendored', h)",
+      'test/routes.test.js': "app.get('/from-test', h)",
+      'src/routes.spec.ts': "router.get('/from-spec', h)",
+    })
+    expect(describeRoutes(await parseRoutes('express', dir))).toEqual(['GET /real page'])
+    await cleanup(dir)
+  })
+})
+
 // ─── TanStack Router / Start ────────────────────────────────────────────────
 
 describe('parseRoutes - tanstack-router', () => {

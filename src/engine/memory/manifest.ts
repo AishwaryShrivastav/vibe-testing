@@ -92,14 +92,20 @@ export async function saveRouteManifest(
 
 export async function saveRunSnapshot(
   vibeDir: string,
-  results: TestResult[]
+  results: TestResult[],
+  /** Partial run (mode "changed"/"auto"): routes it didn't test keep their last status instead of counting as removed. */
+  keepUntested = false,
 ): Promise<SnapshotDiff | null> {
   const snapshotPath = path.join(vibeDir, SNAPSHOT_FILE)
   const previous = await readJSON<RunSnapshot>(snapshotPath)
 
   const routeStatuses: Record<string, 'pass' | 'fail' | 'error' | 'skip'> = {}
+  if (keepUntested && previous) Object.assign(routeStatuses, previous.routes)
+  const tested = new Set<string>()
   for (const r of results) {
     const route = r.scenario.route
+    // A tested route's status comes from this run only.
+    if (!tested.has(route)) { delete routeStatuses[route]; tested.add(route) }
     // Keep the worst status per route (error > fail > pass)
     const existing = routeStatuses[route]
     if (!existing || severity(r.status) > severity(existing)) {
