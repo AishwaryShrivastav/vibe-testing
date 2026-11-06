@@ -10,6 +10,7 @@ import { ensureDir } from '../../utils/file.js'
 import path from 'path'
 import fs from 'fs/promises'
 import { assertPage, AssertionFailure, stepLocator } from './assertions.js'
+import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
 
 export interface ExecutionResult {
   results: TestResult[]
@@ -331,6 +332,29 @@ export async function runOneScenario(
   const stepLogs: StepLog[] = []
   const apiErrors: ApiError[] = []
   let navigatedUrl: string | undefined
+  // Server crashes (5xx page loads, form posts, fetch/XHR) fail the scenario
+  // without needing an assertion; crash text counts when an action caused it.
+  const serverWatch = watchServerErrors(page)
+  const crashSignals: ServerErrorSignal[] = []
+  const serverErrors = () => uniqueSignals([...serverWatch.signals, ...crashSignals])
+  const withServerErrors = async (result: TestResult): Promise<TestResult> => {
+    await settleSignals(serverWatch.signals)
+    const errors = serverErrors()
+    if (errors.length === 0) return result
+    const evidence = describeSignal(errors[0])
+    return {
+      ...result,
+      status: result.status === 'error' ? 'error' : 'fail',
+      server_errors: errors,
+      failure_reason: result.failure_reason ? `${evidence}. ${result.failure_reason}` : evidence,
+      ai_verdict: result.ai_verdict === undefined
+        ? undefined
+        : result.status === 'pass'
+          ? `${evidence} (page checks passed, but the server failed)`
+          : `${evidence}. ${result.ai_verdict}`,
+      verification_status: 'not_verified',
+    }
+  }
 
   // Decide which steps deserve a screenshot: state-changing steps (fill, click, navigate, select, upload)
   const isScreenshotWorthy = (action: string) => ['fill', 'click', 'navigate', 'select', 'upload'].includes(action)
@@ -347,7 +371,14 @@ export async function runOneScenario(
       let stepScreenshotPath: string | undefined
 
       try {
+        const crashBefore = step.action === 'click' ? await detectCrashText(page) : undefined
         selectorUsed = await executeStep(page, step, config.url, apiErrors, projectRoot)
+        if (step.action === 'click') {
+          const crashAfter = await detectCrashText(page)
+          if (crashAfter && crashAfter !== crashBefore) {
+            crashSignals.push({ url: page.url(), evidence: crashAfter })
+          }
+        }
 
         if (step.action === 'navigate' && !navigatedUrl) {
           navigatedUrl = step.url?.startsWith('http')
@@ -403,7 +434,7 @@ export async function runOneScenario(
 
     const verdict = await verifyResult(page, scenario, screenshotPath, navigatedUrl, apiErrors)
 
-    return {
+    return await withServerErrors({
       scenario,
       status: verdict.passed ? 'pass' : 'fail',
       duration_ms: Date.now() - startTime,
@@ -414,11 +445,11 @@ export async function runOneScenario(
       verification_status: verdict.verification,
       step_logs: stepLogs,
       api_errors: apiErrors.length > 0 ? apiErrors : undefined,
-    }
+    })
   } catch (err: unknown) {
     try { await page.screenshot({ path: screenshotPath, fullPage: false }) } catch { /* ignore */ }
 
-    return {
+    return await withServerErrors({
       scenario,
       status: err instanceof AssertionFailure ? 'fail' : 'error',
       duration_ms: Date.now() - startTime,
@@ -429,8 +460,9 @@ export async function runOneScenario(
       verification_status: 'not_verified',
       step_logs: stepLogs,
       api_errors: apiErrors.length > 0 ? apiErrors : undefined,
-    }
+    })
   } finally {
+    serverWatch.stop()
     await page.close()
   }
 }

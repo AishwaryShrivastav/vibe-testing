@@ -792,6 +792,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
       has_screenshot: !!log.screenshot_path,
     })),
     api_errors: result.api_errors ?? [],
+    server_errors: result.server_errors ?? [],
     screenshots_count: stepScreenshots.length + (finalScreenshot ? 1 : 0),
   }
 
@@ -1258,9 +1259,12 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}`
 
-  return { content: [{ type: 'text', text: summary }], isError: result.summary.failed > 0 || result.summary.errors > 0 }
+  return {
+    content: [{ type: 'text', text: summary }],
+    isError: result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0,
+  }
 }
 
 // ─── run_converge ─────────────────────────────────────────────────────────────
@@ -1297,9 +1301,19 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}`
 
-  return { content: [{ type: 'text', text: roundsLine }], isError: result.summary.failed > 0 || result.summary.errors > 0 }
+  return {
+    content: [{ type: 'text', text: roundsLine }],
+    isError: result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0,
+  }
+}
+
+function formatExplorerFailures(failures: string[] | undefined): string {
+  if (!failures?.length) return ''
+  const shown = failures.slice(0, 10).map(failure => `  - ${failure.slice(0, 220)}`).join('\n')
+  const more = failures.length > 10 ? `\n  - …and ${failures.length - 10} more (see report)` : ''
+  return `\n- Server errors found while exploring: ${failures.length}\n${shown}${more}`
 }
 
 // ─── get_context ─────────────────────────────────────────────────────────────

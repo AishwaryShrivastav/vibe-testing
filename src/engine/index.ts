@@ -121,11 +121,13 @@ export class VibeTester {
     const duration = Date.now() - startTime
     const elementsExplored = explorations.reduce((sum, e) => sum + e.elements_discovered, 0)
     const apiCallsObserved = explorations.reduce((sum, e) => sum + e.api_calls.length, 0)
+    const explorerFailures = collectExplorerFailures(explorations)
 
     logger.section('Run complete')
     logger.success(`Passed: ${passed}`)
     if (failed > 0)  logger.error(`Failed: ${failed}`)
     if (errors > 0)  logger.warn(`Errors: ${errors}`)
+    if (explorerFailures.length > 0) logger.error(`Server errors found while exploring: ${explorerFailures.length}`)
     if (elementsExplored > 0) logger.dim(`Elements explored: ${elementsExplored} across ${explorations.length} pages`)
     if (apiCallsObserved > 0) logger.dim(`API calls observed: ${apiCallsObserved}`)
     if (coverageGaps.length > 0) logger.warn(`Coverage gaps: ${coverageGaps.length} missing test areas`)
@@ -148,7 +150,11 @@ export class VibeTester {
         new_routes: snapshotDiff.new_routes,
         removed_routes: snapshotDiff.removed_routes,
       } : undefined,
-      summary: { total: results.length, passed, failed, errors, duration_ms: duration, elements_explored: elementsExplored, api_calls_observed: apiCallsObserved },
+      summary: {
+        total: results.length, passed, failed, errors, duration_ms: duration,
+        elements_explored: elementsExplored, api_calls_observed: apiCallsObserved,
+        explorer_failures: explorerFailures,
+      },
     }
   }
 
@@ -259,12 +265,24 @@ export class VibeTester {
         duration_ms: Date.now() - startTime,
         elements_explored: elementsExplored,
         api_calls_observed: apiCallsObserved,
+        explorer_failures: collectExplorerFailures(cr.explorations),
         converge_rounds: cr.rounds,
       },
     }
   }
 }
 
+
+/**
+ * Real failures the explorer found (server errors, crash text, hangs, uncaught
+ * exceptions) — not its own diagnostics such as navigation or discovery problems.
+ */
+export function collectExplorerFailures(explorations: PageExploration[]): string[] {
+  const failures = explorations.flatMap(exploration => exploration.errors
+    .filter(error => /Server error \d{3}|Crash text|No response within|^Uncaught exception/.test(error))
+    .map(error => `${exploration.route}: ${error}`))
+  return [...new Set(failures)]
+}
 
 export { generateCoverageGaps } from './coverage-gaps.js'
 export type { ConvergeOptions } from './converge.js'

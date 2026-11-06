@@ -2,6 +2,8 @@ import { Page, BrowserContext, Response } from 'playwright'
 import { logger } from '../../utils/logger.js'
 import { ensureDir } from '../../utils/file.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
+import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
+import { probeForms } from './boundary-probes.js'
 import path from 'path'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -267,7 +269,12 @@ async function resolveAndClick(page: Page, element: DiscoveredElement, timeout =
   }
 }
 
-async function testButton(page: Page, element: DiscoveredElement, originalUrl: string): Promise<InteractionOutcome> {
+async function testButton(
+  page: Page,
+  element: DiscoveredElement,
+  originalUrl: string,
+  serverSignals: ServerErrorSignal[] = [],
+): Promise<InteractionOutcome> {
   const start = Date.now()
 
   if (isDestructiveAction(element.text)) {
@@ -279,6 +286,8 @@ async function testButton(page: Page, element: DiscoveredElement, originalUrl: s
   }
 
   const before = await capturePageState(page)
+  const crashBefore = await detectCrashText(page)
+  const signalsBefore = serverSignals.length
 
   try {
     await resolveAndClick(page, element, 3000)
@@ -288,6 +297,19 @@ async function testButton(page: Page, element: DiscoveredElement, originalUrl: s
 
   // Short settle — 400ms is enough for dialogs/toasts; 800ms was wasteful
   await page.waitForTimeout(400)
+  await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+
+  // A click that crashed the server is a broken element, whatever else changed.
+  const crashAfter = await detectCrashText(page)
+  if (serverSignals.length > signalsBefore || (crashAfter && crashAfter !== crashBefore)) {
+    await settleSignals(serverSignals)
+    const evidence = serverSignals.length > signalsBefore
+      ? describeSignal(serverSignals[signalsBefore])
+      : `Crash text after click: ${crashAfter}`
+    if (page.url() !== originalUrl) await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {})
+    return { element: element.text, elementType: 'button', action: 'click', result: 'error', details: evidence, duration_ms: Date.now() - start }
+  }
+
   const after = await capturePageState(page)
 
   if (after.dialogOpen && !before.dialogOpen) {
@@ -519,17 +541,24 @@ function generateTestValue(element: DiscoveredElement): string {
 
 // ─── Main Page Explorer ───────────────────────────────────────────────────────
 
+export interface ExploreOptions {
+  /** Submit forms with malformed/boundary values (G9). Default true. */
+  boundaryProbes?: boolean
+}
+
 export async function explorePage(
   context: BrowserContext,
   route: string,
   baseUrl: string,
   screenshotsDir: string,
-  blocklist?: ActionBlocklist
+  blocklist?: ActionBlocklist,
+  options: ExploreOptions = {},
 ): Promise<PageExploration> {
   const startTime = Date.now()
   const page = await context.newPage()
   const apiCalls: ApiObservation[] = []
   const errors: string[] = []
+  const serverWatch = watchServerErrors(page)
 
   // Intercept ALL network requests for API monitoring
   const requestTimings = new Map<string, number>()
@@ -543,7 +572,12 @@ export async function explorePage(
     const method = response.request().method()
     if (url.match(/\.(js|css|png|jpg|svg|woff|woff2|ico|map|ttf|eot)(\?|$)/)) return
     if (url.includes('fonts.googleapis.com') || url.includes('fonts.gstatic.com')) return
-    if (/\/api\/|\/graphql|\/auth|\/v\d+\//.test(url) || method !== 'GET') {
+    // Record by resource type, not URL shape: fetch/XHR under any prefix
+    // (e.g. /rest/), form posts, and page loads that failed.
+    const type = response.request().resourceType()
+    const isDataCall = type === 'xhr' || type === 'fetch'
+    const isFailedDocument = type === 'document' && response.status() >= 400
+    if (isDataCall || isFailedDocument || /\/api\/|\/graphql|\/auth|\/v\d+\//.test(url) || method !== 'GET') {
       const startMs = requestTimings.get(url + method)
       apiCalls.push({
         url,
@@ -554,6 +588,11 @@ export async function explorePage(
         isError: response.status() >= 400,
       })
     }
+  })
+
+  // Uncaught exceptions in the page are bugs even when nothing looks broken.
+  page.on('pageerror', (error: Error) => {
+    if (errors.length < 50) errors.push(`Uncaught exception: ${error.message.slice(0, 200)}`)
   })
 
   const fullUrl = new URL(route, baseUrl).href
@@ -629,7 +668,7 @@ export async function explorePage(
   // ── Phase 4: Buttons (click each, observe response) ──
   const buttons = elements.filter(e => e.type === 'button' && !e.disabled && !isBlocked(e))
   for (const btn of buttons.slice(0, 20)) {
-    interactions.push(await testButton(page, btn, fullUrl))
+    interactions.push(await testButton(page, btn, fullUrl, serverWatch.signals))
   }
 
   // ── Phase 5: Links (verify + follow internal ones) ──
@@ -645,6 +684,23 @@ export async function explorePage(
     await page.screenshot({ path: screenshotPath, fullPage: true })
   } catch { /* non-critical */ }
 
+  // ── Phase 6: Boundary input probes on forms (G9) ──
+  if (options.boundaryProbes !== false) {
+    const probes = await probeForms(page, fullUrl, serverWatch.signals, blocklist)
+    interactions.push(...probes)
+  }
+
+  // Every server failure is reported once (page load, clicks, probes), plus
+  // crash text and hangs that interactions caused.
+  await settleSignals(serverWatch.signals)
+  for (const signal of uniqueSignals(serverWatch.signals)) errors.push(describeSignal(signal))
+  for (const interaction of interactions) {
+    if (interaction.result === 'error' && /^(Crash text|No response)/.test(interaction.details)) {
+      errors.push(`${interaction.element} (${interaction.action}): ${interaction.details}`)
+    }
+  }
+
+  serverWatch.stop()
   await page.close().catch(() => {})
 
   return {

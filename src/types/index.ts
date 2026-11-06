@@ -236,6 +236,8 @@ export interface TestResult {
   verification_status?: VerificationStatus
   step_logs: StepLog[]
   api_errors?: ApiError[]
+  /** Server crashes seen during the scenario (5xx responses, crash text caused by an action). */
+  server_errors?: Array<{ url: string; method?: string; status?: number; evidence: string }>
 }
 
 export interface ProductModel {
@@ -325,6 +327,8 @@ export interface VibeRunResult {
     duration_ms: number
     elements_explored: number
     api_calls_observed: number
+    /** Server errors, hangs and uncaught exceptions found while exploring pages, e.g. "/contributions: Server error 500 on POST /contributions: …". */
+    explorer_failures?: string[]
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
   }

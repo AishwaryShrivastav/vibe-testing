@@ -466,7 +466,7 @@ program
 
     printFeedbackNudge()
 
-    if (result.diagnostic || result.summary.failed > 0 || result.summary.errors > 0) {
+    if (result.diagnostic || result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0) {
       process.exitCode = 1
     }
   })
@@ -519,7 +519,7 @@ program
 
     printFeedbackNudge()
 
-    if (result.summary.failed > 0 || result.summary.errors > 0) {
+    if (result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0) {
       process.exit(1)
     }
   })
