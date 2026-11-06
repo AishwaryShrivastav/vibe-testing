@@ -1,7 +1,8 @@
 import { chromium, BrowserContext, Page, Locator, type Response } from 'playwright'
 import { TestScenario, TestResult, TestStep, StepLog, ApiError } from '../../types/index.js'
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
-import { describeLoginRetry, performLoginDetailed, type LoginOutcome } from './auth.js'
+import { describeLoginRetry, performLoginDetailed, waitForLoginOutcome, type LoginOutcome } from './auth.js'
+import { readLoginError } from './login-form.js'
 import { checkLogoutRoundTrip } from './session-checks.js'
 import { checkCrossUserAccess } from './access-checks.js'
 import { verifyResult } from './verifier.js'
@@ -78,11 +79,15 @@ export async function executeScenarios(
       slowMo: config.browser?.slowMo ?? 100,
     })
 
-    const unauthCtx = await browser1.newContext({
-      baseURL: config.url,
-      viewport: { width: 1280, height: 800 },
-    })
-    unauthCtx.setDefaultTimeout(config.browser?.timeout ?? 30000)
+    const newUnauthContext = async () => {
+      const ctx = await browser1.newContext({
+        baseURL: config.url,
+        viewport: { width: 1280, height: 800 },
+      })
+      ctx.setDefaultTimeout(config.browser?.timeout ?? 30000)
+      return ctx
+    }
+    let unauthCtx = await newUnauthContext()
 
     // This phase stays logged out: its scenarios check public pages, login
     // forms and "redirects to login" behaviour, which a session would mask.
@@ -100,6 +105,12 @@ export async function executeScenarios(
           failure_reason: `Runner crash: ${err instanceof Error ? err.message : String(err)}`,
           step_logs: [],
         })
+      }
+      // A login scenario that succeeded leaves a session behind; later
+      // scenarios and the public-page exploration must start logged out.
+      if (fillsPassword(scenario)) {
+        await unauthCtx.close().catch(() => {})
+        unauthCtx = await newUnauthContext()
       }
     }
 
@@ -465,6 +476,12 @@ export async function runOneScenario(
     if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
       throw new Error('No steps to execute: scenario must contain at least one step')
     }
+    // A login submit that leaves the login form showing is resubmitted on the
+    // same page (like the configured login): some apps only accept a later
+    // submit, and page state is lost on a fresh page.
+    let fillsSinceNavigate: TestStep[] = []
+    let passwordFilled = false
+    let loginRetry: NonNullable<TestResult['retry']> | undefined
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const urlBefore = page.url()
@@ -475,6 +492,14 @@ export async function runOneScenario(
       try {
         const crashBefore = step.action === 'click' ? await detectCrashText(page) : undefined
         selectorUsed = await executeStep(page, step, config.url, apiErrors, projectRoot)
+        if (step.action === 'navigate') { fillsSinceNavigate = []; passwordFilled = false }
+        if (step.action === 'fill' && step.value) {
+          fillsSinceNavigate.push(step)
+          if (await hasPasswordValue(page, step.value)) passwordFilled = true
+        }
+        if (step.action === 'click' && passwordFilled && isSubmitStep(step) && !loginRetry) {
+          loginRetry = await resubmitRejectedLogin(page, step, fillsSinceNavigate, urlBefore, config, apiErrors, projectRoot)
+        }
         if (step.action === 'click') {
           const crashAfter = await detectCrashText(page)
           if (crashAfter && crashAfter !== crashBefore) {
@@ -538,6 +563,7 @@ export async function runOneScenario(
 
     return await withServerErrors({
       scenario,
+      retry: verdict.passed ? loginRetry : undefined,
       status: verdict.passed ? 'pass' : 'fail',
       duration_ms: Date.now() - startTime,
       screenshot_path: screenshotPath,
@@ -567,6 +593,58 @@ export async function runOneScenario(
     serverWatch.stop()
     await page.close()
   }
+}
+
+/** True when a scenario types into a password field (a login or sign-up flow). */
+function fillsPassword(scenario: TestScenario): boolean {
+  return scenario.steps.some(step => step.action === 'fill' && /password/i.test(`${step.selector ?? ''} ${step.description}`))
+}
+
+/** A click step that executeStep treats as a form submit. */
+function isSubmitStep(step: TestStep): boolean {
+  return !!(step.selector?.includes('submit') || step.description.toLowerCase().includes('submit'))
+}
+
+/** True when a visible password field holds `value` (the step just filled a password). */
+async function hasPasswordValue(page: Page, value: string): Promise<boolean> {
+  return page.evaluate(
+    expected => Array.from(document.querySelectorAll('input[type="password"]')).some(el => (el as HTMLInputElement).value === expected),
+    value,
+  ).catch(() => false)
+}
+
+/**
+ * After a submit that filled a password: while the page is still the login
+ * form, refill and resubmit it, up to config.retries more times. Returns retry
+ * info when a later submit got past the login form (the scenario passes, but
+ * the inconsistent login is reported); undefined when the first submit worked
+ * or none did.
+ */
+async function resubmitRejectedLogin(
+  page: Page,
+  submit: TestStep,
+  fills: TestStep[],
+  loginUrl: string,
+  config: VibeConfig,
+  apiErrors: ApiError[] | undefined,
+  projectRoot: string,
+): Promise<NonNullable<TestResult['retry']> | undefined> {
+  const retries = config.retries ?? 0
+  if (retries < 1 || !await waitForLoginOutcome(page, loginUrl)) return undefined
+  const firstFailure = await readLoginError(page) ?? 'stayed on the login page'
+  let attempts = 1
+  while (attempts <= retries) {
+    attempts++
+    logger.dim(`  Login still shown; resubmitting (attempt ${attempts})`)
+    for (const fill of fills) await executeStep(page, fill, config.url, apiErrors, projectRoot)
+    await executeStep(page, submit, config.url, apiErrors, projectRoot)
+    if (!await waitForLoginOutcome(page, loginUrl)) {
+      // The rejected submits' responses are the retry finding, not extra failures.
+      apiErrors?.splice(0, apiErrors.length)
+      return { attempts, passed_on_retry: true, first_failure: firstFailure }
+    }
+  }
+  return undefined
 }
 
 async function executeStep(page: Page, step: TestStep, baseUrl: string, apiErrors?: ApiError[], projectRoot = process.cwd()): Promise<string | undefined> {

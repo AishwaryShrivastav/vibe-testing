@@ -116,6 +116,44 @@ export function describeSignal(signal: ServerErrorSignal): string {
   return signal.evidence ? `${head}: ${signal.evidence}` : head
 }
 
+function splitUrl(url: string): { path: string; query: string } {
+  try {
+    const parsed = new URL(url)
+    return { path: parsed.pathname, query: parsed.search }
+  } catch { return { path: url, query: '' } }
+}
+
+/**
+ * One line per (method, path, status, evidence): the same failure on one path
+ * reached through different query strings is a single line with a count and
+ * an example query, e.g. "Server error 500 on GET /a (×3, different query
+ * strings, e.g. ?q=…): …". Signals that really differ stay separate lines.
+ */
+export function describeSignalGroups(signals: ServerErrorSignal[]): string[] {
+  const groups = new Map<string, { signal: ServerErrorSignal; queries: string[] }>()
+  for (const signal of signals) {
+    const { path, query } = splitUrl(signal.url)
+    const key = `${signal.method ?? ''} ${path} ${signal.status ?? ''} ${signal.evidence}`
+    const group = groups.get(key)
+    if (group) group.queries.push(query)
+    else groups.set(key, { signal, queries: [query] })
+  }
+  return [...groups.values()].map(({ signal, queries }) => {
+    const line = describeSignal(signal)
+    if (queries.length < 2) return line
+    const distinct = new Set(queries)
+    let note = `×${queries.length}`
+    if (distinct.size > 1) {
+      const example = queries.find(Boolean) ?? ''
+      const shown = example.replace(/=[^&]*/g, '=…').slice(0, 60)
+      note += `, different query strings${example ? `, e.g. ${shown}` : ''}`
+    }
+    const colon = line.indexOf(': ')
+    const head = colon === -1 ? line : line.slice(0, colon)
+    return `${head} (${note})${colon === -1 ? '' : line.slice(colon)}`
+  })
+}
+
 function stripTags(html: string): string {
   return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")

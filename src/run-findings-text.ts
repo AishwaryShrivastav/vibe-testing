@@ -73,7 +73,8 @@ export function formatPlan(plan: PlanSummary | undefined): string {
 function formatFailedScenarios(failed: FailedScenario[] | undefined): string {
   if (!failed?.length) return ''
   const shown = failed.slice(0, MAX_FAILED)
-    .map(f => `  - ${f.status === 'error' ? '[error] ' : ''}${f.name} (${f.route}): ${f.reason}`)
+    // The route is left out when the scenario name already contains it (e.g. "Live page health: /x").
+    .map(f => `  - ${f.status === 'error' ? '[error] ' : ''}${f.name}${f.name.includes(f.route) ? '' : ` (${f.route})`}: ${f.reason}`)
     .join('\n')
   const more = failed.length > MAX_FAILED ? `\n  - …and ${failed.length - MAX_FAILED} more (see report)` : ''
   return `\n- Failed scenarios: ${failed.length}\n${shown}${more}`

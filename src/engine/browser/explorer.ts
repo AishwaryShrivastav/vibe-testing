@@ -2,12 +2,12 @@ import { Page, BrowserContext, Response } from 'playwright'
 import { logger } from '../../utils/logger.js'
 import { ensureDir } from '../../utils/file.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
-import { describeSignal, detectCrashText, evidenceFromBody, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
+import { describeSignal, describeSignalGroups, detectCrashText, evidenceFromBody, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
 import { probeForms } from './boundary-probes.js'
 import { verifyCreatedValues } from './form-checks.js'
 import { detectBrokenValues, findEmptyState, newSuccessLines, visibleText, watchConsoleErrors, watchResourceFailures } from './page-checks.js'
 import { TotalsTracker, exerciseTotalActions } from './totals-check.js'
-import { DEFAULT_WRITE_POLICY, editFormKeys, formSkipReason, isWriteButton, keepInputReason, pageContext, watchWrites, type AppChange, type WritePolicy } from './write-policy.js'
+import { DEFAULT_WRITE_POLICY, editFormKeys, formSkipReason, isWriteButton, keepInputReason, looseEditReason, markSignupForms, pageContext, submitSkipReason, watchWrites, type AppChange, type WritePolicy } from './write-policy.js'
 import { gotoSettled, trackRequests, waitForSettled } from './settle.js'
 import { controlSignature, pageFingerprint, type PageFingerprint } from './fingerprint.js'
 import { DEPTH_RANK, type Depth, type DepthDecision } from './depth.js'
@@ -772,7 +772,9 @@ export async function explorePage(
   const inputs = interact ? elements.filter(e => e.type === 'input' && !e.disabled && !isBlocked(e) && !NOT_FILLABLE.test(e.inputType ?? '')) : []
   // Never overwrite what is already there unless explore.writes is "all": a
   // later Save would store the test values over real data.
-  const editForms = writes === 'all' || inputs.length === 0 ? new Set<string>() : await editFormKeys(page)
+  const editForms = writes === 'all' || !interact ? new Set<string>() : await editFormKeys(page)
+  if (writes !== 'all' && interact) await markSignupForms(page)
+  const looseEdit = writes === 'all' || !interact ? undefined : await looseEditReason(page)
   for (const input of inputs.slice(0, 20)) {
     const keep = await keepInputReason(page, input.selector, writes, editForms)
     if (keep) {
@@ -795,6 +797,11 @@ export async function explorePage(
   for (const btn of interact ? buttons.slice(0, 20) : []) {
     if (writes === 'none' && await isWriteButton(page, btn.selector, btn.text)) {
       interactions.push({ element: btn.text, elementType: 'button', action: 'click', result: 'skipped', details: 'Skipped — data-changing action (explore.writes: none)', duration_ms: 0 })
+      continue
+    }
+    const submitSkip = await submitSkipReason(page, btn.selector, btn.text, writes, editForms, looseEdit)
+    if (submitSkip) {
+      interactions.push({ element: btn.text, elementType: 'button', action: 'click', result: 'skipped', details: submitSkip, duration_ms: 0 })
       continue
     }
     if (!thorough && await isWriteButton(page, btn.selector, btn.text)) {
@@ -849,7 +856,7 @@ export async function explorePage(
   // Every server failure is reported once (page load, clicks, probes), plus
   // crash text, hangs and functional failures that interactions caused.
   await settleSignals(serverWatch.signals)
-  for (const signal of uniqueSignals(serverWatch.signals)) errors.push(describeSignal(signal))
+  errors.push(...describeSignalGroups(uniqueSignals(serverWatch.signals)))
   for (const interaction of interactions) {
     if (interaction.result === 'error' && /^(Crash text|No response|Empty-state action|Submitted value not shown)/.test(interaction.details)) {
       errors.push(`${interaction.element} (${interaction.action}): ${interaction.details}`)
