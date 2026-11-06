@@ -3,8 +3,8 @@ import type { LiveRouteCrawl, Route, TestScenario } from '../../types/index.js'
 import type { AuthConfig } from '../../types/config.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
 import { performLoginDetailed } from './auth.js'
+import { DESTRUCTIVE_PATH } from '../../utils/destructive-path.js'
 
-const DESTRUCTIVE_PATH = /(?:^|\/)(?:logout|log-out|signout|sign-out|delete|remove|destroy|cancel|unsubscribe|revoke)(?:\/|$)/i
 const ASSET_PATH = /\.(?:css|js|mjs|map|json|xml|txt|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|pdf|zip)(?:$|\?)/i
 
 export interface LiveRouteCrawlInput {
@@ -154,6 +154,9 @@ async function crawlPass(
         if (!paths.includes(canonicalPath)) paths.push(canonicalPath)
         if (next.depth >= maxDepth) continue
 
+        // Client-rendered apps add their navigation after scripts run and data
+        // (e.g. a session check) loads; reading links at DOMContentLoaded misses them.
+        await page.waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) }).catch(() => {})
         const hrefs = await page.locator('a[href]').evaluateAll(elements =>
           elements.map(element => (element as HTMLAnchorElement).href)
         )

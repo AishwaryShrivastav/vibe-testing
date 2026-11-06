@@ -1,4 +1,4 @@
-import { BrowserContext } from 'playwright'
+import type { BrowserContext, Page } from 'playwright'
 import { AuthConfig } from '../../types/config.js'
 import { interpolateEnv } from '../../utils/env.js'
 import { logger } from '../../utils/logger.js'
@@ -70,10 +70,8 @@ export async function performLoginDetailed(
     while (attempts <= retries) {
       attempts++
       await fillLoginForm(page, credentials, hints)
-      await page.waitForURL(url => !isStillOnLoginPage(url.href), { timeout: 10000 }).catch(() => {})
 
-      // Judge by the path only — a host such as auth.example.com is not a login page
-      if (!isStillOnLoginPage(page.url())) {
+      if (!await waitForLoginOutcome(page, loginUrl)) {
         if (attempts > 1) logger.warn(`Login only succeeded on attempt ${attempts} (first attempt: ${firstFailure})`)
         else logger.success('Authenticated successfully')
         return { ok: true, attempts, firstFailure, landingUrl: page.url() }
@@ -97,9 +95,52 @@ export function describeLoginRetry(outcome: LoginOutcome, where: string): string
   return `${where}: login with valid credentials only succeeded on attempt ${outcome.attempts} (first attempt: ${outcome.firstFailure ?? 'rejected'})`
 }
 
+/**
+ * After submitting a login form, wait until the app has decided, then return
+ * true when the login form is still shown (login failed).
+ *
+ * The URL alone can't tell: a login form often lives at a path that doesn't
+ * say "login" (e.g. /admin shows the form until signed in, then the admin UI).
+ * Signed in means the page left the login URL for a non-login path, or the
+ * password field is gone. Waits for the network to settle afterwards so the
+ * session cookie or token from the login response is stored before the page
+ * closes.
+ */
+export async function waitForLoginOutcome(page: Page, loginUrl: string): Promise<boolean> {
+  const loginPath = pathOf(loginUrl)
+  await page.waitForFunction(
+    ({ loginPath, loginPattern }) => {
+      const path = location.pathname
+      const leftLogin = path !== loginPath && !new RegExp(loginPattern, 'i').test(path)
+      const passwordShown = Array.from(document.querySelectorAll('input[type="password"]'))
+        .some(el => (el as HTMLElement).offsetParent !== null)
+      return leftLogin || !passwordShown
+    },
+    { loginPath, loginPattern: LOGIN_PATH.source },
+    { timeout: 10000, polling: 250 },
+  ).catch(() => {})
+  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
+  return loginFormStillShown(page, loginUrl)
+}
+
+/** True when the page is still the login page: on a login path, or on the login URL with a visible password field. */
+export async function loginFormStillShown(page: Page, loginUrl: string): Promise<boolean> {
+  const current = page.url()
+  if (isStillOnLoginPage(current)) return true
+  const leftLogin = pathOf(current) !== pathOf(loginUrl)
+  if (leftLogin) return false
+  return page.locator('input[type="password"]:visible').count().then(n => n > 0).catch(() => false)
+}
+
+function pathOf(url: string): string {
+  try { return new URL(url).pathname } catch { return url }
+}
+
+const LOGIN_PATH = /\/(login|log-in|signin|sign-in|auth)\b/
+
 /** True when the URL's path is a login/auth page (the host is ignored). */
 export function isStillOnLoginPage(url: string): boolean {
   let pathname: string
   try { pathname = new URL(url).pathname } catch { pathname = url }
-  return /\/(login|log-in|signin|sign-in|auth)\b/i.test(pathname)
+  return new RegExp(LOGIN_PATH.source, 'i').test(pathname)
 }

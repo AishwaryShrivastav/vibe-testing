@@ -10,7 +10,7 @@ import { VibeTester, buildProductModel, MemoryManager } from './engine/index.js'
 import { runScenarioWithRetry } from './engine/browser/runner.js'
 import { fillLoginForm, readLoginError } from './engine/browser/login-form.js'
 import { loadRunConfig } from './utils/run-config.js'
-import { isStillOnLoginPage } from './engine/browser/auth.js'
+import { waitForLoginOutcome } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
@@ -501,13 +501,14 @@ async function handleLogin(args: Record<string, unknown>) {
   let filled: Awaited<ReturnType<typeof fillLoginForm>>
   let attempts = 0
   let firstFailure: string | undefined
+  let stillOnLogin = true
   const maxAttempts = 1 + (session.config.retries ?? 1)
   try {
     while (true) {
       attempts++
       filled = await fillLoginForm(page, { identity: email, password }, { identityField, passwordField })
-      await page.waitForURL(url => !isStillOnLoginPage(url.href), { timeout: 10000 }).catch(() => {})
-      if (!isStillOnLoginPage(page.url()) || attempts >= maxAttempts) break
+      stillOnLogin = await waitForLoginOutcome(page, loginUrl)
+      if (!stillOnLogin || attempts >= maxAttempts) break
       if (attempts === 1) firstFailure = await readLoginError(page) ?? 'stayed on the login page'
     }
   } catch (error) {
@@ -533,8 +534,8 @@ async function handleLogin(args: Record<string, unknown>) {
 
   const finalUrl = page.url()
   const tokenCount = Object.keys(tokenData.localStorage).length
-  const onLogin = isStillOnLoginPage(finalUrl)
-  const loginSuccess = !onLogin || tokenCount > 0
+  // A stored token alone isn't success: apps keep unrelated keys in localStorage.
+  const loginSuccess = !stillOnLogin
 
   // Close the login page — the context stays alive with cookies/storage intact
   await page.close()

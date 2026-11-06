@@ -1,4 +1,4 @@
-import type { ConsoleMessage, Page } from 'playwright'
+import type { ConsoleMessage, Page, Request } from 'playwright'
 
 /**
  * Functional page checks that need no assertion and no knowledge of the app:
@@ -79,19 +79,51 @@ export function watchConsoleErrors(page: Page): { messages: string[]; settle: ()
     seen.add(key)
     messages.push(text.slice(0, 300))
   }
+  // A request cut off by a navigation (the explorer reloading, a link click)
+  // makes apps log "Failed to fetch" — caused by leaving the page, not a bug.
+  // Network-failure messages are held and dropped when a page navigation or an
+  // aborted fetch/XHR happened just around them.
+  const interruptions: number[] = []
+  const networkFailures: Array<{ text: string; at: number }> = []
+  const onRequest = (request: Request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) interruptions.push(Date.now())
+  }
+  const onRequestFailed = (request: Request) => {
+    if (['fetch', 'xhr'].includes(request.resourceType()) && /ERR_ABORTED|aborted|cancel/i.test(request.failure()?.errorText ?? '')) {
+      interruptions.push(Date.now())
+    }
+  }
   const onConsole = (message: ConsoleMessage) => {
     if (message.type() !== 'error') return
     const text = message.text()
+    if (NETWORK_FAILURE.test(text)) { networkFailures.push({ text, at: Date.now() }); return }
     if (!/%[sdifoOc]/.test(text)) return add(text)
     pending.push(formatConsoleMessage(message).then(add, () => add(text)))
   }
   page.on('console', onConsole)
+  page.on('request', onRequest)
+  page.on('requestfailed', onRequestFailed)
   return {
     messages,
-    settle: async () => { await Promise.allSettled(pending.splice(0)) },
-    stop: () => { page.off('console', onConsole) },
+    settle: async () => {
+      await Promise.allSettled(pending.splice(0))
+      for (const failure of networkFailures.splice(0)) {
+        const interrupted = interruptions.some(at => at >= failure.at - INTERRUPTION_BEFORE_MS && at <= failure.at + INTERRUPTION_AFTER_MS)
+        if (!interrupted) add(failure.text)
+      }
+    },
+    stop: () => {
+      page.off('console', onConsole)
+      page.off('request', onRequest)
+      page.off('requestfailed', onRequestFailed)
+    },
   }
 }
+
+/** Console text of a fetch/XHR that failed at the network level (browser- and library-specific wording). */
+const NETWORK_FAILURE = /Failed to fetch|NetworkError when attempting to fetch|Load failed|Network Error|AbortError|The (?:user|operation) aborted/i
+const INTERRUPTION_BEFORE_MS = 3000
+const INTERRUPTION_AFTER_MS = 1000
 
 async function formatConsoleMessage(message: ConsoleMessage): Promise<string> {
   const args = await Promise.all(message.args().map(arg => arg.jsonValue().catch(() => '…')))

@@ -329,7 +329,7 @@ async function testButton(
     const evidence = serverSignals.length > signalsBefore
       ? describeSignal(serverSignals[signalsBefore])
       : `Crash text after click: ${crashAfter}`
-    if (page.url() !== originalUrl) await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {})
+    if (page.url() !== originalUrl) await gotoSettled(page, originalUrl, 8000).catch(() => {})
     return { element: element.text, elementType: 'button', action: 'click', result: 'error', details: evidence, duration_ms: Date.now() - start }
   }
 
@@ -348,7 +348,7 @@ async function testButton(
 
   if (after.url !== before.url) {
     const newPath = (() => { try { return new URL(after.url).pathname } catch { return after.url } })()
-    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {})
+    await gotoSettled(page, originalUrl, 8000).catch(() => {})
     return { element: element.text, elementType: 'button', action: 'click', result: 'navigated', details: `Navigated to ${newPath}`, duration_ms: Date.now() - start }
   }
 
@@ -460,7 +460,7 @@ async function testLink(page: Page, element: DiscoveredElement, originalUrl: str
     const hitAuthWall = /\/(login|signin|auth)\b/.test(finalPath) && !linkPath.includes('login')
 
     // Navigate back to original page
-    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {})
+    await gotoSettled(page, originalUrl, 8000).catch(() => {})
 
     if (hitAuthWall) {
       return { element: element.text, elementType: 'link', action: 'navigate', result: 'error', details: `Redirected to ${finalPath} (auth wall)`, duration_ms: Date.now() - start }
@@ -473,7 +473,7 @@ async function testLink(page: Page, element: DiscoveredElement, originalUrl: str
     return { element: element.text, elementType: 'link', action: 'navigate', result: 'navigated', details: `${linkPath} loaded (${status})`, duration_ms: Date.now() - start }
   } catch (err) {
     // Navigate back on error
-    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {})
+    await gotoSettled(page, originalUrl, 8000).catch(() => {})
     return { element: element.text, elementType: 'link', action: 'navigate', result: 'error', details: `Navigation failed: ${(err as Error).message.slice(0, 100)}`, duration_ms: Date.now() - start }
   }
 }
@@ -573,6 +573,20 @@ export interface ExploreOptions {
   journey?: boolean
 }
 
+/** Input types that take no typed value. */
+const NOT_FILLABLE = /^(?:checkbox|radio|file|submit|button|reset|image|hidden|range|color)$/i
+
+/**
+ * Open a URL and wait until it has rendered: DOMContentLoaded, then a quiet
+ * network (bounded). Client-rendered apps fill in content after data loads,
+ * so acting at DOMContentLoaded sees a half-rendered page.
+ */
+async function gotoSettled(page: Page, url: string, timeout: number, settleMs = 4000) {
+  const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+  await page.waitForLoadState('networkidle', { timeout: settleMs }).catch(() => {})
+  return response
+}
+
 export async function explorePage(
   context: BrowserContext,
   route: string,
@@ -627,15 +641,10 @@ export async function explorePage(
   const fullUrl = new URL(route, baseUrl).href
 
   try {
-    await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-    // Race: networkidle OR interactive elements appear (whichever first)
-    await Promise.race([
-      page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}),
-      page.waitForFunction(
-        () => document.querySelectorAll('button, a, input, [role="button"], [role="tab"]').length > 2,
-        { timeout: 5000 }
-      ).catch(() => {}),
-    ])
+    // Wait for the network to settle, not just for a few controls: a nav bar
+    // renders first, while the page's own content waits on data (e.g. a
+    // session check). Capped so apps that poll constantly don't stall.
+    await gotoSettled(page, fullUrl, 15000, 6000)
   } catch (err) {
     errors.push(`Navigation failed: ${(err as Error).message}`)
     await page.close().catch(() => {})
@@ -691,7 +700,8 @@ export async function explorePage(
   }
 
   // ── Phase 2: Inputs (fill with test data) ──
-  const inputs = elements.filter(e => e.type === 'input' && !e.disabled && !isBlocked(e))
+  // Checkboxes and radios are toggled in their own phase; they can't be filled.
+  const inputs = elements.filter(e => e.type === 'input' && !e.disabled && !isBlocked(e) && !NOT_FILLABLE.test(e.inputType ?? ''))
   for (const input of inputs.slice(0, 20)) {
     interactions.push(await testInput(page, input))
   }
