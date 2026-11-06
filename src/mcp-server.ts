@@ -9,6 +9,7 @@ import { chromium, BrowserContext, Page } from 'playwright'
 import { VibeTester, buildProductModel, MemoryManager } from './engine/index.js'
 import { runOneScenario } from './engine/browser/runner.js'
 import { fillLoginForm } from './engine/browser/login-form.js'
+import { loadRunConfig } from './utils/run-config.js'
 import { isStillOnLoginPage } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import type { PageExploration } from './engine/browser/explorer.js'
@@ -386,7 +387,11 @@ async function handleScanCodebase(args: Record<string, unknown>) {
   session.guidance = await readVibeGuidance(codebasePath)
   session.blocklist = await loadProjectBlocklist(codebasePath, session.guidance)
 
-  session.config = VibeConfigSchema.parse({ url, codebase_path: codebasePath, mode })
+  // Includes auth settings from vibe.config.json (e.g. login field names for the login tool).
+  session.config = VibeConfigSchema.parse({
+    ...await loadRunConfig({ projectRoot: codebasePath, codebasePath, url, mode, defaultHeaded: false, ignoreFileHeaded: true }),
+    url,
+  })
 
   session.memory = new MemoryManager(codebasePath)
   await session.memory.load()
@@ -1221,12 +1226,18 @@ async function handleRunFullTest(args: Record<string, unknown>) {
       isError: true,
     }
   }
-  const tester = new VibeTester({
+  // Honour vibe.config.json (auth credentials, never_interact, scope, timing);
+  // the detected server URL and the tool arguments win over the file.
+  const runConfig = await loadRunConfig({
+    projectRoot: codebasePath,
+    codebasePath,
     url: configured.server.url,
-    codebase_path: codebasePath,
-    mode: (args.mode as 'fast' | 'deep') ?? 'deep',
-    browser: { headed: (args.headed as boolean) ?? false },
+    mode: args.mode as 'fast' | 'deep' | undefined,
+    headed: args.headed as boolean | undefined,
+    defaultHeaded: false,
+    ignoreFileHeaded: true,
   })
+  const tester = new VibeTester({ ...runConfig, url: configured.server.url })
 
   const result = await tester.run()
 
@@ -1255,12 +1266,18 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 // ─── run_converge ─────────────────────────────────────────────────────────────
 
 async function handleRunConverge(args: Record<string, unknown>) {
-  const tester = new VibeTester({
-    url: args.url as string,
-    codebase_path: args.codebase_path as string | undefined,
-    mode: (args.mode as 'fast' | 'deep') ?? 'deep',
-    browser: { headed: (args.headed as boolean) ?? false },
+  const codebasePath = (args.codebase_path as string | undefined) ?? process.cwd()
+  const runConfig = await loadRunConfig({
+    projectRoot: codebasePath,
+    codebasePath,
+    url: (args.url as string | undefined)?.trim() || undefined,
+    mode: args.mode as 'fast' | 'deep' | undefined,
+    headed: args.headed as boolean | undefined,
+    defaultHeaded: false,
+    ignoreFileHeaded: true,
   })
+  if (!runConfig.url) throw new Error('URL required: pass url or set it in vibe.config.json.')
+  const tester = new VibeTester({ ...runConfig, url: runConfig.url })
 
   const result = await tester.converge({
     max_followup_rounds: (args.max_followup_rounds as number) ?? 4,

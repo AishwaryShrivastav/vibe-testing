@@ -104,7 +104,26 @@ export async function executeScenarios(
     let authEstablished = false
     let authCtx: BrowserContext | null = null
 
-    if (loginScenario) {
+    // Configured credentials (vibe.config.json) come first: they work even when
+    // no login scenario was generated, e.g. for routes found by the live crawl.
+    if (config.auth?.strategy === 'credentials' && config.auth.credentials) {
+      logger.info('Establishing authenticated session from configured credentials...')
+      const ctx = await browser2.newContext({
+        baseURL: config.url,
+        viewport: { width: 1280, height: 800 },
+      })
+      ctx.setDefaultTimeout(config.browser?.timeout ?? 30000)
+      if (await performLogin(ctx, config.url, config.auth)) {
+        authCtx = ctx
+        authEstablished = true
+        logger.success('  Auth established with configured credentials')
+      } else {
+        await ctx.close().catch(() => {})
+        logger.warn('  Configured credentials did not log in; trying a generated login scenario')
+      }
+    }
+
+    if (!authEstablished && loginScenario) {
       logger.info('Establishing authenticated session (fresh browser)...')
 
       let tempCtx: BrowserContext

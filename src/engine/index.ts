@@ -43,6 +43,7 @@ export class VibeTester {
       const guidance = await import('../utils/vibe-md.js').then(module => module.readVibeGuidance(this.projectRoot))
       const crawl = await crawlLiveRoutes({
         baseUrl: this.config.url,
+        auth: this.config.auth,
         blockedPatterns: [
           ...(this.config.never_interact ?? []),
           ...(guidance?.never_automate ?? []),

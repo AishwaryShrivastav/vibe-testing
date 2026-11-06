@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
 import { VibeTester } from './engine/index.js'
-import { readJSON, fileExists } from './utils/file.js'
-import type { VibeConfig } from './types/config.js'
+import { fileExists } from './utils/file.js'
+import { loadRunConfig } from './utils/run-config.js'
 import { logger } from './utils/logger.js'
 import {
   chromiumInstallCommand,
@@ -447,28 +447,21 @@ program
       return
     }
 
-    const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
-    const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
-
-    const url = urlArg ?? fileConfig.url
-    if (!url) {
+    const config = await loadRunConfig({
+      projectRoot: process.cwd(),
+      configPath: opts.config,
+      codebasePath: opts.codebase,
+      url: urlArg,
+      mode: opts.mode as 'fast' | 'deep',
+      headed: opts.headed !== false,
+      scopeInclude: opts.scope,
+    })
+    if (!config.url) {
       logger.error('URL required — pass as argument or set in vibe.config.json')
       process.exit(1)
     }
 
-    const config = {
-      ...fileConfig,
-      url,
-      mode: opts.mode as 'fast' | 'deep',
-      codebase_path: opts.codebase ?? fileConfig.codebase_path,
-      browser: {
-        ...fileConfig.browser,
-        headed: opts.headed !== false,
-      },
-      ...(opts.scope?.length ? { scope: { ...fileConfig.scope, include: opts.scope } } : {}),
-    }
-
-    const tester = new VibeTester(config)
+    const tester = new VibeTester({ ...config, url: config.url })
     const result = await tester.run()
 
     printFeedbackNudge()
@@ -502,27 +495,20 @@ program
       return
     }
 
-    const configPath = opts.config ?? path.join(process.cwd(), 'vibe.config.json')
-    const fileConfig = await readJSON<Partial<VibeConfig>>(configPath) ?? {}
-
-    const url = urlArg ?? fileConfig.url
-    if (!url) {
+    const config = await loadRunConfig({
+      projectRoot: process.cwd(),
+      configPath: opts.config,
+      codebasePath: opts.codebase,
+      url: urlArg,
+      mode: opts.mode as 'fast' | 'deep',
+      headed: opts.headed !== false,
+    })
+    if (!config.url) {
       logger.error('URL required — pass as argument or set in vibe.config.json')
       process.exit(1)
     }
 
-    const config = {
-      ...fileConfig,
-      url,
-      mode: opts.mode as 'fast' | 'deep',
-      codebase_path: opts.codebase ?? fileConfig.codebase_path,
-      browser: {
-        ...fileConfig.browser,
-        headed: opts.headed !== false,
-      },
-    }
-
-    const tester = new VibeTester(config)
+    const tester = new VibeTester({ ...config, url: config.url })
     const result = await tester.converge({
       max_followup_rounds: parseInt(opts.maxRounds, 10) || 4,
       target_pass_rate: parseFloat(opts.targetPassRate) || 0.92,

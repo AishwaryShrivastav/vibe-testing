@@ -200,6 +200,8 @@ export interface LiveRouteCrawl {
   scenarios: TestScenario[]
   attemptedPaths: string[]
   reason?: string
+  /** Outcome of the logged-in crawl pass, when credentials were configured. */
+  auth?: { status: 'logged-in' | 'login-failed' | 'unavailable'; pages: number }
 }
 
 export type TestStatus = 'pass' | 'fail' | 'skip' | 'error'
