@@ -143,6 +143,8 @@ VibeRunResult → { product_model, results[], report, report_path, coverage_gaps
     include: string[]      // Route glob patterns
     exclude: string[]
     max_routes: number
+    seed_routes: string[]
+    since?: string         // for mode auto/changed: git ref to compare against
   }
   memory?: {
     verify_after_n_passes: number
@@ -153,7 +155,9 @@ VibeRunResult → { product_model, results[], report, report_path, coverage_gaps
     slowMo: number
     timeout: number
   }
-  mode: 'fast' | 'deep'
+  mode: 'fast' | 'deep' | 'auto' | 'changed'  // test depth per page (default deep)
+  retries: number          // 0–2, default 1
+  explore?: { writes: 'safe' | 'all' | 'none' }
 }
 ```
 
