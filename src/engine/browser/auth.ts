@@ -1,7 +1,8 @@
-import { BrowserContext, Page } from 'playwright'
+import { BrowserContext } from 'playwright'
 import { AuthConfig } from '../../types/config.js'
 import { interpolateEnv } from '../../utils/env.js'
 import { logger } from '../../utils/logger.js'
+import { fillLoginForm } from './login-form.js'
 
 export async function performLogin(
   context: BrowserContext,
@@ -28,57 +29,18 @@ export async function performLogin(
 
     await page.goto(loginUrl, { waitUntil: 'networkidle' })
 
-    const email    = interpolateEnv(auth.credentials.email)
-    const password = interpolateEnv(auth.credentials.password)
-    const emailField    = auth.fields?.email    ?? 'email'
-    const passwordField = auth.fields?.password ?? 'password'
+    // `fields.email` names the identity field, which may be a username, phone
+    // number or ID — the config key predates non-email logins.
+    await fillLoginForm(
+      page,
+      {
+        identity: interpolateEnv(auth.credentials.email),
+        password: interpolateEnv(auth.credentials.password),
+      },
+      { identityField: auth.fields?.email, passwordField: auth.fields?.password },
+    )
 
-    // Try selectors in order of specificity — handles forms without name/id attributes
-    const emailSelectors = [
-      `[name="${emailField}"]`,
-      '[type="email"]',
-      `#${emailField}`,
-      `[placeholder*="email" i]`,
-      `[placeholder*="Email" i]`,
-      `[aria-label*="email" i]`,
-      'input[type="text"]:first-of-type',
-    ]
-    const passwordSelectors = [
-      `[name="${passwordField}"]`,
-      '[type="password"]',
-      `#${passwordField}`,
-      `[placeholder*="password" i]`,
-      `[aria-label*="password" i]`,
-    ]
-
-    await fillFirstMatch(page, emailSelectors, email)
-    await fillFirstMatch(page, passwordSelectors, password)
-    // Try multiple submit button selectors — wrap in try-catch to avoid crashing
-    const submitSelectors = [
-      '[type="submit"]',
-      'button:has-text("Login")',
-      'button:has-text("Sign in")',
-      'button:has-text("Log in")',
-      'button:has-text("Continue")',
-      'button:has-text("Submit")',
-    ]
-    let clicked = false
-    for (const sel of submitSelectors) {
-      try {
-        const btn = page.locator(sel).first()
-        if (await btn.isVisible({ timeout: 500 })) {
-          await btn.click()
-          clicked = true
-          break
-        }
-      } catch { /* try next */ }
-    }
-    if (!clicked) {
-      logger.warn('No submit button found — trying Enter key on password field')
-      await page.keyboard.press('Enter')
-    }
-
-    await page.waitForNavigation({ timeout: 10000 }).catch(() => {})
+    await page.waitForURL(url => !isStillOnLoginPage(url.href), { timeout: 10000 }).catch(() => {})
 
     // Judge by the path only — a host such as auth.example.com is not a login page
     const loginFailed = isStillOnLoginPage(page.url())
@@ -103,18 +65,4 @@ export function isStillOnLoginPage(url: string): boolean {
   let pathname: string
   try { pathname = new URL(url).pathname } catch { pathname = url }
   return /\/(login|log-in|signin|sign-in|auth)\b/i.test(pathname)
-}
-
-async function fillFirstMatch(page: Page, selectors: string[], value: string): Promise<void> {
-  for (const selector of selectors) {
-    try {
-      const el = page.locator(selector).first()
-      if (await el.isVisible({ timeout: 1000 })) {
-        await el.fill(value)
-        return
-      }
-    } catch { /* try next selector */ }
-  }
-  // Last resort: try the first visible input on the page
-  throw new Error(`No matching input found for selectors: ${selectors.join(', ')}`)
 }

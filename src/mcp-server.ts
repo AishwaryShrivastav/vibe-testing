@@ -8,6 +8,8 @@ import {
 import { chromium, BrowserContext, Page } from 'playwright'
 import { VibeTester, buildProductModel, MemoryManager } from './engine/index.js'
 import { runOneScenario } from './engine/browser/runner.js'
+import { fillLoginForm } from './engine/browser/login-form.js'
+import { isStillOnLoginPage } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
@@ -116,9 +118,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object' as const,
         properties: {
-          email: { type: 'string', description: 'Email/username to log in with. If omitted, uses saved credentials.' },
+          email: { type: 'string', description: 'Login identifier: email, username, phone/mobile number or account/employee ID. If omitted, uses saved credentials.' },
           password: { type: 'string', description: 'Password. If omitted, uses saved credentials.' },
           login_url: { type: 'string', description: 'Login page URL path (e.g. /login). Defaults to /login.' },
+          identity_field: { type: 'string', description: 'Optional name, id, autocomplete value or label of the identifier field (e.g. "userName", "phoneNumber"). Auto-detected when omitted.' },
+          password_field: { type: 'string', description: 'Optional name, id or label of the password field. Auto-detected when omitted.' },
         },
         required: [],
       },
@@ -452,9 +456,12 @@ async function handleLogin(args: Record<string, unknown>) {
   const loginUrl = new URL(loginPath, baseUrl).href
 
   const recs = session.memory?.getRecommendations()
+  // `email` is the login identifier: an email, username, phone number or ID.
   const email = (args.email as string) ?? recs?.saved_credentials?.email
   const password = (args.password as string) ?? recs?.saved_credentials?.password
-  if (!email || !password) throw new Error('No credentials provided and no saved credentials found. Provide email and password.')
+  if (!email || !password) throw new Error('No credentials provided and no saved credentials found. Provide email (or username/phone/ID) and password.')
+  const identityField = (args.identity_field as string | undefined) ?? session.config.auth?.fields?.email
+  const passwordField = (args.password_field as string | undefined) ?? session.config.auth?.fields?.password
 
   await ensureBrowser()
 
@@ -484,16 +491,15 @@ async function handleLogin(args: Record<string, unknown>) {
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
-  const emailLoc = page.locator('[type="email"], [name="email"], #email, [placeholder*="email" i]').first()
-  const passLoc = page.locator('[type="password"], [name="password"], #password').first()
+  let filled: Awaited<ReturnType<typeof fillLoginForm>>
+  try {
+    filled = await fillLoginForm(page, { identity: email, password }, { identityField, passwordField })
+  } catch (error) {
+    await ctx.close().catch(() => {})
+    throw error
+  }
 
-  await emailLoc.fill(email, { timeout: 3000 })
-  await passLoc.fill(password, { timeout: 3000 })
-
-  const submitLoc = page.locator('button[type="submit"], input[type="submit"]').first()
-  await submitLoc.click({ timeout: 3000 })
-
-  await page.waitForURL(url => !url.href.includes('login') && !url.href.includes('signin'), { timeout: 10000 }).catch(() => {})
+  await page.waitForURL(url => !isStillOnLoginPage(url.href), { timeout: 10000 }).catch(() => {})
 
   const tokenData = await page.evaluate(`(() => {
     var storage = {};
@@ -501,8 +507,11 @@ async function handleLogin(args: Record<string, unknown>) {
       var key = localStorage.key(i);
       if (key) storage[key] = localStorage.getItem(key) || '';
     }
-    return { localStorage: storage, cookies: document.cookie };
-  })()`) as { localStorage: Record<string, string>; cookies: string }
+    return { localStorage: storage };
+  })()`) as { localStorage: Record<string, string> }
+  // Read cookies from the browser context: document.cookie cannot see HttpOnly
+  // cookies, which is how most session cookies are set.
+  const cookieNames = [...new Set((await ctx.cookies(page.url())).map(cookie => cookie.name))]
 
   const screenshotPath = path.join(session.screenshotsDir, 'login-result.png')
   await page.screenshot({ path: screenshotPath, fullPage: false })
@@ -510,7 +519,7 @@ async function handleLogin(args: Record<string, unknown>) {
 
   const finalUrl = page.url()
   const tokenCount = Object.keys(tokenData.localStorage).length
-  const onLogin = finalUrl.includes('login') || finalUrl.includes('signin')
+  const onLogin = isStillOnLoginPage(finalUrl)
   const loginSuccess = !onLogin || tokenCount > 0
 
   // Close the login page — the context stays alive with cookies/storage intact
@@ -527,9 +536,13 @@ async function handleLogin(args: Record<string, unknown>) {
     success: loginSuccess,
     final_url: finalUrl,
     final_path: (() => { try { return new URL(finalUrl).pathname } catch { return finalUrl } })(),
+    identity_field: filled.identityDescription,
+    identity_kind: filled.identityKind,
+    multi_step: filled.multiStep,
     tokens_found: tokenCount,
     token_keys: Object.keys(tokenData.localStorage),
-    has_cookies: tokenData.cookies.length > 0,
+    has_cookies: cookieNames.length > 0,
+    cookie_names: cookieNames,
     api_calls: apiCalls.slice(0, 20),
   }
 
