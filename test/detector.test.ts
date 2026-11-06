@@ -212,6 +212,17 @@ describe('detectBaseUrl', () => {
     expect(await detectBaseUrl(dir, 'react-spa')).toBe('http://localhost:8080')
     await cleanup(dir)
   })
+
+  it.each(['vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.mts', 'vite.config.cts'])(
+    'reads port from %s',
+    async (file) => {
+      const dir = await withTempProject({}, {
+        [file]: 'export default { server: { port: 4321 } }',
+      })
+      expect(await detectBaseUrl(dir, 'react-spa')).toBe('http://localhost:4321')
+      await cleanup(dir)
+    }
+  )
 })
 
 // ─── Monorepo Detection ──────────────────────────────────────────────────────

@@ -202,6 +202,103 @@ describe('parseRoutes - react-spa', () => {
     expect(paths).toContain('/settings')
     await cleanup(dir)
   })
+
+  it('finds routes in src/App.jsx and links guarded/ternary elements to page files', async () => {
+    const dir = await withTempProject({
+      'src/App.jsx': `
+        import { Navigate, Route, Routes } from "react-router-dom";
+        import LoginPage from "./pages/LoginPage";
+        import ProductsPage from "./pages/ProductsPage";
+        import { Settings } from "./pages";
+        const PrivateRoute = ({ children }) => children;
+        export default () => (
+          <Routes>
+            <Route path="/login" element={authed ? <Navigate to="/products" replace /> : <LoginPage />} />
+            <Route
+              path="/products"
+              element={
+                <PrivateRoute>
+                  <ProductsPage />
+                </PrivateRoute>
+              }
+            />
+            <Route element={<PrivateRoute><Settings /></PrivateRoute>} path="/settings" />
+            <Route path="*" element={<Navigate to="/products" replace />} />
+          </Routes>
+        );
+      `,
+      'src/pages/LoginPage.jsx': 'export default () => <form />',
+      'src/pages/ProductsPage.jsx': 'export default () => <div />',
+      'src/pages/index.js': 'export const Settings = () => null',
+    })
+    const routes = await parseRoutes('react-spa', dir)
+    const byPath = Object.fromEntries(routes.map(r => [r.path, r.file_path && path.relative(dir, r.file_path)]))
+    expect(byPath['/login']).toBe(path.join('src', 'pages', 'LoginPage.jsx'))
+    expect(byPath['/products']).toBe(path.join('src', 'pages', 'ProductsPage.jsx'))
+    expect(byPath['/settings']).toBe(path.join('src', 'pages', 'index.js'))
+    expect(byPath['*']).toBeUndefined()
+    await cleanup(dir)
+  })
+
+  it('links an imported guard wrapper to the inner page, not the guard', async () => {
+    const dir = await withTempProject({
+      'src/App.tsx': `
+        import RequireAuth from './components/RequireAuth'
+        import Dashboard from './pages/Dashboard'
+        <Route path="/dashboard" element={<RequireAuth redirectTo="/login"><Dashboard /></RequireAuth>} />
+      `,
+      'src/components/RequireAuth.tsx': 'export default ({ children }) => children',
+      'src/pages/Dashboard.tsx': 'export default () => null',
+    })
+    const routes = await parseRoutes('react-spa', dir)
+    const dash = routes.find(r => r.path === '/dashboard')
+    expect(dash?.file_path && path.relative(dir, dash.file_path)).toBe(path.join('src', 'pages', 'Dashboard.tsx'))
+    await cleanup(dir)
+  })
+})
+
+// ─── Express ─────────────────────────────────────────────────────────────────
+
+describe('parseRoutes - express', () => {
+  it('finds routes in the TypeScript layout (src/routes, src/index.ts)', async () => {
+    const dir = await withTempProject({
+      'src/index.ts': "app.get('/health', handler)",
+      'src/routes/users.ts': "router.post('/users', create)",
+    })
+    const routes = await parseRoutes('express', dir)
+    expect(routes.map(r => `${r.method} ${r.path}`).sort()).toEqual(['GET /health', 'POST /users'])
+    await cleanup(dir)
+  })
+
+  it('finds routes in the plain-JS layout (root routes/, app.js, server.js)', async () => {
+    const dir = await withTempProject({
+      'app.js': "app.get('/', home)",
+      'server.js': "app.get('/status', status)",
+      'routes/products.js': "router.get('/products', list)\nrouter.delete('/products/:id', remove)",
+    })
+    const routes = await parseRoutes('express', dir)
+    expect(routes.map(r => `${r.method} ${r.path}`).sort()).toEqual([
+      'DELETE /products/:id', 'GET /', 'GET /products', 'GET /status',
+    ])
+    await cleanup(dir)
+  })
+
+  it('finds routes in ESM and CommonJS files (.mjs, .cjs)', async () => {
+    const dir = await withTempProject({
+      'src/server.mjs': "app.get('/esm', h)",
+      'src/routes/orders.cjs': "router.put('/orders/:id', h)",
+    })
+    const routes = await parseRoutes('express', dir)
+    expect(routes.map(r => `${r.method} ${r.path}`).sort()).toEqual(['GET /esm', 'PUT /orders/:id'])
+    await cleanup(dir)
+  })
+
+  it('does not double-count a file matched by two patterns', async () => {
+    const dir = await withTempProject({ 'index.js': "app.get('/once', h)" })
+    const routes = await parseRoutes('express', dir)
+    expect(routes.filter(r => r.path === '/once')).toHaveLength(1)
+    await cleanup(dir)
+  })
 })
 
 // ─── TanStack Router / Start ────────────────────────────────────────────────

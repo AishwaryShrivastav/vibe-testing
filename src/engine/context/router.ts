@@ -289,10 +289,10 @@ function extractVueRoutes(content: string): Route[] {
 
 async function parseReactSpaRoutes(codebasePath: string): Promise<Route[]> {
   const candidates = [
-    'src/router.tsx', 'src/router.ts',
-    'src/routes.tsx', 'src/routes.ts',
-    'src/App.tsx', 'src/App.ts',
-    'src/app.tsx', 'src/app.ts',
+    'src/router.tsx', 'src/router.ts', 'src/router.jsx', 'src/router.js',
+    'src/routes.tsx', 'src/routes.ts', 'src/routes.jsx', 'src/routes.js',
+    'src/App.tsx', 'src/App.ts', 'src/App.jsx', 'src/App.js',
+    'src/app.tsx', 'src/app.ts', 'src/app.jsx', 'src/app.js',
   ]
 
   for (const candidate of candidates) {
@@ -330,12 +330,23 @@ async function resolveReactComponentPaths(
     importMap[match[1]] = match[2]
   }
 
-  // Match route path to component: <Route path="/login" element={<Login />} />
-  const routeElementPattern = /path=['"]([^'"]+)['"][^>]*element=\{<(\w+)/g
-  const pathToComponent: Record<string, string> = {}
-  for (const match of routerContent.matchAll(routeElementPattern)) {
-    pathToComponent[match[1]] = match[2]
+  // Named imports from local modules: import { Login, Signup } from './pages'
+  const namedImportPattern = /import\s+(?:(\w+)\s*,\s*)?\{([^}]+)\}\s*from\s+['"]([^'"]+)['"]/g
+  for (const match of routerContent.matchAll(namedImportPattern)) {
+    const source = match[3]
+    if (!isLocalImport(source)) continue
+    if (match[1]) importMap[match[1]] = source
+    for (const spec of match[2].split(',')) {
+      const local = spec.trim().split(/\s+as\s+/).pop()?.trim()
+      if (local && /^\w+$/.test(local)) importMap[local] = source
+    }
   }
+
+  // Match route path to the page component it renders, e.g.
+  //   <Route path="/login" element={<Login />} />
+  //   <Route path="/pos" element={<PrivateRoute><POSPage /></PrivateRoute>} />
+  //   <Route path="/login" element={authed ? <Navigate to="/" /> : <LoginPage />} />
+  const pathToComponent = mapRoutesToComponents(routerContent, importMap)
 
   // Resolve file paths
   const extensions = ['.tsx', '.ts', '.jsx', '.js']
@@ -372,13 +383,101 @@ async function resolveReactComponentPaths(
   }
 }
 
+function isLocalImport(source: string): boolean {
+  return source.startsWith('.') || source.startsWith('/') || source.startsWith('@/') ||
+    source.startsWith('~/') || source.startsWith('src/')
+}
+
+/**
+ * Walk every <Route ...> opening tag and map its path to the page component
+ * rendered by its element/component prop. The element expression may wrap the
+ * page (auth guards, layouts, Suspense) or branch (ternaries), so we take the
+ * last JSX component in it that is imported from a local module — guards are
+ * usually outermost, library components (Navigate, Suspense) aren't local.
+ */
+export function mapRoutesToComponents(
+  content: string,
+  importMap: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {}
+
+  for (const start of content.matchAll(/<Route(?=[\s/>])/g)) {
+    const tag = readOpeningTag(content, start.index! + start[0].length)
+    if (!tag) continue
+
+    const pathMatch = tag.match(/\bpath\s*=\s*(?:['"]([^'"]+)['"]|\{\s*['"`]([^'"`]+)['"`]\s*\})/)
+    const routePath = pathMatch?.[1] ?? pathMatch?.[2]
+    if (!routePath) continue
+
+    // v5 style: component={Login}
+    const componentProp = tag.match(/\b(?:component|Component)\s*=\s*\{\s*(\w+)\s*\}/)
+    if (componentProp && importMap[componentProp[1]]) {
+      result[routePath] = componentProp[1]
+      continue
+    }
+
+    const elementStart = tag.search(/\belement\s*=\s*\{/)
+    if (elementStart === -1) continue
+    const braceIdx = tag.indexOf('{', elementStart)
+    const expr = readBalanced(tag, braceIdx)
+    if (!expr) continue
+
+    const candidates = [...expr.matchAll(/<([A-Z][\w]*)/g)]
+      .map(m => m[1])
+      .filter(name => importMap[name] && isLocalImport(importMap[name]))
+    if (candidates.length > 0) result[routePath] = candidates[candidates.length - 1]
+  }
+
+  return result
+}
+
+/** Return the attribute text of a JSX opening tag starting at `from`, up to its closing '>'. */
+function readOpeningTag(content: string, from: number): string | null {
+  let depth = 0
+  let quote: string | null = null
+  for (let i = from; i < content.length; i++) {
+    const ch = content[i]
+    if (quote) {
+      if (ch === '\\') { i++; continue }
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue }
+    if (ch === '{') depth++
+    else if (ch === '}') depth--
+    else if (ch === '>' && depth === 0) return content.slice(from, i)
+  }
+  return null
+}
+
+/** Return the text between the brace at `openIdx` and its matching closing brace. */
+function readBalanced(text: string, openIdx: number): string | null {
+  let depth = 0
+  let quote: string | null = null
+  for (let i = openIdx; i < text.length; i++) {
+    const ch = text[i]
+    if (quote) {
+      if (ch === '\\') { i++; continue }
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue }
+    if (ch === '{') depth++
+    else if (ch === '}' && --depth === 0) return text.slice(openIdx + 1, i)
+  }
+  return null
+}
+
 async function parseExpressRoutes(codebasePath: string): Promise<Route[]> {
-  const routeFiles = await glob('src/routes/**/*.{ts,js}', codebasePath)
-  const mainFiles  = await glob('{src/,}index.{ts,js}', codebasePath)
+  // Cover both TS layouts (src/routes, src/index.ts) and the common plain-JS
+  // layout (routes/, app.js, server.js at the root), incl. ESM/CJS extensions.
+  const exts = '{ts,js,mts,mjs,cts,cjs}'
+  const routeFiles = await glob(`{src/,}routes/**/*.${exts}`, codebasePath)
+  const mainFiles  = await glob(`{src/,}{index,app,server}.${exts}`, codebasePath)
 
   const routes: Route[] = []
 
-  for (const f of [...routeFiles, ...mainFiles]) {
+  for (const f of new Set([...routeFiles, ...mainFiles])) {
     const content = await readFile(path.join(codebasePath, f))
     const extracted = extractExpressRoutes(content)
     routes.push(...extracted)

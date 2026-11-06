@@ -3,6 +3,7 @@ import type { CoverageGapSuggestion, TestResult, TestScenario, TestStep } from '
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
 import { MemoryManager } from './memory/index.js'
+import { mergeConfigCredentials } from './credentials.js'
 import { generateCoverageGaps } from './coverage-gaps.js'
 import { readVibeGuidance } from '../utils/vibe-md.js'
 import { logger } from '../utils/logger.js'
@@ -114,7 +115,7 @@ export function scenarioFromGap(gap: CoverageGapSuggestion, baseUrl: string): Te
   const steps = gapStepsToTestSteps(gap.suggested_test.steps, gap.route, baseUrl)
   if (steps.length === 0) return null
 
-  const needsAuth = !/\/(login|register|forgot-password|reset-password|privacy)\b/i.test(gap.route)
+  const needsAuth = !/\/(log-?in|sign-?in|sign-?up|register|forgot-password|reset-password|privacy|terms)\b/i.test(gap.route)
 
   scenarioSeq += 1
   return {
@@ -130,9 +131,16 @@ export function scenarioFromGap(gap: CoverageGapSuggestion, baseUrl: string): Te
   }
 }
 
-function minimalLoginScenario(config: VibeConfig): TestScenario | null {
+export function minimalLoginScenario(config: VibeConfig): TestScenario | null {
   if (config.auth?.strategy !== 'credentials' || !config.auth.credentials) return null
   const loginPath = config.auth.login_url ?? '/login'
+  const fieldSelector = (name: string | undefined, fallback: string) => {
+    const f = name ?? fallback
+    const parts = [`[name="${f}"]`]
+    if (/^[A-Za-z][\w-]*$/.test(f)) parts.push(`#${f}`)
+    parts.push(`[type="${fallback}"]`, `[name="${fallback}"]`)
+    return [...new Set(parts)].join(', ')
+  }
   return {
     id: 'vibe-converge-session-login',
     name: 'Converge — establish session (login)',
@@ -143,13 +151,13 @@ function minimalLoginScenario(config: VibeConfig): TestScenario | null {
       { action: 'navigate', url: loginPath, description: 'Open login page' },
       {
         action: 'fill',
-        selector: '[type="email"], [name="email"]',
+        selector: fieldSelector(config.auth.fields?.email, 'email'),
         value: config.auth.credentials.email,
-        description: 'Fill email',
+        description: `Fill ${config.auth.fields?.email ?? 'email'}`,
       },
       {
         action: 'fill',
-        selector: '[type="password"], [name="password"]',
+        selector: fieldSelector(config.auth.fields?.password, 'password'),
         value: config.auth.credentials.password,
         description: 'Fill password',
       },
@@ -168,7 +176,10 @@ function severityOrder(g: CoverageGapSuggestion): number {
   return 2
 }
 
-function buildFollowUpBatch(
+const RETEST_ID_SUFFIX = /(-retest)+$/
+const RETEST_NAME_SUFFIX = /(\s\(retest\))+$/
+
+export function buildFollowUpBatch(
   gaps: CoverageGapSuggestion[],
   failed: TestResult[],
   config: VibeConfig,
@@ -187,16 +198,23 @@ function buildFollowUpBatch(
     fromGaps.push(sc)
   }
 
+  // Retest each failing scenario once per round. `failed` accumulates across
+  // rounds, so strip earlier "-retest" suffixes and de-duplicate by the base
+  // scenario; otherwise retests of retests pile up ("X (retest) (retest)").
   const retests: TestScenario[] = []
+  const retested = new Set<string>()
   for (const r of failed) {
     if (retests.length + fromGaps.length >= limit + 8) break
     if (r.status === 'pass') continue
     const s = r.scenario
     if (s.id.startsWith('VTC-') && s.name.includes('[converge]')) continue
+    const baseId = s.id.replace(RETEST_ID_SUFFIX, '')
+    if (retested.has(baseId)) continue
+    retested.add(baseId)
     retests.push({
       ...s,
-      id: `${s.id}-retest`,
-      name: `${s.name} (retest)`,
+      id: `${baseId}-retest`,
+      name: `${s.name.replace(RETEST_NAME_SUFFIX, '')} (retest)`,
     })
   }
 
@@ -247,7 +265,7 @@ export async function runConverge(
   const projectRoot = config.codebase_path ?? process.cwd()
   const memory = new MemoryManager(projectRoot)
   await memory.load()
-  const recs = memory.getRecommendations()
+  const recs = mergeConfigCredentials(memory.getRecommendations(), config)
   const guidance = await readVibeGuidance(projectRoot)
 
   logger.section('Converge — iterative coverage expansion')

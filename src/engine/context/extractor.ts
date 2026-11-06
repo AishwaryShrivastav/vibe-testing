@@ -374,17 +374,19 @@ function extractFormsFromBlock(block: string): FormField[][] {
   return forms
 }
 
-function parseInputTag(tag: string): FormField | null {
-  const nameMatch     = tag.match(/name=['"]([^'"]+)['"]/)
-  const idMatch       = tag.match(/id=['"]([^'"]+)['"]/)
-  const typeMatch     = tag.match(/type=['"]([^'"]+)['"]/)
-  const requiredMatch = /required/.test(tag)
-  const minMatch      = tag.match(/min(?:Length)?=[{'"]+(\d+)[}'"]*/)
-  const maxMatch      = tag.match(/max(?:Length)?=[{'"]+(\d+)[}'"]*/)
-  const patternMatch  = tag.match(/pattern=['"]([^'"]+)['"]/)
-  const placeholderMatch = tag.match(/placeholder=['"]([^'"]+)['"]/)
+export function parseInputTag(tag: string): FormField | null {
+  // (?<![\w-]) anchors each attribute name so `id=` doesn't match inside
+  // `data-testid=`, `name=` inside `data-name=`, `required` inside `aria-required`.
+  const nameMatch     = tag.match(/(?<![\w-])name=['"]([^'"]+)['"]/)
+  const idMatch       = tag.match(/(?<![\w-])id=['"]([^'"]+)['"]/)
+  const typeMatch     = tag.match(/(?<![\w-])type=['"]([^'"]+)['"]/)
+  const requiredMatch = /(?<![\w-])required(?![\w-])/.test(tag)
+  const minMatch      = tag.match(/(?<![\w-])min(?:Length)?=[{'"]+(\d+)[}'"]*/)
+  const maxMatch      = tag.match(/(?<![\w-])max(?:Length)?=[{'"]+(\d+)[}'"]*/)
+  const patternMatch  = tag.match(/(?<![\w-])pattern=['"]([^'"]+)['"]/)
+  const placeholderMatch = tag.match(/(?<![\w-])placeholder=['"]([^'"]+)['"]/)
 
-  const jsxTypeMatch = !typeMatch ? tag.match(/type=\{[^}]*['"](\w+)['"][^}]*\}/) : null
+  const jsxTypeMatch = !typeMatch ? tag.match(/(?<![\w-])type=\{[^}]*['"](\w+)['"][^}]*\}/) : null
 
   const identifier = nameMatch?.[1] ?? idMatch?.[1]
   // Accept fields with placeholder even if they have no name/id/type
@@ -419,7 +421,7 @@ function parseInputTag(tag: string): FormField | null {
   }
 }
 
-function resolveFieldType(
+export function resolveFieldType(
   quotedType: string | undefined,
   jsxExpr: string | undefined,
   identifier: string | undefined,

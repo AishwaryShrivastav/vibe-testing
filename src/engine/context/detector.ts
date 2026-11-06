@@ -87,7 +87,10 @@ export async function detectBaseUrl(codebasePath: string, framework: Framework):
 
   // 2. Vite config
   const viteConfigContents: string[] = []
-  for (const viteFile of ['vite.config.ts', 'vite.config.js', 'vite.config.mts']) {
+  for (const viteFile of [
+    'vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs',
+    'vite.config.cts', 'vite.config.cjs',
+  ]) {
     const vitePath = path.join(codebasePath, viteFile)
     try {
       const content = await fs.readFile(vitePath, 'utf-8')

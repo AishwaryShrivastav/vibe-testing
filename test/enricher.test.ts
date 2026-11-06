@@ -118,6 +118,32 @@ describe('generateScenarios', () => {
     expect(passwordStep?.value).toBe('RealPasswordFromConfig!')
   })
 
+  it('fills a username (non-email) login field with the configured identity', async () => {
+    const gaps: Gap[] = [{ route: '/login', reason: 'no_tests', priority_score: 9, priority: 'high' }]
+    const behaviours: RouteBehaviour[] = [{
+      route: { path: '/login', type: 'page', requires_auth: false, dynamic_segments: [] },
+      forms: [[
+        { name: 'username', type: 'text', required: false, validations: [], placeholder: 'admin', label: 'Username' },
+        { name: 'password', type: 'password', required: false, validations: [], placeholder: '1234', label: 'Password' },
+      ]],
+      api_calls: [],
+    }]
+    const recommendations = {
+      skip_routes: new Set<string>(),
+      auth_routes: new Set<string>(),
+      timeout_hints: {},
+      selector_hints: {},
+      first_run: true,
+      auth_intel: null,
+      saved_credentials: { email: 'admin', password: '1234', registered_at: new Date().toISOString() },
+    }
+
+    const scenarios = await generateScenarios(gaps, behaviours, {}, 'deep', recommendations)
+    const loginScenario = scenarios.find(s => s.route === '/login' && s.name.toLowerCase().includes('login'))
+    const fills = loginScenario!.steps.filter(s => s.action === 'fill').map(s => s.value)
+    expect(fills).toEqual(['admin', '1234'])
+  })
+
   it('honors explicit auth.login_url for non-standard login routes', async () => {
     const gaps: Gap[] = [{ route: '/access', reason: 'no_tests', priority_score: 9, priority: 'high' }]
     const behaviours: RouteBehaviour[] = [{

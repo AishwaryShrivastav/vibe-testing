@@ -12,10 +12,11 @@ import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
 import { readVibeGuidance } from './utils/vibe-md.js'
-import { ActionBlocklist } from './utils/blocklist.js'
+import { ActionBlocklist, loadProjectBlocklist } from './utils/blocklist.js'
 import { VibeConfigSchema, type VibeConfig, type VibeGuidance } from './types/config.js'
 import type { ProductModel, TestScenario, TestResult } from './types/index.js'
 import { ensureDir, fileExists } from './utils/file.js'
+import { isSourceFile } from './utils/source-files.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
@@ -379,7 +380,7 @@ async function handleScanCodebase(args: Record<string, unknown>) {
   await ensureDir(session.screenshotsDir)
 
   session.guidance = await readVibeGuidance(codebasePath)
-  session.blocklist = new ActionBlocklist([], session.guidance)
+  session.blocklist = await loadProjectBlocklist(codebasePath, session.guidance)
 
   session.config = VibeConfigSchema.parse({ url, codebase_path: codebasePath, mode })
 
@@ -1331,7 +1332,7 @@ async function handleGetContext(args: Record<string, unknown>) {
       if (!stat) continue
       if (stat.isDirectory()) {
         await walk(full, depth + 1)
-      } else if (/\.(tsx?|jsx?|vue|svelte)$/.test(entry)) {
+      } else if (isSourceFile(entry)) {
         rootFiles.push(full)
       }
     }
