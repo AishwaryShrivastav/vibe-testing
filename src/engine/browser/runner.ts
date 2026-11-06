@@ -1,7 +1,7 @@
 import { chromium, BrowserContext, Page, Locator, type Response } from 'playwright'
 import { TestScenario, TestResult, TestStep, StepLog, ApiError } from '../../types/index.js'
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
-import { performLogin } from './auth.js'
+import { describeLoginRetry, performLoginDetailed, type LoginOutcome } from './auth.js'
 import { verifyResult } from './verifier.js'
 import { exploreAllPages, PageExploration } from './explorer.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
@@ -15,6 +15,8 @@ import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchSer
 export interface ExecutionResult {
   results: TestResult[]
   explorations: PageExploration[]
+  /** Operations that only succeeded on a retry (e.g. a login accepted on the second submission). */
+  retry_findings: string[]
 }
 
 export async function executeScenarios(
@@ -34,6 +36,12 @@ export async function executeScenarios(
 
   const results: TestResult[] = []
   const explorations: PageExploration[] = []
+  const retryFindings = new Set<string>()
+  const noteLogin = (outcome: LoginOutcome) => {
+    const finding = describeLoginRetry(outcome, 'Configured login')
+    if (finding) retryFindings.add(finding)
+  }
+  const done = (): ExecutionResult => ({ results, explorations, retry_findings: [...retryFindings] })
 
   const unauthScenarios = scenarios.filter(s => !s.requires_auth)
   const authScenarios = scenarios.filter(s => s.requires_auth)
@@ -51,15 +59,13 @@ export async function executeScenarios(
     })
     unauthCtx.setDefaultTimeout(config.browser?.timeout ?? 30000)
 
-    if (config.auth?.strategy === 'credentials') {
-      await performLogin(unauthCtx, config.url, config.auth)
-    }
-
+    // This phase stays logged out: its scenarios check public pages, login
+    // forms and "redirects to login" behaviour, which a session would mask.
     logger.section(`Executing ${unauthScenarios.length} scenarios (unauthenticated)`)
     for (const scenario of unauthScenarios) {
       logger.info(`Running: ${scenario.name}`)
       try {
-        const result = await runOneScenario(scenario, unauthCtx, config, screenshotsDir, projectRoot)
+        const result = await runScenarioWithRetry(scenario, unauthCtx, config, screenshotsDir, projectRoot)
         results.push(result)
         logResult(result)
       } catch (err) {
@@ -114,7 +120,9 @@ export async function executeScenarios(
         viewport: { width: 1280, height: 800 },
       })
       ctx.setDefaultTimeout(config.browser?.timeout ?? 30000)
-      if (await performLogin(ctx, config.url, config.auth)) {
+      const outcome = await performLoginDetailed(ctx, config.url, config.auth, config.retries)
+      noteLogin(outcome)
+      if (outcome.ok) {
         authCtx = ctx
         authEstablished = true
         logger.success('  Auth established with configured credentials')
@@ -145,7 +153,7 @@ export async function executeScenarios(
           })
         }
         await browser2.close().catch(() => {})
-        return { results, explorations }
+        return done()
       }
       try {
         const stepsToRun = loginScenario.steps.filter(s => s.action !== 'assert')
@@ -263,7 +271,7 @@ export async function executeScenarios(
       for (const scenario of authScenarios) {
         logger.info(`Running: ${scenario.name}`)
         try {
-          const result = await runOneScenario(scenario, authCtx, config, screenshotsDir, projectRoot)
+          const result = await runScenarioWithRetry(scenario, authCtx, config, screenshotsDir, projectRoot)
           results.push(result)
           logResult(result)
         } catch (err) {
@@ -301,7 +309,7 @@ export async function executeScenarios(
     await browser2.close().catch(() => {})
   }
 
-  return { results, explorations }
+  return done()
 }
 
 function logResult(result: TestResult): void {
@@ -317,6 +325,42 @@ function logResult(result: TestResult): void {
 
 function extractUrlPath(url: string): string {
   try { return new URL(url).pathname } catch { return url }
+}
+
+/**
+ * Run a scenario, and run it again (up to config.retries times) when it fails
+ * or errors. A pass on a retry is kept as a pass but carries `retry` with the
+ * first failure, so it is reported as "only passed on retry" instead of being
+ * hidden. When every attempt fails, the first attempt's result (the original
+ * evidence) is returned with the attempt count.
+ */
+export async function runScenarioWithRetry(
+  scenario: TestScenario,
+  context: BrowserContext,
+  config: VibeConfig,
+  screenshotsDir: string,
+  projectRoot = config.codebase_path ?? process.cwd(),
+): Promise<TestResult> {
+  const first = await runOneScenario(scenario, context, config, screenshotsDir, projectRoot)
+  if (first.status === 'pass' || (config.retries ?? 0) < 1) return first
+
+  const firstFailure = (first.failure_reason ?? first.ai_verdict ?? first.status).slice(0, 200)
+  let attempts = 1
+  while (attempts <= (config.retries ?? 0)) {
+    attempts++
+    logger.dim(`  Retrying (attempt ${attempts}): ${scenario.name}`)
+    const again = await runOneScenario(scenario, context, config, screenshotsDir, projectRoot)
+    if (again.status === 'pass') {
+      return { ...again, retry: { attempts, passed_on_retry: true, first_failure: firstFailure } }
+    }
+  }
+  return { ...first, retry: { attempts, passed_on_retry: false, first_failure: firstFailure } }
+}
+
+/** Finding text for a scenario that only passed on a retry, or undefined. */
+export function describeScenarioRetry(result: TestResult): string | undefined {
+  if (!result.retry?.passed_on_retry) return undefined
+  return `${result.scenario.name} (${result.scenario.route}): only passed on attempt ${result.retry.attempts} (first attempt: ${result.retry.first_failure})`
 }
 
 export async function runOneScenario(

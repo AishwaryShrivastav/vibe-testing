@@ -1,4 +1,5 @@
-import type { RunDiagnostic, VibeRunResult } from '../types/index.js'
+import type { RunDiagnostic, TestResult, VibeRunResult } from '../types/index.js'
+import { describeScenarioRetry } from './browser/runner.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
@@ -38,17 +39,22 @@ export class VibeTester {
     }
 
     const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
+    const crawlRetryFindings: string[] = []
 
     if (productModel.scenarios.length === 0) {
       const guidance = await import('../utils/vibe-md.js').then(module => module.readVibeGuidance(this.projectRoot))
       const crawl = await crawlLiveRoutes({
         baseUrl: this.config.url,
         auth: this.config.auth,
+        retries: this.config.retries,
         blockedPatterns: [
           ...(this.config.never_interact ?? []),
           ...(guidance?.never_automate ?? []),
         ],
       })
+      if (crawl.auth?.status === 'logged-in' && (crawl.auth.login_attempts ?? 0) > 1) {
+        crawlRetryFindings.push(`Crawl login: login with valid credentials only succeeded on attempt ${crawl.auth.login_attempts} (first attempt: ${crawl.auth.first_failure ?? 'rejected'})`)
+      }
       if (crawl.scenarios.length > 0) {
         productModel.routes.push(...crawl.routes.filter(route =>
           !productModel.routes.some(existing => existing.path === route.path)
@@ -78,7 +84,8 @@ export class VibeTester {
       }
     }
 
-    const { results, explorations } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
+    const { results, explorations, retry_findings } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
+    const retryFindings = collectRetryFindings(results, [...crawlRetryFindings, ...(retry_findings ?? [])])
 
     if (results.length === 0) throw new Error('No scenarios executed: empty execution result')
 
@@ -128,6 +135,7 @@ export class VibeTester {
     if (failed > 0)  logger.error(`Failed: ${failed}`)
     if (errors > 0)  logger.warn(`Errors: ${errors}`)
     if (explorerFailures.length > 0) logger.error(`Server errors found while exploring: ${explorerFailures.length}`)
+    if (retryFindings.length > 0) logger.warn(`Only succeeded on retry: ${retryFindings.length}`)
     if (elementsExplored > 0) logger.dim(`Elements explored: ${elementsExplored} across ${explorations.length} pages`)
     if (apiCallsObserved > 0) logger.dim(`API calls observed: ${apiCallsObserved}`)
     if (coverageGaps.length > 0) logger.warn(`Coverage gaps: ${coverageGaps.length} missing test areas`)
@@ -154,6 +162,7 @@ export class VibeTester {
         total: results.length, passed, failed, errors, duration_ms: duration,
         elements_explored: elementsExplored, api_calls_observed: apiCallsObserved,
         explorer_failures: explorerFailures,
+        retry_findings: retryFindings,
       },
     }
   }
@@ -266,6 +275,7 @@ export class VibeTester {
         elements_explored: elementsExplored,
         api_calls_observed: apiCallsObserved,
         explorer_failures: collectExplorerFailures(cr.explorations),
+        retry_findings: collectRetryFindings(cr.total_results, cr.retry_findings),
         converge_rounds: cr.rounds,
       },
     }
@@ -282,6 +292,16 @@ export function collectExplorerFailures(explorations: PageExploration[]): string
     .filter(error => /Server error \d{3}|Crash text|No response within|^Uncaught exception/.test(error))
     .map(error => `${exploration.route}: ${error}`))
   return [...new Set(failures)]
+}
+
+/**
+ * Everything that only succeeded on a retry: logins (session or crawl) and
+ * scenarios that passed on a later attempt. These are inconsistent behaviour
+ * worth a look, reported separately from failures.
+ */
+export function collectRetryFindings(results: TestResult[], operationFindings: string[] = []): string[] {
+  const scenarioFindings = results.map(describeScenarioRetry).filter((finding): finding is string => !!finding)
+  return [...new Set([...operationFindings, ...scenarioFindings])]
 }
 
 export { generateCoverageGaps } from './coverage-gaps.js'

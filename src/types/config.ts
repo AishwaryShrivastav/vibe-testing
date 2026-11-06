@@ -34,6 +34,13 @@ export const VibeConfigSchema = z.object({
     timeout: z.number().default(30000),
   }).optional(),
   mode: z.enum(['fast', 'deep']).default('deep'),
+  /**
+   * Extra attempts for operations that should succeed: logins (resubmitted on
+   * the same page), scenarios and crawl page loads. Success on a retry is
+   * always reported as a finding, never hidden. 0 disables retries (use it
+   * when repeating an action has side effects, e.g. payments).
+   */
+  retries: z.number().int().min(0).max(2).default(1),
   routes: z.enum(['auto', 'config']).default('auto'),
 })
 

@@ -201,7 +201,14 @@ export interface LiveRouteCrawl {
   attemptedPaths: string[]
   reason?: string
   /** Outcome of the logged-in crawl pass, when credentials were configured. */
-  auth?: { status: 'logged-in' | 'login-failed' | 'unavailable'; pages: number }
+  auth?: {
+    status: 'logged-in' | 'login-failed' | 'unavailable'
+    pages: number
+    /** Login form submissions made; more than 1 means the first was rejected. */
+    login_attempts?: number
+    /** What the login page showed after the first rejected submission. */
+    first_failure?: string
+  }
 }
 
 export type TestStatus = 'pass' | 'fail' | 'skip' | 'error'
@@ -238,6 +245,8 @@ export interface TestResult {
   api_errors?: ApiError[]
   /** Server crashes seen during the scenario (5xx responses, crash text caused by an action). */
   server_errors?: Array<{ url: string; method?: string; status?: number; evidence: string }>
+  /** Set when the scenario was retried: whether a retry passed and what the first attempt hit. */
+  retry?: { attempts: number; passed_on_retry: boolean; first_failure?: string }
 }
 
 export interface ProductModel {
@@ -329,6 +338,8 @@ export interface VibeRunResult {
     api_calls_observed: number
     /** Server errors, hangs and uncaught exceptions found while exploring pages, e.g. "/contributions: Server error 500 on POST /contributions: …". */
     explorer_failures?: string[]
+    /** Logins and scenarios that only succeeded on a retry (first attempt's evidence included). */
+    retry_findings?: string[]
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
   }

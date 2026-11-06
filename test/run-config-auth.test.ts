@@ -131,14 +131,14 @@ describe('crawlLiveRoutes with configured credentials', () => {
 
     const byPath = Object.fromEntries(crawl.routes.map(route => [route.path, route.requires_auth]))
     expect(byPath).toMatchObject({ '/login': false, '/signup': false, '/dashboard': true, '/contributions': true, '/profile': true })
-    expect(crawl.auth).toEqual({ status: 'logged-in', pages: 3 })
+    expect(crawl.auth).toEqual({ status: 'logged-in', pages: 3, login_attempts: 1 })
     expect(crawl.scenarios.find(s => s.route === '/dashboard')).toMatchObject({ requires_auth: true })
     expect(hits).not.toContain('GET /logout')
   }, 60_000)
 
   it('reports a failed login and keeps only the public pages', async () => {
     const crawl = await crawlLiveRoutes({ baseUrl, auth: credentials('wrong') })
-    expect(crawl.auth).toEqual({ status: 'login-failed', pages: 0 })
+    expect(crawl.auth).toEqual({ status: 'login-failed', pages: 0, login_attempts: 2, first_failure: 'Invalid username' })
     expect(crawl.routes.every(route => !route.requires_auth)).toBe(true)
   }, 60_000)
 

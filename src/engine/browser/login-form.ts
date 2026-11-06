@@ -109,6 +109,21 @@ export async function fillLoginForm(
   return { identityKind, identityDescription, multiStep }
 }
 
+/**
+ * The error a login page shows after a rejected submission, for evidence:
+ * a visible alert/error element first, otherwise a body line that reads like
+ * a credential error. Undefined when nothing recognisable is shown.
+ */
+export async function readLoginError(page: Page): Promise<string | undefined> {
+  const alert = page.locator('[role="alert"]:visible, .error:visible, .alert:visible, [data-error]:visible, .toast-error:visible').first()
+  const alertText = (await alert.innerText({ timeout: 500 }).catch(() => '')).trim()
+  if (alertText) return alertText.replace(/\s+/g, ' ').slice(0, 160)
+  const body = await page.locator('body').innerText({ timeout: 1000 }).catch(() => '')
+  const line = body.split('\n').map(l => l.trim())
+    .find(l => /invalid|incorrect|wrong|failed|denied|not (?:found|recognized|recognised)|try again|error/i.test(l) && l.length < 200)
+  return line || undefined
+}
+
 /** Click the form's submit control, or a recognisable sign-in button, or press Enter in the field. */
 export async function submitLoginForm(page: Page, field: Locator, timeoutMs = 3000): Promise<void> {
   const form = field.locator('xpath=ancestor::form[1]')

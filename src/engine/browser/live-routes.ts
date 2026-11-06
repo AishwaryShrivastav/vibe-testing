@@ -2,7 +2,7 @@ import { chromium, type Browser, type BrowserContext } from 'playwright'
 import type { LiveRouteCrawl, Route, TestScenario } from '../../types/index.js'
 import type { AuthConfig } from '../../types/config.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
-import { performLogin } from './auth.js'
+import { performLoginDetailed } from './auth.js'
 
 const DESTRUCTIVE_PATH = /(?:^|\/)(?:logout|log-out|signout|sign-out|delete|remove|destroy|cancel|unsubscribe|revoke)(?:\/|$)/i
 const ASSET_PATH = /\.(?:css|js|mjs|map|json|xml|txt|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|pdf|zip)(?:$|\?)/i
@@ -16,6 +16,8 @@ export interface LiveRouteCrawlInput {
   blockedPatterns?: string[]
   /** With credentials, also crawl logged in; pages only reachable then are marked requires_auth. */
   auth?: AuthConfig
+  /** Extra attempts for the crawl login (same page) and for page loads that fail. Default 1. */
+  retries?: number
 }
 
 export interface LiveRouteCrawlDependencies {
@@ -46,7 +48,8 @@ export async function crawlLiveRoutes(
     const context = dependencies.context ?? await browser!.newContext({ baseURL: origin })
     ownedContext = dependencies.context ? undefined : context
     context.setDefaultTimeout(timeoutMs)
-    const options = { origin, maxPages, maxDepth, timeoutMs, blocklist }
+    const retries = clamp(input.retries ?? 1, 0, 2)
+    const options = { origin, maxPages, maxDepth, timeoutMs, blocklist, retries }
     const publicPass = await crawlPass(context, options)
     const routes: Route[] = publicPass.paths.map(path => liveRoute(path, false))
     const attemptedPaths = [...publicPass.attempted]
@@ -62,15 +65,20 @@ export async function crawlLiveRoutes(
         const authContext = await authBrowser.newContext({ baseURL: origin })
         try {
           authContext.setDefaultTimeout(timeoutMs)
-          if (await performLogin(authContext, origin, input.auth)) {
-            const authPass = await crawlPass(authContext, options)
+          const login = await performLoginDetailed(authContext, origin, input.auth, retries)
+          const loginDetails = { login_attempts: login.attempts, ...(login.firstFailure ? { first_failure: login.firstFailure } : {}) }
+          if (login.ok) {
+            // Start from where the login landed as well as from /: on many apps
+            // the signed-in area is only linked from that landing page.
+            const landing = login.landingUrl ? safeSameOriginPath(login.landingUrl, origin, blocklist) : undefined
+            const authPass = await crawlPass(authContext, options, landing && landing !== '/' ? [landing, '/'] : ['/'])
             const publicPaths = new Set(publicPass.paths)
             const added = authPass.paths.filter(path => !publicPaths.has(path))
             routes.push(...added.map(path => liveRoute(path, true)))
             attemptedPaths.push(...authPass.attempted)
-            auth = { status: 'logged-in', pages: added.length }
+            auth = { status: 'logged-in', pages: added.length, ...loginDetails }
           } else {
-            auth = { status: 'login-failed', pages: 0 }
+            auth = { status: 'login-failed', pages: 0, ...loginDetails }
           }
         } finally {
           await authContext.close().catch(() => {})
@@ -107,16 +115,18 @@ interface CrawlPassOptions {
   maxDepth: number
   timeoutMs: number
   blocklist: ActionBlocklist
+  retries: number
 }
 
 /** Breadth-first crawl from `/` within one browser context. Returns canonical page paths in visit order. */
 async function crawlPass(
   context: BrowserContext,
-  { origin, maxPages, maxDepth, timeoutMs, blocklist }: CrawlPassOptions,
+  { origin, maxPages, maxDepth, timeoutMs, blocklist, retries }: CrawlPassOptions,
+  seeds: string[] = ['/'],
 ): Promise<{ paths: string[]; attempted: string[] }> {
   const page = await context.newPage()
-  const queue: Array<{ path: string; depth: number }> = [{ path: '/', depth: 0 }]
-  const queued = new Set(['/'])
+  const queue: Array<{ path: string; depth: number }> = seeds.map(path => ({ path, depth: 0 }))
+  const queued = new Set(seeds)
   const attempted: string[] = []
   const paths: string[] = []
 
@@ -125,10 +135,19 @@ async function crawlPass(
       const next = queue.shift()!
       attempted.push(next.path)
       try {
-        const response = await page.goto(new URL(next.path, origin).href, {
-          waitUntil: 'domcontentloaded',
-          timeout: timeoutMs,
-        })
+        // A page load that throws (timeout, connection reset) gets `retries` more tries.
+        let response = null
+        for (let attempt = 0; ; attempt++) {
+          try {
+            response = await page.goto(new URL(next.path, origin).href, {
+              waitUntil: 'domcontentloaded',
+              timeout: timeoutMs,
+            })
+            break
+          } catch (error) {
+            if (attempt >= retries) throw error
+          }
+        }
         const finalUrl = new URL(page.url())
         if (finalUrl.origin !== origin || (response && response.status() >= 400)) continue
         const canonicalPath = normalizePath(finalUrl.pathname)

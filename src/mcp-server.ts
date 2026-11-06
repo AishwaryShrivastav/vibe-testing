@@ -7,8 +7,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { chromium, BrowserContext, Page } from 'playwright'
 import { VibeTester, buildProductModel, MemoryManager } from './engine/index.js'
-import { runOneScenario } from './engine/browser/runner.js'
-import { fillLoginForm } from './engine/browser/login-form.js'
+import { runScenarioWithRetry } from './engine/browser/runner.js'
+import { fillLoginForm, readLoginError } from './engine/browser/login-form.js'
 import { loadRunConfig } from './utils/run-config.js'
 import { isStillOnLoginPage } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
@@ -496,15 +496,24 @@ async function handleLogin(args: Record<string, unknown>) {
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
+  // A rejected login is resubmitted on the same page (config.retries times):
+  // some apps only accept the second submission. A retry success is reported.
   let filled: Awaited<ReturnType<typeof fillLoginForm>>
+  let attempts = 0
+  let firstFailure: string | undefined
+  const maxAttempts = 1 + (session.config.retries ?? 1)
   try {
-    filled = await fillLoginForm(page, { identity: email, password }, { identityField, passwordField })
+    while (true) {
+      attempts++
+      filled = await fillLoginForm(page, { identity: email, password }, { identityField, passwordField })
+      await page.waitForURL(url => !isStillOnLoginPage(url.href), { timeout: 10000 }).catch(() => {})
+      if (!isStillOnLoginPage(page.url()) || attempts >= maxAttempts) break
+      if (attempts === 1) firstFailure = await readLoginError(page) ?? 'stayed on the login page'
+    }
   } catch (error) {
     await ctx.close().catch(() => {})
     throw error
   }
-
-  await page.waitForURL(url => !isStillOnLoginPage(url.href), { timeout: 10000 }).catch(() => {})
 
   const tokenData = await page.evaluate(`(() => {
     var storage = {};
@@ -544,6 +553,11 @@ async function handleLogin(args: Record<string, unknown>) {
     identity_field: filled.identityDescription,
     identity_kind: filled.identityKind,
     multi_step: filled.multiStep,
+    attempts,
+    ...(firstFailure ? { first_attempt_failure: firstFailure } : {}),
+    ...(loginSuccess && attempts > 1
+      ? { finding: `Login with valid credentials only succeeded on attempt ${attempts} (first attempt: ${firstFailure})` }
+      : {}),
     tokens_found: tokenCount,
     token_keys: Object.keys(tokenData.localStorage),
     has_cookies: cookieNames.length > 0,
@@ -759,7 +773,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
   const ctx = useAuth ? session.authContext : await getOrCreateUnauthContext()
   if (!ctx) throw new Error(useAuth ? 'No authenticated context. Call login first.' : 'Failed to create browser context.')
 
-  const result = await runOneScenario(scenario, ctx, session.config, session.screenshotsDir, session.projectRoot)
+  const result = await runScenarioWithRetry(scenario, ctx, session.config, session.screenshotsDir, session.projectRoot)
   session.results.push(result)
 
   // Collect screenshots from step logs
@@ -793,6 +807,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
     })),
     api_errors: result.api_errors ?? [],
     server_errors: result.server_errors ?? [],
+    ...(result.retry ? { retry: result.retry } : {}),
     screenshots_count: stepScreenshots.length + (finalScreenshot ? 1 : 0),
   }
 
@@ -1259,7 +1274,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatRetryFindings(result.summary.retry_findings)}`
 
   return {
     content: [{ type: 'text', text: summary }],
@@ -1301,7 +1316,7 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatRetryFindings(result.summary.retry_findings)}`
 
   return {
     content: [{ type: 'text', text: roundsLine }],
@@ -1314,6 +1329,13 @@ function formatExplorerFailures(failures: string[] | undefined): string {
   const shown = failures.slice(0, 10).map(failure => `  - ${failure.slice(0, 220)}`).join('\n')
   const more = failures.length > 10 ? `\n  - …and ${failures.length - 10} more (see report)` : ''
   return `\n- Server errors found while exploring: ${failures.length}\n${shown}${more}`
+}
+
+function formatRetryFindings(findings: string[] | undefined): string {
+  if (!findings?.length) return ''
+  const shown = findings.slice(0, 10).map(finding => `  - ${finding.slice(0, 260)}`).join('\n')
+  const more = findings.length > 10 ? `\n  - …and ${findings.length - 10} more (see report)` : ''
+  return `\n- Only succeeded on retry (inconsistent behaviour worth a look): ${findings.length}\n${shown}${more}`
 }
 
 // ─── get_context ─────────────────────────────────────────────────────────────
