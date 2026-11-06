@@ -30,7 +30,7 @@ export async function generateScenarios(
   gaps: Gap[],
   behaviours: RouteBehaviour[],
   coverage: CoverageMap,
-  mode: 'fast' | 'deep',
+  mode: 'fast' | 'deep' | 'auto' | 'changed',
   recommendations?: MemoryRecommendations,
   configuredLoginUrl?: string
 ): Promise<TestScenario[]> {

@@ -1,4 +1,5 @@
 import type { FailedScenario } from './engine/findings.js'
+import type { PlanSummary } from './types/index.js'
 
 /** Everything a run found, as returned in VibeRunResult.summary (all optional). */
 export interface RunFindings {
@@ -36,6 +37,37 @@ export function formatRunFindings(findings: RunFindings): string {
     section('Warnings (possible missing data, not counted as failures)', findings.explorer_warnings, 220),
     section('Changes made to the app while exploring (data-changing requests; clean up if needed)', findings.app_changes, 260),
   ].join('')
+}
+
+/**
+ * The test plan in a few lines: mode, what it was based on, counts per depth,
+ * then every page that wasn't simply "light: unchanged" with its reason.
+ * Starts with "\n- "; empty without a plan.
+ */
+export function formatPlan(plan: PlanSummary | undefined): string {
+  if (!plan) return ''
+  const counts = (['thorough', 'standard', 'light', 'skipped'] as const)
+    .filter(depth => plan.counts[depth] > 0)
+    .map(depth => `${plan.counts[depth]} ${depth}`)
+    .join(', ') || 'no pages'
+  const since = plan.since ? ` since ${/^[0-9a-f]{40}$/.test(plan.since) ? plan.since.slice(0, 8) : plan.since}` : ''
+  const order: Record<string, number> = { thorough: 0, standard: 1, light: 2, skipped: 3 }
+  const notable = plan.pages
+    // The default reasons ("every page thoroughly", "unchanged", "fast mode…") add nothing per page.
+    .filter(page => page.depth !== 'skipped' && !/^(every page thoroughly|unchanged|fast mode)/.test(page.reason))
+    .sort((a, b) => order[a.depth] - order[b.depth])
+  const shown = notable.slice(0, MAX_LINES).map(page => `  - ${page.depth} ${page.route}: ${page.reason.slice(0, 160)}`)
+  if (notable.length > MAX_LINES) shown.push(`  - …and ${notable.length - MAX_LINES} more (see report)`)
+  const changed = plan.changed_files?.length
+    ? [`  - changed files (${plan.changed_files.length}): ${plan.changed_files.slice(0, 6).join(', ')}${plan.changed_files.length > 6 ? ', …' : ''}`]
+    : []
+  const skippedRoutes = plan.pages.filter(page => page.depth === 'skipped').map(page => page.route)
+  const skipped = skippedRoutes.length
+    ? [`  - skipped (${skippedRoutes.length}): ${skippedRoutes.slice(0, 8).join(', ')}${skippedRoutes.length > 8 ? ', …' : ''}`]
+    : []
+  const notes = plan.notes.slice(0, 4).map(note => `  - note: ${note.slice(0, 200)}`)
+  const lines = [...changed, ...shown, ...skipped, ...notes]
+  return `\n- Test plan: mode ${plan.mode} (${plan.basis}${since}): ${counts}${lines.length ? `\n${lines.join('\n')}` : ''}`
 }
 
 function formatFailedScenarios(failed: FailedScenario[] | undefined): string {

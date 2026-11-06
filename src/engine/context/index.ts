@@ -138,7 +138,7 @@ function findDynamicParent(routes: Route[], concretePath: string): Route | undef
   })
 }
 
-function matchesScope(routePath: string, include: string[], exclude: string[]): boolean {
+export function matchesScope(routePath: string, include: string[], exclude: string[]): boolean {
   const matches = (pattern: string, p: string): boolean => {
     // Tokenize wildcards once; never rewrite the stars introduced by expansion.
     // A trailing /** includes the subtree root as well as descendants.

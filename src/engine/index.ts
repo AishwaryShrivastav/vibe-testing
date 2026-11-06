@@ -1,7 +1,12 @@
 import type { RunDiagnostic, VibeRunResult } from '../types/index.js'
 import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings } from './findings.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
-import { buildProductModel } from './context/index.js'
+import { buildProductModel, matchesScope } from './context/index.js'
+import { planRun, scenariosForPlan, summarisePlan } from './test-plan.js'
+import { headCommit } from './context/change-impact.js'
+import { saveFingerprints, writeBaseline } from './memory/baseline.js'
+import type { TestResult } from '../types/index.js'
+import type { ExecutionResult } from './browser/runner.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
 import { MemoryManager } from './memory/index.js'
 import { mergeConfigCredentials } from './credentials.js'
@@ -62,9 +67,11 @@ export class VibeTester {
         crawlRetryFindings.push(`Crawl login: login with valid credentials only succeeded on attempt ${crawl.auth.login_attempts} (first attempt: ${crawl.auth.first_failure ?? 'rejected'})`)
       }
       if (crawl.scenarios.length > 0) {
-        // Pages the code already covers are not added twice (compare without the query).
+        // Pages the code already covers are not added twice (compare without the query);
+        // scope include/exclude applies to crawled pages too.
+        const { include = ['/**'], exclude = [] } = this.config.scope ?? {}
         const known = new Set(productModel.routes.map(route => route.path.split('?')[0]))
-        const added = crawl.routes.filter(route => !known.has(route.path.split('?')[0]))
+        const added = crawl.routes.filter(route => !known.has(route.path.split('?')[0]) && matchesScope(route.path.split('?')[0], include, exclude))
         productModel.routes.push(...added)
         const addedPaths = new Set(added.map(route => route.path))
         productModel.scenarios.push(...crawl.scenarios.filter(scenario => addedPaths.has(scenario.route)))
@@ -92,16 +99,36 @@ export class VibeTester {
       }
     }
 
-    const { results, explorations, retry_findings } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
-    const retryFindings = collectRetryFindings(results, [...crawlRetryFindings, ...(retry_findings ?? [])])
+    // How deeply to test each page (mode fast / deep / auto / changed).
+    const plan = await planRun(this.config, productModel, this.projectRoot)
+    const { kept, dropped } = scenariosForPlan(productModel.scenarios, plan)
+    const planSkipped = [...new Set(productModel.scenarios.map(s => s.route).filter(route => plan.decide(route) === 'skip'))]
+    logger.section(`Test plan: mode ${plan.mode} (${plan.basis}${plan.since ? ` since ${plan.since.slice(0, 12)}` : ''})`)
+    for (const note of plan.notes) logger.dim(`  ${note}`)
+    if (plan.changedFiles?.length) logger.dim(`  Changed files: ${plan.changedFiles.slice(0, 10).join(', ')}${plan.changedFiles.length > 10 ? ', …' : ''}`)
+    if (dropped > 0) logger.dim(`  ${dropped} interactive scenario(s) not run on light or skipped pages`)
 
-    if (results.length === 0) throw new Error('No scenarios executed: empty execution result')
+    const execution: ExecutionResult = kept.length > 0
+      ? await executeScenarios(kept, this.config, this.projectRoot, undefined, plan)
+      : { results: [] as TestResult[], explorations: [] as PageExploration[], retry_findings: [] }
+    const { results, explorations, retry_findings } = execution
+    const retryFindings = collectRetryFindings(results, [...crawlRetryFindings, ...(retry_findings ?? [])])
+    const planSummary = summarisePlan(plan, explorations, [...planSkipped, ...(execution.skipped_routes ?? [])])
+    if (dropped > 0) planSummary.notes = [...planSummary.notes, `${dropped} interactive scenario(s) not run on light or skipped pages`]
+    if (execution.session_checks_note) planSummary.notes = [...planSummary.notes, execution.session_checks_note]
+    if (kept.length === 0) planSummary.notes = [...planSummary.notes, 'nothing to test: no page was planned']
+
+    if (results.length === 0 && kept.length > 0) throw new Error('No scenarios executed: empty execution result')
 
     await memory.updateFromResults(results)
 
     // Save run snapshot and diff against previous run
     const vibeDir = path.join(this.projectRoot, '.vibe')
-    const snapshotDiff = await saveRunSnapshot(vibeDir, results)
+    const partialRun = plan.mode === 'auto' || plan.mode === 'changed'
+    const snapshotDiff = await saveRunSnapshot(vibeDir, results, partialRun)
+    // Baseline for the next auto/changed run: this commit and these pages.
+    await writeBaseline(vibeDir, { commit: await headCommit(this.projectRoot), at: new Date().toISOString(), mode: plan.mode }).catch(() => {})
+    await saveFingerprints(vibeDir, explorations).catch(() => {})
     if (snapshotDiff) {
       logger.section('Changes since last run')
       if (snapshotDiff.newly_passing.length > 0)
@@ -126,7 +153,7 @@ export class VibeTester {
 
     const recs = memory.getRecommendations()
     const report = await generateHtmlReport(results, productModel, this.config, explorations, coverageGaps, recs, {
-      retryFindings, durationMs: Date.now() - startTime, reportDir: path.join(this.projectRoot, '.vibe'),
+      retryFindings, durationMs: Date.now() - startTime, reportDir: path.join(this.projectRoot, '.vibe'), plan: planSummary,
     })
     const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
     await fs.mkdir(path.dirname(reportPath), { recursive: true })
@@ -178,6 +205,7 @@ export class VibeTester {
         retry_findings: retryFindings,
         app_changes: collectAppChanges(explorations),
         failed_scenarios: collectFailedScenarios(results),
+        plan: planSummary,
       },
     }
   }

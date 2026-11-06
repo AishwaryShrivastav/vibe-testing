@@ -73,7 +73,7 @@ export function watchServerErrors(page: Page): { signals: ServerErrorSignal[]; s
     }
     signals.push(signal)
     response.text().then(body => {
-      signal.evidence = matchCrashText(stripTags(body)) ?? (stripTags(body).replace(/\s+/g, ' ').trim().slice(0, 200) || `HTTP ${signal.status}`)
+      signal.evidence = evidenceFromBody(body, signal.status)
     }).catch(() => { signal.evidence = `HTTP ${signal.status}` })
   }
 
@@ -82,6 +82,12 @@ export function watchServerErrors(page: Page): { signals: ServerErrorSignal[]; s
     signals,
     stop: () => { page.off('response', onResponse) },
   }
+}
+
+/** Short evidence from a failed response's body: crash text if any, else its first words. */
+export function evidenceFromBody(body: string, status?: number): string {
+  const text = stripTags(body)
+  return matchCrashText(text) ?? (text.replace(/\s+/g, ' ').trim().slice(0, 200) || `HTTP ${status ?? ''}`.trim())
 }
 
 /** Wait for response bodies still being read by a watcher (bounded). */

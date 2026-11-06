@@ -73,6 +73,8 @@ export interface Route {
   requires_auth: boolean
   dynamic_segments: string[]
   file_path?: string
+  /** Server routes: the module holding the handler, when it isn't the routes file. */
+  handler_file?: string
   origin?: 'static' | 'live-crawl'
 }
 
@@ -348,7 +350,28 @@ export interface VibeRunResult {
     failed_scenarios?: Array<{ name: string; route: string; status: 'fail' | 'error'; reason: string }>
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
+    /** How deeply each page was tested and why (mode fast/deep/auto/changed). */
+    plan?: PlanSummary
   }
+}
+
+export interface PlanPage {
+  route: string
+  depth: 'light' | 'standard' | 'thorough' | 'skipped'
+  reason: string
+}
+
+export interface PlanSummary {
+  mode: 'fast' | 'deep' | 'auto' | 'changed'
+  /** What the depths are based on. */
+  basis: 'every page' | 'code changes' | 'page fingerprints'
+  /** The ref (code) or time (fingerprints) compared against. */
+  since?: string
+  /** Changed files, relative to the repository root. */
+  changed_files?: string[]
+  notes: string[]
+  counts: Record<'light' | 'standard' | 'thorough' | 'skipped', number>
+  pages: PlanPage[]
 }
 
 export interface RunDiagnostic {

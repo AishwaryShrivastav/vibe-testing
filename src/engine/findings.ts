@@ -3,13 +3,9 @@ import type { PageExploration } from './browser/explorer.js'
 import { describeScenarioRetry } from './browser/runner.js'
 import { describeChange } from './browser/write-policy.js'
 
-/** Explorer findings that are real failures, as opposed to its own diagnostics. */
-const EXPLORER_FAILURE = /Server error \d{3}|Crash text|No response within|^Uncaught exception|^Console error|^Broken value|^Broken resource|Empty-state action|Submitted value not shown|^Total mismatch/
+import { isExplorerFailure } from './finding-kinds.js'
 
-/** True when an explorer error is a real failure in the app (not a navigation or discovery diagnostic). */
-export function isExplorerFailure(error: string): boolean {
-  return EXPLORER_FAILURE.test(error)
-}
+export { isExplorerFailure }
 
 const FINDING_KINDS: Array<[RegExp, string]> = [
   [/Server error \d{3}/, 'Server error'],

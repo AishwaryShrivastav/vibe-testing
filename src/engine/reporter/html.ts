@@ -1,4 +1,4 @@
-import { TestResult, ProductModel, CoverageGapSuggestion, VerificationStatus } from '../../types/index.js'
+import { TestResult, ProductModel, CoverageGapSuggestion, VerificationStatus, type PlanSummary } from '../../types/index.js'
 import { VibeConfig } from '../../types/config.js'
 import type { MemoryRecommendations } from '../memory/index.js'
 import type { PageExploration, InteractionOutcome, ApiObservation } from '../browser/explorer.js'
@@ -26,6 +26,8 @@ export interface ReportFindings {
    * relative to the report; defaults to <codebase>/.vibe.
    */
   reportDir?: string
+  /** How deeply each page was tested and why (mode fast/deep/auto/changed). */
+  plan?: PlanSummary
 }
 
 type ImageMap = Map<string, ReportImage>
@@ -128,6 +130,8 @@ ${renderBugsFound([...failed, ...errored], explorerFailures, { warnings: explore
     </div>
   </div>
 </div>
+
+${findings.plan ? renderPlanSection(findings.plan) : ''}
 
 ${renderWarningsSection(retryFindings, explorerWarnings)}
 
@@ -317,6 +321,44 @@ function renderAppChangesSection(explorations: PageExploration[]): string {
   </table></div>`
 }
 
+// ─── Test Plan Section ────────────────────────────────────────────────────────
+
+function formatTimings(timings: Record<string, number>): string {
+  return Object.entries(timings)
+    .filter(([, ms]) => ms >= 50)
+    .map(([phase, ms]) => `${phase} ${(ms / 1000).toFixed(1)}s`)
+    .join(' · ') || 'under 0.1s'
+}
+
+const DEPTH_ORDER: Record<string, number> = { thorough: 0, standard: 1, light: 2, skipped: 3 }
+
+/** Mode, what the depths were based on, and each page's depth with its reason. */
+function renderPlanSection(plan: PlanSummary): string {
+  const counts = (['thorough', 'standard', 'light', 'skipped'] as const)
+    .filter(depth => plan.counts[depth] > 0)
+    .map(depth => `${plan.counts[depth]} ${depth}`)
+    .join(' · ')
+  const rows = [...plan.pages]
+    .sort((a, b) => DEPTH_ORDER[a.depth] - DEPTH_ORDER[b.depth] || a.route.localeCompare(b.route))
+    .map(page => `<tr>
+      <td><code>${esc(page.route)}</code></td>
+      <td><span class="badge depth-${page.depth}">${page.depth}</span></td>
+      <td>${esc(page.reason)}</td>
+    </tr>`).join('\n')
+  const changed = plan.changed_files?.length
+    ? `<p class="section-note">Changed files (${plan.changed_files.length}): ${plan.changed_files.slice(0, 12).map(file => `<code>${esc(file)}</code>`).join(' ')}${plan.changed_files.length > 12 ? ' …' : ''}</p>`
+    : ''
+  const notes = plan.notes.length ? `<ul class="plan-notes">${plan.notes.map(note => `<li>${esc(note)}</li>`).join('')}</ul>` : ''
+  return `<h2>Test Plan</h2>
+  <p class="section-note">Mode <strong>${esc(plan.mode)}</strong>, based on ${esc(plan.basis)}${plan.since ? ` since <code>${esc(plan.since.slice(0, 24))}</code>` : ''}: ${esc(counts || 'no pages')}.</p>
+  ${changed}
+  ${notes}
+  ${rows ? `<div class="section-table"><table>
+    <thead><tr><th>Page</th><th>Depth</th><th>Why</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>` : ''}`
+}
+
 // ─── Exploration Section ──────────────────────────────────────────────────────
 
 function renderExplorationSection(explorations: PageExploration[], images: ImageMap): string {
@@ -364,6 +406,7 @@ function renderExplorationSection(explorations: PageExploration[], images: Image
       <div class="status-dot ${statusClass}"></div>
       <div class="title">${esc(exp.route)}</div>
       <div class="meta-tags">
+        ${exp.depth ? `<span class="badge depth-${exp.depth}" title="${esc(exp.depth_reason ?? '')}">${exp.depth}</span>` : ''}
         ${sessionTag}
         ${signInWall ? `<span class="badge session">sign-in required</span>` : `<span class="badge pass">${working} working</span>`}
         ${broken > 0 ? `<span class="badge fail">${broken} broken</span>` : ''}
@@ -377,6 +420,8 @@ function renderExplorationSection(explorations: PageExploration[], images: Image
       <div class="info-grid">
         <div class="info-item"><span class="info-label">Elements</span><span>${Object.entries(exp.elements_by_type).map(([k, v]) => `${v} ${k}s`).join(', ')}</span></div>
         <div class="info-item"><span class="info-label">API Calls</span><span>${exp.api_calls.length}${exp.api_calls.filter(a => a.isError).length > 0 ? ` (${exp.api_calls.filter(a => a.isError).length} errors)` : ''}</span></div>
+        ${exp.depth ? `<div class="info-item"><span class="info-label">Depth</span><span>${esc(exp.depth)}${exp.depth_reason ? ` — ${esc(exp.depth_reason)}` : ''}</span></div>` : ''}
+        ${exp.timings ? `<div class="info-item"><span class="info-label">Time per phase</span><span>${esc(formatTimings(exp.timings))}</span></div>` : ''}
       </div>
       ${findingsHtml}
       ${interactionRows ? `<table class="step-table">
@@ -731,6 +776,10 @@ code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-s
 .page-findings.fail li { background: var(--fail-bg); border-color: var(--fail); }
 .page-findings.warn li { background: var(--warn-bg); border-color: var(--warn); }
 .page-findings.dim li { background: var(--surface2); border-color: var(--border); color: var(--text-dim); }
+.badge.depth-thorough { background: var(--accent-bg); color: var(--accent); border: 1px solid rgba(99,102,241,0.3); }
+.badge.depth-standard { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.badge.depth-light, .badge.depth-skipped { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+.plan-notes { margin: 0 0 12px 18px; color: var(--text-dim); font-size: 13px; }
 footer { margin-top: 48px; padding: 20px 0; border-top: 1px solid var(--border); text-align: center; font-size: 12px; color: var(--text-dim); }
 ol { color: var(--text); }
 `

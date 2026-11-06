@@ -2,12 +2,16 @@ import { Page, BrowserContext, Response } from 'playwright'
 import { logger } from '../../utils/logger.js'
 import { ensureDir } from '../../utils/file.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
-import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
+import { describeSignal, detectCrashText, evidenceFromBody, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
 import { probeForms } from './boundary-probes.js'
 import { verifyCreatedValues } from './form-checks.js'
 import { detectBrokenValues, findEmptyState, newSuccessLines, visibleText, watchConsoleErrors, watchResourceFailures } from './page-checks.js'
 import { TotalsTracker, exerciseTotalActions } from './totals-check.js'
 import { DEFAULT_WRITE_POLICY, editFormKeys, formSkipReason, isWriteButton, keepInputReason, pageContext, watchWrites, type AppChange, type WritePolicy } from './write-policy.js'
+import { gotoSettled, trackRequests, waitForSettled } from './settle.js'
+import { controlSignature, pageFingerprint, type PageFingerprint } from './fingerprint.js'
+import { DEPTH_RANK, type Depth, type DepthDecision } from './depth.js'
+import { isExplorerFailure } from '../finding-kinds.js'
 import path from 'path'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +62,15 @@ export interface PageExploration {
   signed_in?: boolean
   /** Data-changing requests exploration made (what to clean up afterwards). */
   changes?: AppChange[]
+  /** How deeply the page was tested, and why (see depth.ts). */
+  depth?: Depth
+  depth_reason?: string
+  /** Milliseconds spent per phase: load, discover, interact, links, journey, create, probes. */
+  timings?: Record<string, number>
+  /** The page's structure, compared between runs to spot changed pages. */
+  fingerprint?: PageFingerprint
+  /** The page's non-link controls; equal signatures mean one template. */
+  control_signature?: string
   duration_ms: number
   screenshot_path?: string
 }
@@ -429,7 +442,7 @@ async function anyVisibleLinkTo(page: Page, href: string): Promise<boolean> {
   return false
 }
 
-async function testLink(page: Page, element: DiscoveredElement, originalUrl: string): Promise<InteractionOutcome> {
+async function testLink(page: Page, element: DiscoveredElement, originalUrl: string, serverSignals: ServerErrorSignal[] = []): Promise<InteractionOutcome> {
   const start = Date.now()
 
   if (!element.href || element.href === '#') {
@@ -469,20 +482,23 @@ async function testLink(page: Page, element: DiscoveredElement, originalUrl: str
     return { element: element.text, elementType: 'link', action: 'verify', result: 'error', details: `Link not visible on page`, duration_ms: Date.now() - start }
   }
 
-  // Actually navigate to verify the destination loads (use direct goto, not click —
-  // avoids the ambiguous text-match timeout that was causing 5s stalls)
+  // Fetch the destination with the page's session instead of navigating away
+  // and back: same status, redirects and server errors, a fraction of the
+  // time. (The in-app journey still navigates for real.)
   try {
     // Keep the query: some pages only render with it (/reservation/1?checkin=…).
     const destUrl = new URL(element.href, originalUrl).href
-    const resp = await page.goto(destUrl, { waitUntil: 'domcontentloaded', timeout: 8000 })
-    const status = resp?.status() ?? 0
-    const finalPath = (() => { try { return new URL(page.url()).pathname } catch { return '' } })()
+    const resp = await page.request.get(destUrl, { timeout: 8000, maxRedirects: 10, failOnStatusCode: false })
+    const status = resp.status()
+    const finalPath = (() => { try { return new URL(resp.url()).pathname } catch { return '' } })()
+    if (status >= 500) {
+      const body = await resp.text().catch(() => '')
+      serverSignals.push({ url: destUrl, method: 'GET', status, evidence: evidenceFromBody(body, status) })
+    }
+    await resp.dispose().catch(() => {})
 
     // Check if we got redirected to login (auth wall)
     const hitAuthWall = /\/(login|signin|auth)\b/.test(finalPath) && !linkPath.includes('login')
-
-    // Navigate back to original page
-    await gotoSettled(page, originalUrl, 8000).catch(() => {})
 
     if (hitAuthWall) {
       return { element: element.text, elementType: 'link', action: 'navigate', result: 'error', details: `Redirected to ${finalPath} (auth wall)`, duration_ms: Date.now() - start }
@@ -494,8 +510,6 @@ async function testLink(page: Page, element: DiscoveredElement, originalUrl: str
 
     return { element: element.text, elementType: 'link', action: 'navigate', result: 'navigated', details: `${linkPath} loaded (${status})`, duration_ms: Date.now() - start }
   } catch (err) {
-    // Navigate back on error
-    await gotoSettled(page, originalUrl, 8000).catch(() => {})
     return { element: element.text, elementType: 'link', action: 'navigate', result: 'error', details: `Navigation failed: ${(err as Error).message.slice(0, 100)}`, duration_ms: Date.now() - start }
   }
 }
@@ -595,21 +609,20 @@ export interface ExploreOptions {
   journey?: boolean
   /** What exploration may change in the app (see write-policy.ts). Default "safe". */
   writes?: WritePolicy
+  /** How much to run (see depth.ts). Default "thorough". */
+  depth?: Depth
+  /** Why this depth, shown in the report. */
+  depthReason?: string
+  /**
+   * Once the page's controls are known: a lighter decision when the page is
+   * one more instance of a template already tested (same route pattern or
+   * same controls under the same parent path).
+   */
+  templateCheck?: (signature: string) => DepthDecision | undefined
 }
 
 /** Input types that take no typed value. */
 const NOT_FILLABLE = /^(?:checkbox|radio|file|submit|button|reset|image|hidden|range|color)$/i
-
-/**
- * Open a URL and wait until it has rendered: DOMContentLoaded, then a quiet
- * network (bounded). Client-rendered apps fill in content after data loads,
- * so acting at DOMContentLoaded sees a half-rendered page.
- */
-async function gotoSettled(page: Page, url: string, timeout: number, settleMs = 4000) {
-  const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
-  await page.waitForLoadState('networkidle', { timeout: settleMs }).catch(() => {})
-  return response
-}
 
 export async function explorePage(
   context: BrowserContext,
@@ -621,6 +634,13 @@ export async function explorePage(
 ): Promise<PageExploration> {
   const startTime = Date.now()
   const page = await context.newPage()
+  trackRequests(page)
+  let depth: Depth = options.depth ?? 'thorough'
+  let depthReason = options.depthReason ?? 'every page thoroughly'
+  const timings: Record<string, number> = {}
+  let phaseStart = Date.now()
+  const endPhase = (name: string) => { timings[name] = Date.now() - phaseStart; phaseStart = Date.now() }
+  const origin = (() => { try { return new URL(baseUrl).origin } catch { return '' } })()
   const apiCalls: ApiObservation[] = []
   const errors: string[] = []
   const serverWatch = watchServerErrors(page)
@@ -674,14 +694,15 @@ export async function explorePage(
   } catch (err) {
     errors.push(`Navigation failed: ${(err as Error).message}`)
     await page.close().catch(() => {})
-    return { route, url: fullUrl, elements_discovered: 0, elements_by_type: {}, interactions: [], api_calls: apiCalls, errors, duration_ms: Date.now() - startTime }
+    return { route, url: fullUrl, elements_discovered: 0, elements_by_type: {}, interactions: [], api_calls: apiCalls, errors, depth, depth_reason: depthReason, duration_ms: Date.now() - startTime }
   }
+  endPhase('load')
 
   // Check for auth redirect
   const currentPath = (() => { try { return new URL(page.url()).pathname } catch { return '' } })()
   if (currentPath !== route && /\/(login|signin|auth)\b/.test(currentPath)) {
     await page.close().catch(() => {})
-    return { route, url: fullUrl, elements_discovered: 0, elements_by_type: {}, interactions: [], api_calls: apiCalls, errors: [`Redirected to ${currentPath} — sign-in required`], redirected_to: currentPath, duration_ms: Date.now() - startTime }
+    return { route, url: fullUrl, elements_discovered: 0, elements_by_type: {}, interactions: [], api_calls: apiCalls, errors: [`Redirected to ${currentPath} — sign-in required`], redirected_to: currentPath, depth, depth_reason: depthReason, duration_ms: Date.now() - startTime }
   }
 
   // Discover all interactive elements
@@ -706,6 +727,16 @@ export async function explorePage(
 
   logger.dim(`    ${elements.length} elements: ${Object.entries(elementsByType).map(([k, v]) => `${v} ${k}s`).join(', ')}`)
 
+  // One more page of a template already tested gets the light checks only.
+  const signature = controlSignature(elements)
+  const template = options.templateCheck?.(signature)
+  if (template && DEPTH_RANK[template.depth] < DEPTH_RANK[depth]) {
+    depth = template.depth
+    depthReason = template.reason
+  }
+  const fingerprint = await pageFingerprint(page, elements, apiCalls, origin)
+  endPhase('discover')
+
   const interactions: InteractionOutcome[] = []
   const brokenValues = new Map<string, string>()   // finding -> where
   const placeholderValues = new Map<string, string>()
@@ -723,9 +754,14 @@ export async function explorePage(
 
   // Writes the page makes while loading are its own; from here on they're ours.
   writeLog.startTracking()
+  const interact = depth !== 'light'
+  const thorough = depth === 'thorough'
+  const screenshotPath = path.join(screenshotsDir, `explore-${route.replace(/[/?&=]/g, '_').replace(/^_/, '')}.png`)
+  await ensureDir(screenshotsDir)
+  if (!interact) await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
 
   // ── Phase 1: Tabs (safe, helps reveal content) ──
-  const tabs = elements.filter(e => e.type === 'tab' && !e.disabled && !isBlocked(e))
+  const tabs = interact ? elements.filter(e => e.type === 'tab' && !e.disabled && !isBlocked(e)) : []
   for (const tab of tabs.slice(0, 12)) {
     writeLog.setAction(`tab "${tab.text}"`)
     interactions.push(await testTab(page, tab))
@@ -733,7 +769,7 @@ export async function explorePage(
 
   // ── Phase 2: Inputs (fill with test data) ──
   // Checkboxes and radios are toggled in their own phase; they can't be filled.
-  const inputs = elements.filter(e => e.type === 'input' && !e.disabled && !isBlocked(e) && !NOT_FILLABLE.test(e.inputType ?? ''))
+  const inputs = interact ? elements.filter(e => e.type === 'input' && !e.disabled && !isBlocked(e) && !NOT_FILLABLE.test(e.inputType ?? '')) : []
   // Never overwrite what is already there unless explore.writes is "all": a
   // later Save would store the test values over real data.
   const editForms = writes === 'all' || inputs.length === 0 ? new Set<string>() : await editFormKeys(page)
@@ -748,7 +784,7 @@ export async function explorePage(
   }
 
   // ── Phase 3: Checkboxes / toggles ──
-  const checkboxes = elements.filter(e => e.type === 'checkbox' && !e.disabled && !isBlocked(e))
+  const checkboxes = interact ? elements.filter(e => e.type === 'checkbox' && !e.disabled && !isBlocked(e)) : []
   for (const cb of checkboxes.slice(0, 10)) {
     writeLog.setAction(`toggle "${cb.text || cb.selector}"`)
     interactions.push(await testCheckbox(page, cb))
@@ -756,26 +792,32 @@ export async function explorePage(
 
   // ── Phase 4: Buttons (click each, observe response) ──
   const buttons = elements.filter(e => e.type === 'button' && !e.disabled && !isBlocked(e))
-  for (const btn of buttons.slice(0, 20)) {
+  for (const btn of interact ? buttons.slice(0, 20) : []) {
     if (writes === 'none' && await isWriteButton(page, btn.selector, btn.text)) {
       interactions.push({ element: btn.text, elementType: 'button', action: 'click', result: 'skipped', details: 'Skipped — data-changing action (explore.writes: none)', duration_ms: 0 })
+      continue
+    }
+    if (!thorough && await isWriteButton(page, btn.selector, btn.text)) {
+      interactions.push({ element: btn.text, elementType: 'button', action: 'click', result: 'skipped', details: `Skipped — data-changing action (${depth} depth)`, duration_ms: 0 })
       continue
     }
     writeLog.setAction(`click "${btn.text}"`)
     interactions.push(await testButton(page, btn, fullUrl, serverWatch.signals))
   }
-  await scanValues(route)
+  if (interact) await scanValues(route)
+  endPhase('interact')
 
   // ── Phase 5: Links (verify + follow internal ones) ──
   const links = elements.filter(e => e.type === 'link' && !isBlocked(e))
-  for (const link of links.slice(0, 12)) {
+  for (const link of interact ? links.slice(0, 12) : []) {
     writeLog.setAction(`link "${link.text}"`)
-    interactions.push(await testLink(page, link, fullUrl))
+    interactions.push(await testLink(page, link, fullUrl, serverWatch.signals))
   }
+  endPhase('links')
 
   // ── Phase 5b: In-app journey — repeat "add" actions, then move through the
   // app by clicking (client-side navigation keeps app state, like a user) ──
-  if (options.journey !== false) {
+  if (thorough && options.journey !== false) {
     writeLog.setAction('in-app journey')
     // "none": follow links only — repeating "add" actions and clicking
     // actions on pages with a total both create or change records.
@@ -784,26 +826,25 @@ export async function explorePage(
     interactions.push(...await inAppJourney(page, fullUrl, writes === 'none' ? [] : buttons, links, isBlocked, scanValues,
       (where: string) => exerciseTotalActions(page, totals, where, canClickForTotals)))
   }
+  endPhase('journey')
 
   // Take final screenshot
-  await ensureDir(screenshotsDir)
-  const screenshotPath = path.join(screenshotsDir, `explore-${route.replace(/\//g, '_').replace(/^_/, '')}.png`)
-  try {
-    await page.screenshot({ path: screenshotPath, fullPage: true })
-  } catch { /* non-critical */ }
+  if (interact) await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
 
   // ── Phase 6: Create-then-verify on add/create/save forms ──
-  if (options.createChecks !== false) {
+  if (thorough && options.createChecks !== false) {
     writeLog.setAction('create-then-verify')
     interactions.push(...await verifyCreatedValues(page, fullUrl, blocklist, writeGate(page, writes)))
   }
+  endPhase('create')
 
   // ── Phase 7: Boundary input probes on forms (G9) ──
-  if (options.boundaryProbes !== false) {
+  if (thorough && options.boundaryProbes !== false) {
     writeLog.setAction('boundary probes')
     const probes = await probeForms(page, fullUrl, serverWatch.signals, blocklist, writeGate(page, writes))
     interactions.push(...probes)
   }
+  endPhase('probes')
 
   // Every server failure is reported once (page load, clicks, probes), plus
   // crash text, hangs and functional failures that interactions caused.
@@ -840,6 +881,11 @@ export async function explorePage(
     errors,
     warnings,
     ...(writeLog.changes.length > 0 ? { changes: writeLog.changes } : {}),
+    depth,
+    depth_reason: depthReason,
+    timings,
+    fingerprint,
+    control_signature: signature,
     duration_ms: Date.now() - startTime,
     screenshot_path: screenshotPath,
   }
@@ -874,8 +920,7 @@ async function inAppJourney(
   const start = Date.now()
   const origin = (() => { try { return new URL(pageUrl).origin } catch { return '' } })()
   try {
-    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-    await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
+    await gotoSettled(page, pageUrl, 15000)
   } catch {
     return outcomes
   }
@@ -904,14 +949,22 @@ async function inAppJourney(
     }
   }).slice(0, 6)
 
+  // A page that starts empty (a cart, a till, a basket) can only be exercised
+  // with something in it: add an item on a linked page, come back in-app (so
+  // the app keeps its state), then use the page's own actions and re-check
+  // its total.
+  if (addButtons.length === 0 && exerciseTotals && findEmptyState(await visibleText(page))) {
+    outcomes.push(...await seedFromLinkedPage(page, pageUrl, internal, isBlocked, scanValues, exerciseTotals, start))
+    await gotoSettled(page, pageUrl, 15000).catch(() => {})
+  }
+
   for (const link of internal) {
     const path = new URL(link.href!).pathname
     const locator = page.locator(`a[href="${link.href}"], a[href="${path}"]`).first()
     if (!await locator.isVisible({ timeout: 800 }).catch(() => false)) continue
     try {
       await locator.click({ timeout: 3000 })
-      await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(300)
+      await waitForSettled(page, { capMs: 4000 })
       await scanValues(`${path} (via in-app navigation)`)
       outcomes.push({ element: link.text || path, elementType: 'link', action: 'journey: navigate', result: 'navigated', details: `Opened ${path} in-app`, duration_ms: Date.now() - start })
       if (exerciseTotals) outcomes.push(...await exerciseTotals(`${path} (via in-app navigation)`))
@@ -922,7 +975,81 @@ async function inAppJourney(
   return outcomes
 }
 
+/**
+ * From an empty page: open linked pages in-app until one has an "add" action,
+ * click it, return to the page in-app and exercise it (see inAppJourney).
+ */
+async function seedFromLinkedPage(
+  page: Page,
+  pageUrl: string,
+  internal: DiscoveredElement[],
+  isBlocked: (el: DiscoveredElement) => boolean,
+  scanValues: (where: string) => Promise<void>,
+  exerciseTotals: (where: string) => Promise<InteractionOutcome[]>,
+  start: number,
+): Promise<InteractionOutcome[]> {
+  const startPath = new URL(pageUrl).pathname
+  for (const link of internal.slice(0, 3)) {
+    const linkPath = new URL(link.href!).pathname
+    try {
+      const out = page.locator(`a[href="${link.href}"], a[href="${linkPath}"]`).first()
+      if (!await out.isVisible({ timeout: 800 }).catch(() => false)) continue
+      await out.click({ timeout: 3000 })
+      await waitForSettled(page, { capMs: 4000 })
+      const add = page.getByRole('button', { name: ADD_ACTION }).first()
+      const label = (await add.innerText({ timeout: 800 }).catch(() => '')).trim()
+      const blocked = !label || isDestructiveAction(label) || isBlocked({ tag: 'button', type: 'button', text: label, selector: '', disabled: false })
+      const back = page.locator(`a[href="${startPath}"], a[href="${new URL(pageUrl).origin}${startPath}"]`).first()
+      if (blocked || !await add.isVisible().catch(() => false) || !await back.isVisible({ timeout: 800 }).catch(() => false)) {
+        await gotoSettled(page, pageUrl, 15000)
+        continue
+      }
+      await add.click({ timeout: 3000 })
+      await page.waitForTimeout(250)
+      await back.click({ timeout: 3000 })
+      await waitForSettled(page, { capMs: 4000 })
+      const where = `${startPath} after adding an item on ${linkPath}`
+      const result: InteractionOutcome[] = [{
+        element: label, elementType: 'button', action: 'journey: add elsewhere, return', result: 'success',
+        details: `Clicked "${label}" on ${linkPath}, back on ${startPath} in-app`, duration_ms: Date.now() - start,
+      }]
+      await scanValues(where)
+      result.push(...await exerciseTotals(where))
+      return result
+    } catch {
+      await gotoSettled(page, pageUrl, 15000).catch(() => {})
+    }
+  }
+  return []
+}
+
 // ─── Multi-page exploration orchestrator ──────────────────────────────────────
+
+export interface ExploreAllOptions extends ExploreOptions {
+  /** Depth per route; "skip" leaves the page out. Default: every page thoroughly. */
+  decide?: (route: string) => DepthDecision | 'skip'
+  /** The route pattern a concrete route belongs to (/tutorial/:page), for same-template grouping. */
+  templateOf?: (route: string) => string | undefined
+  /** After a light or standard pass: a reason to test the page thoroughly now (e.g. its fingerprint changed). */
+  recheck?: (exploration: PageExploration) => string | undefined
+  /** Routes whose scenarios failed: tested thoroughly whatever was planned. */
+  failedRoutes?: Set<string>
+  /** Called for each route the plan skipped. */
+  onSkip?: (route: string) => void
+  /** Group same-template pages (default true). */
+  groupTemplates?: boolean
+}
+
+/** Parent path for template grouping: only below the top level ("/tutorial" for "/tutorial/a1"). */
+function templateParent(route: string): string | undefined {
+  const segments = route.split('?')[0].split('/').filter(Boolean)
+  return segments.length >= 2 ? `/${segments.slice(0, -1).join('/')}` : undefined
+}
+
+/** A light or standard pass found a real problem in the app. */
+function hasProblem(exploration: PageExploration): boolean {
+  return exploration.errors.some(isExplorerFailure)
+}
 
 export async function exploreAllPages(
   context: BrowserContext,
@@ -930,14 +1057,52 @@ export async function exploreAllPages(
   baseUrl: string,
   screenshotsDir: string,
   blocklist?: ActionBlocklist,
-  options: ExploreOptions = {},
+  options: ExploreAllOptions = {},
 ): Promise<PageExploration[]> {
   const explorations: PageExploration[] = []
+  const templateFirst = new Map<string, string>()
 
   for (const route of routes) {
-    logger.info(`  Exploring: ${route}`)
+    const planned = options.decide ? options.decide(route) : { depth: 'thorough' as Depth, reason: 'every page thoroughly' }
+    if (planned === 'skip') {
+      options.onSkip?.(route)
+      continue
+    }
+    let decision: DepthDecision = planned
+    if (decision.depth !== 'thorough' && options.failedRoutes?.has(route)) {
+      decision = { depth: 'thorough', reason: `upgraded after a failing scenario (planned ${planned.depth}: ${planned.reason})` }
+    }
+    const pattern = options.templateOf?.(route)
+    const templateCheck = options.groupTemplates === false ? undefined : (signature: string): DepthDecision | undefined => {
+      const parent = templateParent(route)
+      const key = pattern ? `pattern ${pattern}` : parent ? `${parent}/* ${signature}` : undefined
+      if (!key) return undefined
+      const first = templateFirst.get(key)
+      if (!first) {
+        templateFirst.set(key, route)
+        return undefined
+      }
+      return { depth: 'light', reason: `same template as ${first}${pattern ? ` (${pattern})` : ''}` }
+    }
+
+    logger.info(`  Exploring: ${route} (${decision.depth})`)
     try {
-      const exploration = await explorePage(context, route, baseUrl, screenshotsDir, blocklist, options)
+      let exploration = await explorePage(context, route, baseUrl, screenshotsDir, blocklist, {
+        ...options, depth: decision.depth, depthReason: decision.reason, templateCheck,
+      })
+      // Safety net: a lighter pass that found a problem, or a page that changed
+      // since the last run, gets the full treatment now.
+      if (exploration.depth !== 'thorough' && !exploration.redirected_to) {
+        const upgrade = hasProblem(exploration)
+          ? `upgraded after a problem at ${exploration.depth} depth`
+          : options.recheck?.(exploration)
+        if (upgrade) {
+          logger.dim(`    Re-testing thoroughly: ${upgrade}`)
+          exploration = await explorePage(context, route, baseUrl, screenshotsDir, blocklist, {
+            ...options, depth: 'thorough', depthReason: upgrade,
+          })
+        }
+      }
       explorations.push(exploration)
 
       const tested = exploration.interactions.filter(i => i.result !== 'skipped').length
@@ -945,8 +1110,9 @@ export async function exploreAllPages(
       const failed = exploration.interactions.filter(i => i.result === 'error').length
       const apis = exploration.api_calls.length
       const apiErrors = exploration.api_calls.filter(a => a.isError).length
+      const phases = Object.entries(exploration.timings ?? {}).filter(([, ms]) => ms >= 50).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(1)}s`).join(', ')
 
-      logger.dim(`    ${tested} tested, ${passed} working, ${failed} broken, ${apis} API calls${apiErrors > 0 ? ` (${apiErrors} errors)` : ''}`)
+      logger.dim(`    ${exploration.depth}: ${tested} tested, ${passed} working, ${failed} broken, ${apis} API calls${apiErrors > 0 ? ` (${apiErrors} errors)` : ''}${phases ? ` — ${phases}` : ''}`)
     } catch (err) {
       logger.warn(`    Exploration crashed: ${(err as Error).message}`)
       explorations.push({
@@ -957,6 +1123,8 @@ export async function exploreAllPages(
         interactions: [],
         api_calls: [],
         errors: [`Crash: ${(err as Error).message}`],
+        depth: decision.depth,
+        depth_reason: decision.reason,
         duration_ms: 0,
       })
     }

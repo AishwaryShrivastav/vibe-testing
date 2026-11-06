@@ -94,7 +94,8 @@ export async function parseExpressRoutes(codebasePath: string): Promise<Route[]>
         const method = route.method === 'all' ? 'GET' : route.method.toUpperCase() as Route['method']
         const key = `${method} ${fullPath}`
         if (routes.has(key)) continue
-        const body = await handlerBody(route.handler, info, parsed, codebasePath)
+        const handler = await handlerSource(route.handler, info, parsed, codebasePath)
+        const body = handler?.body
         routes.set(key, {
           path: fullPath,
           method,
@@ -102,6 +103,7 @@ export async function parseExpressRoutes(codebasePath: string): Promise<Route[]>
           requires_auth: mount.auth || requiresAuth(route, info, fullPath, body),
           dynamic_segments: dynamicSegments(fullPath),
           file_path: path.join(codebasePath, info.file),
+          ...(handler?.file && handler.file !== info.file ? { handler_file: path.join(codebasePath, handler.file) } : {}),
         })
       }
     }
@@ -291,29 +293,29 @@ function authUseBefore(info: ParsedFile, receiver: string, index: number): boole
  * The handler's source: inline functions as written; `handler.method` or a bare
  * name resolved to its definition in this file or a module it imports.
  */
-async function handlerBody(
+async function handlerSource(
   handler: string,
   info: ParsedFile,
   parsed: Map<string, ParsedFile>,
   codebasePath: string,
-): Promise<string | undefined> {
+): Promise<{ body: string; file: string } | undefined> {
   const text = handler.trim()
-  if (/=>|^(async\s+)?function\b/.test(text)) return text
+  if (/=>|^(async\s+)?function\b/.test(text)) return { body: text, file: info.file }
   const name = /([A-Za-z_$][\w$]*)\s*$/.exec(text.replace(/\.bind\s*\([^)]*\)$/, ''))?.[1]
   if (!name) return undefined
 
-  const searchIn = [info.content]
+  const searchIn: Array<{ file: string; content: string }> = [{ file: info.file, content: info.content }]
   for (const file of new Set(info.imports.values())) {
     const imported = parsed.get(file)?.content
       ?? await readFile(path.join(codebasePath, file)).then(stripComments).catch(() => undefined)
-    if (imported) searchIn.push(imported)
+    if (imported) searchIn.push({ file, content: imported })
   }
   const definition = new RegExp(String.raw`(?:\b${escape(name)}\s*[:=]\s*(?:async\s*)?(?:function\b[^{]*|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)|(?:async\s+)?function\s+${escape(name)}\s*\([^)]*\)|^\s*(?:async\s+)?${escape(name)}\s*\([^)]*\)\s*)\s*\{`, 'm')
-  for (const source of searchIn) {
-    const m = definition.exec(source)
+  for (const { file, content } of searchIn) {
+    const m = definition.exec(content)
     if (!m) continue
-    const body = readBalanced(source, m.index + m[0].length - 1, '{', '}')
-    if (body !== undefined) return body.slice(0, 8000)
+    const body = readBalanced(content, m.index + m[0].length - 1, '{', '}')
+    if (body !== undefined) return { body: body.slice(0, 8000), file }
   }
   return undefined
 }

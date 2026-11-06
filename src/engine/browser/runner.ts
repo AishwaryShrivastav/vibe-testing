@@ -5,7 +5,8 @@ import { describeLoginRetry, performLoginDetailed, type LoginOutcome } from './a
 import { checkLogoutRoundTrip } from './session-checks.js'
 import { checkCrossUserAccess } from './access-checks.js'
 import { verifyResult } from './verifier.js'
-import { exploreAllPages, PageExploration } from './explorer.js'
+import { exploreAllPages, PageExploration, type ExploreAllOptions } from './explorer.js'
+import { basicPlan, type TestPlan } from '../test-plan.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
 import { logger } from '../../utils/logger.js'
 import { ensureDir } from '../../utils/file.js'
@@ -19,13 +20,19 @@ export interface ExecutionResult {
   explorations: PageExploration[]
   /** Operations that only succeeded on a retry (e.g. a login accepted on the second submission). */
   retry_findings: string[]
+  /** Pages the plan left out (mode "changed"). */
+  skipped_routes?: string[]
+  /** Why the logout round-trip / cross-user checks didn't run, when they didn't. */
+  session_checks_note?: string
 }
 
 export async function executeScenarios(
   scenarios: TestScenario[],
   config: VibeConfig,
   projectRoot: string,
-  guidance?: VibeGuidance | null
+  guidance?: VibeGuidance | null,
+  /** Depth per page (see test-plan.ts). Default: from config.mode, fast → light, else thorough. */
+  plan: TestPlan = basicPlan(config.mode === 'fast' ? 'fast' : 'deep'),
 ): Promise<ExecutionResult> {
   if (scenarios.length === 0) throw new Error('No scenarios to execute: empty scenario batch')
   const screenshotsDir = path.join(projectRoot, '.vibe', 'screenshots')
@@ -43,7 +50,23 @@ export async function executeScenarios(
     const finding = describeLoginRetry(outcome, 'Configured login')
     if (finding) retryFindings.add(finding)
   }
-  const done = (): ExecutionResult => ({ results, explorations, retry_findings: [...retryFindings] })
+  const skippedRoutes = new Set<string>()
+  let sessionChecksNote: string | undefined
+  const done = (): ExecutionResult => ({
+    results, explorations, retry_findings: [...retryFindings],
+    ...(skippedRoutes.size > 0 ? { skipped_routes: [...skippedRoutes] } : {}),
+    ...(sessionChecksNote ? { session_checks_note: sessionChecksNote } : {}),
+  })
+  // Pages are explored at the plan's depth; a page whose scenario failed is
+  // explored thoroughly whatever was planned.
+  const exploreOptions = (): ExploreAllOptions => ({
+    writes: config.explore?.writes,
+    decide: plan.decide,
+    templateOf: plan.templateOf,
+    recheck: plan.recheck,
+    failedRoutes: new Set(results.filter(result => result.status !== 'pass').map(result => result.scenario.route)),
+    onSkip: route => skippedRoutes.add(route),
+  })
 
   const unauthScenarios = scenarios.filter(s => !s.requires_auth)
   const authScenarios = scenarios.filter(s => s.requires_auth)
@@ -84,7 +107,7 @@ export async function executeScenarios(
     const publicRoutes = [...new Set(unauthScenarios.map(s => s.route).filter(r => !r.includes('redirect')))]
     if (publicRoutes.length > 0) {
       logger.section(`Exploring ${publicRoutes.length} public pages (element-by-element)`)
-      const publicExplorations = await exploreAllPages(unauthCtx, publicRoutes, config.url, screenshotsDir, blocklist, { writes: config.explore?.writes })
+      const publicExplorations = await exploreAllPages(unauthCtx, publicRoutes, config.url, screenshotsDir, blocklist, exploreOptions())
       explorations.push(...publicExplorations)
     }
 
@@ -290,7 +313,7 @@ export async function executeScenarios(
       const protectedRoutes = [...new Set(authScenarios.map(s => s.route))]
       if (protectedRoutes.length > 0) {
         logger.section(`Exploring ${protectedRoutes.length} pages (element-by-element)`)
-        const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist, { writes: config.explore?.writes })
+        const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist, exploreOptions())
         // Signed in, a bounce to sign-in means the session was lost, not that the page is protected.
         explorations.push(...authExplorations.map(exploration => ({
           ...exploration,
@@ -301,22 +324,30 @@ export async function executeScenarios(
         })))
       }
 
-      // ── Phase 4a: Cross-user access (only with two configured accounts; own sessions) ──
-      const crossUser = await checkCrossUserAccess(browser2, config, protectedRoutes, screenshotsDir, blocklist)
-      if (crossUser) {
-        results.push(crossUser)
-        logResult(crossUser)
-      }
-
-      // ── Phase 4b: Logout round-trip (own session, so the others stay signed in) ──
-      // The check confirms which of these really asks a signed-out visitor to sign in.
-      const protectedPages = protectedRoutes.filter(route => !/[:[*]/.test(route))
-      if (protectedPages.length > 0) {
-        const logout = await checkLogoutRoundTrip(browser2, config, protectedPages, screenshotsDir, blocklist)
-        if (logout) {
-          results.push(logout)
-          logResult(logout)
+      // Session checks belong to thorough testing: skipped when no page was
+      // tested thoroughly (mode fast, or auto with only light pages).
+      if (plan.sessionChecks(explorations)) {
+        // ── Phase 4a: Cross-user access (only with two configured accounts; own sessions) ──
+        const crossUser = await checkCrossUserAccess(browser2, config, protectedRoutes, screenshotsDir, blocklist)
+        if (crossUser) {
+          results.push(crossUser)
+          logResult(crossUser)
         }
+
+        // ── Phase 4b: Logout round-trip (own session, so the others stay signed in) ──
+        // The check confirms which of these really asks a signed-out visitor to sign in.
+        const protectedPages = protectedRoutes.filter(route => !/[:[*]/.test(route))
+        if (protectedPages.length > 0) {
+          const logout = await checkLogoutRoundTrip(browser2, config, protectedPages, screenshotsDir, blocklist)
+          if (logout) {
+            results.push(logout)
+            logResult(logout)
+          }
+        }
+      } else {
+        // fast mode says so in its own plan note.
+        if (plan.mode !== 'fast') sessionChecksNote = `logout round-trip and cross-user checks skipped: no page was tested thoroughly (mode ${plan.mode})`
+        logger.dim('  Session checks (logout round-trip, cross-user) skipped for this mode')
       }
 
       await authCtx.close().catch(() => {})
