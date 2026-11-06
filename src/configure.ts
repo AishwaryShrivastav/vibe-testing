@@ -65,7 +65,8 @@ export async function configureProject(input: {
   const server = await detectLiveServer({
     codebasePath: scanPath,
     explicitUrl: requestedUrl,
-    configuredUrl: configuredUrl ?? inferredUrl,
+    configuredUrl,
+    inferredUrl,
   })
   const effectiveUrl = server.url ?? requestedUrl ?? configuredUrl ?? inferredUrl
 

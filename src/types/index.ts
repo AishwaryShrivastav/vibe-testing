@@ -12,6 +12,7 @@ export type Framework =
 export type ServerCandidateSource =
   | 'explicit-url'
   | 'configured-url'
+  | 'inferred-url'
   | 'script'
   | 'config'
   | 'active-port'
@@ -41,6 +42,8 @@ export interface ServerDetection {
   evidence: ServerEvidence[]
   attemptedCandidates: ServerCandidateAttempt[]
   diagnostics: ServerDiscoveryDiagnostic[]
+  /** Why a user-supplied URL could not be used. Set only when no server was selected for it. */
+  failure?: string
 }
 
 export type AuthMethod = 'oauth' | 'password' | 'unknown' | 'none'

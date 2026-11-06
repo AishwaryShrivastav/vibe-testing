@@ -1195,7 +1195,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
         status: 'not-started',
         pages_observed: 0,
         attempted_paths: configured.server.attemptedCandidates.map(candidate => candidate.url),
-        reason: 'No reachable HTML server was detected.',
+        reason: configured.server.failure ?? 'No reachable HTML server was detected.',
       },
       auth: configured.auth,
       next_action: `Start the application at ${configured.server.configuredUrl} or pass its active URL, then retry run_full_test.`,
