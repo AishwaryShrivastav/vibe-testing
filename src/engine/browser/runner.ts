@@ -1,4 +1,4 @@
-import { chromium, BrowserContext, Page, Locator } from 'playwright'
+import { chromium, BrowserContext, Page, Locator, type Response } from 'playwright'
 import { TestScenario, TestResult, TestStep, StepLog, ApiError } from '../../types/index.js'
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
 import { performLogin } from './auth.js'
@@ -492,19 +492,24 @@ async function executeStep(page: Page, step: TestStep, baseUrl: string, apiError
 
       if (isSubmit) {
         const urlBefore = page.url()
-        // Click and capture API response in parallel (3s grace for API to respond)
-        const responsePromise = page.waitForResponse(
-          resp => (resp.url().includes('/api') || resp.url().includes('/auth')) && resp.status() > 0,
-          { timeout: 8000 }
-        ).catch(() => null)
+        // Collect API responses while the submit settles. (Waiting separately
+        // for one with an 8s timeout stalled every submit whose form posts
+        // somewhere other than /api or /auth, e.g. a server-rendered app.)
+        const apiResponses: Response[] = []
+        const onResponse = (resp: Response) => {
+          if ((resp.url().includes('/api') || resp.url().includes('/auth')) && resp.status() > 0) apiResponses.push(resp)
+        }
+        page.on('response', onResponse)
+        try {
+          await locator.click({ timeout })
+          // Wait for the page to settle (URL change, network idle, or toast)
+          await waitForSubmitSettled(page, urlBefore, timeout)
+        } finally {
+          page.off('response', onResponse)
+        }
 
-        await locator.click({ timeout })
-
-        // Wait for the page to settle (URL change, network idle, or toast)
-        await waitForSubmitSettled(page, urlBefore, timeout)
-
-        // Check if we got an API response
-        const apiResp = await responsePromise
+        // Check the first API response the submit produced
+        const apiResp = apiResponses[0]
         if (apiResp && apiResp.status() >= 400 && apiErrors) {
           const body = await apiResp.text().catch(() => '')
           apiErrors.push({ url: apiResp.url(), status: apiResp.status(), body: body.slice(0, 200) })
