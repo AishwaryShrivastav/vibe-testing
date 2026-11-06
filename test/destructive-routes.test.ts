@@ -14,4 +14,13 @@ describe('static routes that act when opened are never test pages', () => {
     )
     expect(gaps.map(g => g.route).sort()).toEqual(['/dashboard', '/memos'])
   })
+
+  it('drops route patterns that cannot be opened as written', () => {
+    const gaps = analyzeGaps(
+      [route('/rooms'), route('/rooms/[id]'), route('/users/:userId'), route('/docs/[...slug]'), route('/files/*'), route('/rooms/101')],
+      {},
+      memory,
+    )
+    expect(gaps.map(g => g.route).sort()).toEqual(['/rooms', '/rooms/101'])
+  })
 })

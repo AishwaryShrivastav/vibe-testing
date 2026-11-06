@@ -57,3 +57,23 @@ describe('console errors: requests cut off by navigation are not app errors', ()
     }
   })
 })
+
+describe('console errors: browser policy notices are not app errors', () => {
+  it('ignores "Permissions policy violation" but keeps app errors', async () => {
+    const fx = await startBrowserFixture({ '/': page(`<script>
+      console.error('Permissions policy violation: compute-pressure is not allowed in this document.')
+      console.error('TypeError: cart is undefined')
+    </script>`) })
+    const tab = await fx.browser.newPage()
+    try {
+      const watch = watchConsoleErrors(tab)
+      await tab.goto(fx.baseUrl)
+      await tab.waitForTimeout(300)
+      await watch.settle()
+      watch.stop()
+      expect(watch.messages).toEqual(['TypeError: cart is undefined'])
+    } finally {
+      await fx.close()
+    }
+  })
+})

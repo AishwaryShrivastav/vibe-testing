@@ -15,6 +15,9 @@ const CONSOLE_NOISE = [
   /\[HMR\]|\[vite\]/i,
   // Network failures are reported by watchResourceFailures with their URL.
   /^Failed to load resource/i,
+  // The browser reporting a feature an embedded frame asked for and was denied
+  // (e.g. a video embed probing compute-pressure); not the app's own code.
+  /^Permissions policy violation\b/i,
 ]
 
 // ── Broken and unavailable resources ────────────────────────────────────────

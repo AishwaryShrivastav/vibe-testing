@@ -9,6 +9,12 @@ let scenarioCounter = 1
 const LOGIN_KEYWORDS = ['login', 'signin', 'sign-in', 'log-in']
 const REGISTER_KEYWORDS = ['register', 'signup', 'sign-up']
 
+/** Identity field of a login form not read from code: email, username or login ID. */
+const IDENTITY_FALLBACK_SELECTOR = [
+  '[type="email"]', '[name="email"]', '[autocomplete="username"]',
+  '[name*="user" i]', '[id*="user" i]', '[name*="login" i]', '[id*="login" i]',
+].join(', ')
+
 function isLoginRoute(routePath: string, configuredLoginUrl?: string): boolean {
   if (configuredLoginUrl && routePath === configuredLoginUrl) return true
   const lower = routePath.toLowerCase()
@@ -316,7 +322,9 @@ function generateAuthFlowScenarios(
       }
     } else {
       loginSteps.push(
-        { action: 'fill', selector: '[type="email"], [name="email"]', value: testEmail, description: `Fill email with ${testEmail}` },
+        // The form wasn't read from code: match the account identity however
+        // it is asked for (email, username, login ID).
+        { action: 'fill', selector: IDENTITY_FALLBACK_SELECTOR, value: testEmail, description: `Fill email/username with ${testEmail}` },
         { action: 'fill', selector: '[type="password"], [name="password"]', value: testPassword, description: 'Fill password' },
       )
     }
@@ -332,17 +340,20 @@ function generateAuthFlowScenarios(
 
   const publicPaths = ['login', 'signin', 'sign-in', 'register', 'signup', 'sign-up', 'forgot', 'reset', 'privacy', 'terms', 'about']
   const memoryAuthRoutes = recs?.auth_routes ?? new Set<string>()
+  // Known to need sign-in: marked in code (auth middleware, guards) or learned on a past run.
+  const knownProtected = (route: string) =>
+    memoryAuthRoutes.has(route) || !!behaviours.find(b => b.route.path === route)?.route.requires_auth
   const protectedRoutes = gaps.filter(g => {
-    if (memoryAuthRoutes.has(g.route)) return true
-    const routeBehaviour = behaviours.find(b => b.route.path === g.route)
     const isPublicRoute = publicPaths.some(p => g.route.toLowerCase().includes(p))
-    const markedAuth = routeBehaviour?.route.requires_auth
-    return markedAuth || (!isPublicRoute && g.route !== '/')
+    return knownProtected(g.route) || (!isPublicRoute && g.route !== '/')
   })
 
   for (const pg of protectedRoutes) protectedPaths.add(pg.route)
 
-  for (const protectedGap of protectedRoutes.slice(0, 2)) {
+  // Asserting a redirect is only fair where protection is known: a route merely
+  // guessed as protected (e.g. /cookie) would fail as a false "bug". Guessed
+  // routes still run signed in.
+  for (const protectedGap of protectedRoutes.filter(g => knownProtected(g.route)).slice(0, 2)) {
     scenarios.push(makeScenario(protectedGap.route, `${protectedGap.route} redirects to login when unauthenticated`, [
       { action: 'navigate', url: protectedGap.route, description: `Navigate to ${protectedGap.route} without authentication` },
       { action: 'wait', value: '2000', description: 'Wait for redirect' },

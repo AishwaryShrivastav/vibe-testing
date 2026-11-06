@@ -126,13 +126,17 @@ async function crawlPass(
 ): Promise<{ paths: string[]; attempted: string[] }> {
   const page = await context.newPage()
   const queue: Array<{ path: string; depth: number }> = seeds.map(path => ({ path, depth: 0 }))
-  const queued = new Set(seeds)
+  const queued = new Set(seeds.map(basePath))
+  // Paths only linked with a query string (/reservation/1?checkin=…) get one
+  // representative URL each, crawled after every plain link: query variants
+  // must not multiply or crowd out ordinary pages.
+  const deferred = new Map<string, { path: string; depth: number }>()
   const attempted: string[] = []
   const paths: string[] = []
 
   try {
-    while (queue.length > 0 && attempted.length < maxPages) {
-      const next = queue.shift()!
+    while ((queue.length > 0 || deferred.size > 0) && attempted.length < maxPages) {
+      const next = queue.shift() ?? takeFirst(deferred)!
       attempted.push(next.path)
       try {
         // A page load that throws (timeout, connection reset) gets `retries` more tries.
@@ -150,7 +154,7 @@ async function crawlPass(
         }
         const finalUrl = new URL(page.url())
         if (finalUrl.origin !== origin || (response && response.status() >= 400)) continue
-        const canonicalPath = normalizePath(finalUrl.pathname)
+        const canonicalPath = normalizePath(finalUrl.pathname) + (next.path.includes('?') ? finalUrl.search : '')
         if (!paths.includes(canonicalPath)) paths.push(canonicalPath)
         if (next.depth >= maxDepth) continue
 
@@ -162,8 +166,15 @@ async function crawlPass(
         )
         for (const href of hrefs) {
           const safePath = safeSameOriginPath(href, origin, blocklist)
-          if (!safePath || queued.has(safePath)) continue
-          queued.add(safePath)
+          if (!safePath) continue
+          const base = basePath(safePath)
+          if (queued.has(base)) continue
+          if (safePath.includes('?')) {
+            if (!deferred.has(base)) deferred.set(base, { path: safePath, depth: next.depth + 1 })
+            continue
+          }
+          deferred.delete(base)
+          queued.add(base)
           queue.push({ path: safePath, depth: next.depth + 1 })
         }
       } catch {
@@ -190,13 +201,32 @@ function safeSameOriginPath(href: string, origin: string, blocklist: ActionBlock
   try {
     const url = new URL(href, origin)
     if (url.origin !== origin || !['http:', 'https:'].includes(url.protocol)) return undefined
-    if (url.hash || url.search || ASSET_PATH.test(url.pathname)) return undefined
+    if (url.hash || ASSET_PATH.test(url.pathname)) return undefined
     const path = normalizePath(url.pathname)
     if (DESTRUCTIVE_PATH.test(path) || blocklist.isBlocked(path, path)) return undefined
-    return path
+    if (!url.search) return path
+    // A query can act too (?action=delete, ?logout=1): skip those.
+    let query = url.search
+    try { query = decodeURIComponent(url.search) } catch { /* keep raw */ }
+    if (DESTRUCTIVE_QUERY.test(query) || blocklist.isBlocked(query, query)) return undefined
+    return path + url.search
   } catch {
     return undefined
   }
+}
+
+/** Query words that make opening a link an action rather than a page view. */
+const DESTRUCTIVE_QUERY = /(?:^|[?&=_\-/])(?:logout|log-out|signout|sign-out|delete|remove|destroy|cancel|unsubscribe|revoke)(?:$|[&=_\-/])/i
+
+function basePath(value: string): string {
+  return value.split('?')[0]
+}
+
+function takeFirst<K, V>(map: Map<K, V>): V | undefined {
+  const first = map.entries().next()
+  if (first.done) return undefined
+  map.delete(first.value[0])
+  return first.value[1]
 }
 
 function normalizePath(value: string): string {

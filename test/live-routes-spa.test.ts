@@ -75,3 +75,69 @@ describe('explorer: waits for content rendered after data loads', () => {
     }
   }, 60000)
 })
+
+describe('explorer: link verification by resolved URL', () => {
+  let fx: BrowserFixture
+
+  beforeAll(async () => {
+    fx = await startBrowserFixture({
+      '/': page(`
+        <div class="room"><h3>Single</h3><a href="/reservation/1?checkin=2026-01-01">Book now</a></div>
+        <div class="room"><h3>Double</h3><a href="/reservation/2?checkin=2026-01-01">Book now</a></div>
+        <a href="/hidden" style="display:none">Hidden</a>`),
+      '/reservation/1': page('<h1>Reservation 1</h1>'),
+      '/reservation/2': page('<h1>Reservation 2</h1>'),
+      '/hidden': page('<h1>Hidden</h1>'),
+    })
+  })
+  afterAll(async () => { await fx?.close() })
+
+  it('finds relative links with a query string and visits them with the query', async () => {
+    const { explorePage } = await import('../src/engine/browser/explorer.js')
+    const os = await import('node:os')
+    const context = await fx.browser.newContext()
+    try {
+      const exploration = await explorePage(context, '/', fx.baseUrl, os.tmpdir(), undefined,
+        { boundaryProbes: false, createChecks: false, journey: false })
+      const bookNow = exploration.interactions.filter(i => i.element === 'Book now')
+      expect(bookNow.length).toBeGreaterThan(0)
+      expect(bookNow.every(i => i.result === 'navigated')).toBe(true)
+      expect(fx.hits).toContain('/reservation/1?checkin=2026-01-01')
+    } finally {
+      await context.close()
+    }
+  }, 60000)
+})
+
+describe('live crawl: pages only linked with a query string', () => {
+  let fx: BrowserFixture
+
+  beforeAll(async () => {
+    fx = await startBrowserFixture({
+      '/': page(`
+        <a href="/reservation/1?checkin=2026-01-01&checkout=2026-01-02">Book now</a>
+        <a href="/reservation/1?checkin=2026-02-01&checkout=2026-02-02">Book now</a>
+        <a href="/reservation/2?checkin=2026-01-01">Book now</a>
+        <a href="/rooms?view=grid">Rooms (grid)</a>
+        <a href="/rooms">Rooms</a>
+        <a href="/account?action=delete">Delete my account</a>
+        <a href="/session?logout=1">Sign out</a>`),
+      '/reservation/1': page('<h1>Reservation 1</h1>'),
+      '/reservation/2': page('<h1>Reservation 2</h1>'),
+      '/rooms': page('<h1>Rooms</h1>'),
+      '/account': page('<h1>Account</h1>'),
+      '/session': page('<h1>Session</h1>'),
+    })
+  })
+  afterAll(async () => { await fx?.close() })
+
+  it('keeps one URL per path, prefers plain links, and skips acting queries', async () => {
+    const crawl = await crawlLiveRoutes({ baseUrl: fx.baseUrl, maxPages: 10 }, { browser: fx.browser })
+    expect(crawl.routes.map(r => r.path)).toEqual([
+      '/', '/rooms', '/reservation/1?checkin=2026-01-01&checkout=2026-01-02', '/reservation/2?checkin=2026-01-01',
+    ])
+    expect(fx.hits).not.toContain('/reservation/1?checkin=2026-02-01&checkout=2026-02-02')
+    expect(fx.hits.some(hit => hit.startsWith('/account'))).toBe(false)
+    expect(fx.hits.some(hit => hit.startsWith('/session'))).toBe(false)
+  }, 60000)
+})

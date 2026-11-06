@@ -43,20 +43,9 @@ export async function findFrontendApp(codebasePath: string): Promise<string | nu
     const candidates: Array<{ dir: string; score: number }> = []
     for (const entry of entries) {
       const pkgDir = path.join(dir, entry)
-      const pkg = await readJSON<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(
-        path.join(pkgDir, 'package.json')
-      )
+      const pkg = await readJSON<PackageManifest>(path.join(pkgDir, 'package.json'))
       if (!pkg) continue
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies }
-      let score = 0
-      if (deps['next']) score += 5
-      if (deps['react']) score += 3
-      if (deps['vue']) score += 3
-      if (deps['vite'] || deps['@vitejs/plugin-react']) score += 2
-      if (deps['react-router-dom'] || deps['react-router']) score += 2
-      if (deps['@sveltejs/kit']) score += 4
-      if (deps['nuxt']) score += 4
-      if (deps['express'] || deps['fastify']) score -= 5
+      const score = scoreWebApp(pkg)
       if (score > 0) candidates.push({ dir: pkgDir, score })
     }
 
@@ -64,6 +53,72 @@ export async function findFrontendApp(codebasePath: string): Promise<string | nu
     if (candidates.length > 0) return candidates[0].dir
   }
   return null
+}
+
+/** Folders never searched for a nested web app (dependencies, build output, VCS, tests). */
+const NOT_APP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'out', 'target', 'coverage', 'vendor', 'tmp', 'temp',
+  'test', 'tests', '__tests__', 'e2e', 'cypress', 'playwright', 'fixtures', 'docs', 'examples',
+])
+
+/** Score a package as a web app: frontend frameworks up, backend-only packages down. */
+function scoreWebApp(pkg: PackageManifest): number {
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+  let score = 0
+  if (deps['next']) score += 5
+  if (deps['react']) score += 3
+  if (deps['vue']) score += 3
+  if (deps['vite'] || deps['@vitejs/plugin-react']) score += 2
+  if (deps['react-router-dom'] || deps['react-router']) score += 2
+  if (deps['@sveltejs/kit']) score += 4
+  if (deps['nuxt']) score += 4
+  if (deps['express'] || deps['fastify']) score -= 5
+  return score
+}
+
+/**
+ * The folder whose code describes the app: the project root when it is a web
+ * app itself; otherwise the best-scoring web app in a subfolder. Covers
+ * workspace monorepos (apps/, packages/) and mixed-language repos where the
+ * frontend sits in a subfolder of, say, a Maven or Go project (e.g. assets/).
+ */
+export async function resolveAppRoot(codebasePath: string): Promise<string> {
+  if (await detectMonorepo(codebasePath)) {
+    const app = await findFrontendApp(codebasePath)
+    if (app) return app
+  }
+  if (await detectFramework(codebasePath) !== 'unknown') return codebasePath
+  return await findNestedWebApp(codebasePath) ?? codebasePath
+}
+
+/**
+ * Search up to two folder levels below the root for a package.json that looks
+ * like a web app (or an Express/Fastify server, scored lowest). Ties go to the
+ * shallower folder.
+ */
+export async function findNestedWebApp(codebasePath: string, maxDepth = 2): Promise<string | null> {
+  const candidates: Array<{ dir: string; score: number; depth: number }> = []
+  const visit = async (dir: string, depth: number): Promise<void> => {
+    if (depth > maxDepth) return
+    let entries: import('fs').Dirent[]
+    try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.') || NOT_APP_DIRS.has(entry.name)) continue
+      const sub = path.join(dir, entry.name)
+      const pkg = await readJSON<PackageManifest>(path.join(sub, 'package.json'))
+      if (pkg) {
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+        const score = scoreWebApp(pkg)
+        // A server-only package still beats nothing: its routes are the app's pages.
+        if (score > 0) candidates.push({ dir: sub, score, depth })
+        else if (deps['express'] || deps['fastify']) candidates.push({ dir: sub, score: 0, depth })
+      }
+      await visit(sub, depth + 1)
+    }
+  }
+  await visit(codebasePath, 1)
+  candidates.sort((a, b) => b.score - a.score || a.depth - b.depth)
+  return candidates[0]?.dir ?? null
 }
 
 // ─── Port auto-detection ──────────────────────────────────────────────────────

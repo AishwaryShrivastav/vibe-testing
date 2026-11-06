@@ -72,6 +72,9 @@ function extractPageFunctionality(content: string, routePath: string): PageFunct
   }
 }
 
+const SEARCH_SIGNAL = /\bset[A-Z]?\w*Search\w*\b|\bsearch(?:Term|Query|Text|Value|Input|Params)\b|\bonSearch\b|type=["']search["']|placeholder=["'][^"']*\bsearch\b/i
+const FILTER_SIGNAL = /\b(?:statusFilter|setFilter\w*|statusTab|filterBy\w*|activeTab|setActiveTab|selectedTab)\b|role=["']tab(?:list)?["']|<Tabs?\b/
+
 function extractFeatures(content: string, routePath: string): PageFeature[] {
   const features: PageFeature[] = []
 
@@ -104,12 +107,14 @@ function extractFeatures(content: string, routePath: string): PageFeature[] {
   }
 
   // Search functionality
-  if (/search|filter.*input|setSearch|searchTerm|searchQuery/i.test(content)) {
+  // Real search UI or state only: a bare substring would match "research" or a
+  // route list that merely mentions a search page.
+  if (SEARCH_SIGNAL.test(content)) {
     features.push({ name: 'Search', type: 'search', description: 'Has search/filter input' })
   }
 
   // Filter / tabs functionality
-  if (/statusFilter|setFilter|tab|statusTab|filterBy/i.test(content)) {
+  if (FILTER_SIGNAL.test(content)) {
     features.push({ name: 'Filter', type: 'filter', description: 'Has filter or tab controls' })
   }
 

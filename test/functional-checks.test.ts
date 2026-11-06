@@ -238,6 +238,19 @@ describe('functional checks against real pages', () => {
     expect(await logout('icon')).toMatchObject({ status: 'pass' })
   }, 90_000)
 
+  it('judges logout only against a page that really requires sign-in', async () => {
+    const config = VibeConfigSchema.parse({
+      url: fx.baseUrl,
+      auth: { strategy: 'credentials', login_url: '/bad/login', credentials: { email: 'u', password: 'p' } },
+      browser: { headed: false, slowMo: 0 },
+    })
+    // A public page listed first is skipped; the protected one is used.
+    const result = await checkLogoutRoundTrip(fx.browser, config, ['/resources', '/bad/home'], shots)
+    expect(result).toMatchObject({ status: 'fail', scenario: { route: '/bad/home' } })
+    // Only public pages: nothing to judge, so no false "logout does not end the session".
+    expect(await checkLogoutRoundTrip(fx.browser, config, ['/resources'], shots)).toBeUndefined()
+  }, 90_000)
+
   it('treats a short page that rendered a form as loaded, not inconclusive', async () => {
     const ctx = await fx.browser.newContext()
     try {

@@ -9,6 +9,26 @@ import path from 'path'
  * register scenario. Only the field part of the description ("Fill username")
  * and the selector are inspected, never the typed value.
  */
+const LOGIN_PATH = /\/(login|log-in|signin|sign-in|auth)\b/i
+
+/**
+ * What a result proves about a route needing sign-in, or undefined when it
+ * proves nothing: a signed-out visit that landed on a sign-in page → true; a
+ * passing "redirects to login" check → true; a signed-out visit that stayed
+ * on the page → false.
+ */
+export function authEvidence(result: TestResult): boolean | undefined {
+  const route = result.scenario.route
+  if (LOGIN_PATH.test(route.split('?')[0])) return undefined
+  if (/redirects to login/i.test(result.scenario.name)) return result.status === 'pass' ? true : undefined
+  if (result.scenario.requires_auth || !result.current_url) return undefined
+  let landed: string
+  try { landed = new URL(result.current_url).pathname } catch { return undefined }
+  if (LOGIN_PATH.test(landed)) return true
+  if (result.status === 'pass' && landed === route.split('?')[0]) return false
+  return undefined
+}
+
 function findCredentialSteps(result: TestResult): { emailStep?: TestStep; passwordStep?: TestStep } {
   const fillSteps = result.scenario.steps.filter(s => s.action === 'fill')
   const fieldText = (s: TestStep) => `${s.description.split(/\s+with\s+/i)[0]} ${s.selector ?? ''}`
@@ -52,7 +72,8 @@ export interface RunSummary {
 }
 
 export interface ProjectIntel {
-  version: 1
+  /** 2: sign-in requirements are learned from evidence only; earlier guesses are discarded on load. */
+  version: 1 | 2
   routes: Record<string, RouteIntel>
   auth: AuthIntel | null
   credentials: SavedCredentials | null
@@ -102,7 +123,7 @@ export class MemoryManager {
 
     const storedIntel = await readJSON<ProjectIntel>(this.intelPath)
     if (storedIntel) {
-      this.intel = storedIntel
+      this.intel = migrateIntel(storedIntel)
       const runCount = this.intel.run_history.length
       if (runCount > 0) {
         const lastRun = this.intel.run_history[runCount - 1]
@@ -257,10 +278,11 @@ export class MemoryManager {
     }
 
     const reason = result.failure_reason ?? result.ai_verdict ?? ''
-    if (reason.includes('authentication') || (reason.includes('redirect') && reason.includes('login'))) {
-      ri.needs_auth = true
-    }
-    if (result.scenario.requires_auth) ri.needs_auth = true
+    // Learn "needs sign-in" only from evidence. Running a scenario signed in is
+    // a guess, and a failed "redirects to login" check ("Expected redirect to
+    // login but stayed on /x") is evidence of the opposite.
+    const auth = authEvidence(result)
+    if (auth !== undefined) ri.needs_auth = auth
     if (result.scenario.steps.some(s => s.action === 'fill')) ri.has_form = true
     if (reason.includes('Invalid reset') || reason.includes('token') || ri.path.includes('reset-password')) {
       ri.needs_url_params = true
@@ -364,14 +386,12 @@ export class MemoryManager {
   }
 
   private updateSkipRoutes(): void {
-    this.intel.known_skip_routes = []
-    for (const [routePath, ri] of Object.entries(this.intel.routes)) {
-      if (ri.needs_url_params) this.intel.known_skip_routes.push(routePath)
-      if (ri.load_samples >= 3 && ri.last_status === 'error') {
-        this.intel.known_skip_routes.push(routePath)
-      }
-    }
-    this.intel.known_skip_routes = [...new Set(this.intel.known_skip_routes)]
+    // Only routes that can't be opened as written (they need URL parameters).
+    // A route that errored before is never skipped: errors are findings, and a
+    // skipped route could never pass again to come off the list.
+    this.intel.known_skip_routes = Object.entries(this.intel.routes)
+      .filter(([, ri]) => ri.needs_url_params)
+      .map(([routePath]) => routePath)
   }
 
   private logLearnings(results: TestResult[]): void {
@@ -460,8 +480,25 @@ export class MemoryManager {
 
   private defaultIntel(): ProjectIntel {
     return {
-      version: 1, routes: {}, auth: null, credentials: null, avg_scenario_ms: 0,
+      version: INTEL_VERSION, routes: {}, auth: null, credentials: null, avg_scenario_ms: 0,
       run_history: [], known_skip_routes: [], global_selectors: {},
     }
+  }
+}
+
+const INTEL_VERSION = 2
+
+/**
+ * Upgrade stored intelligence. Before version 2, routes were marked as needing
+ * sign-in from guesses (any scenario run signed in) and routes that errored
+ * were skipped for good; both are discarded so they're re-learned from evidence.
+ */
+export function migrateIntel(intel: ProjectIntel): ProjectIntel {
+  if ((intel.version ?? 1) >= INTEL_VERSION) return intel
+  for (const ri of Object.values(intel.routes ?? {})) ri.needs_auth = false
+  return {
+    ...intel,
+    version: INTEL_VERSION,
+    known_skip_routes: Object.entries(intel.routes ?? {}).filter(([, ri]) => ri.needs_url_params).map(([routePath]) => routePath),
   }
 }
