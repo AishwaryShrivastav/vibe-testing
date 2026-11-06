@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { detectAuthentication } from './engine/context/auth-detector.js'
-import { detectBaseUrl, detectFramework, detectMonorepo, findFrontendApp } from './engine/context/detector.js'
+import { detectBaseUrl, detectFramework, resolveAppRoot } from './engine/context/detector.js'
 import { parseRoutes } from './engine/context/router.js'
 import { detectLiveServer } from './engine/context/server-detector.js'
 import type { AuthDetection, Framework, ServerDetection } from './types/index.js'
@@ -65,7 +65,8 @@ export async function configureProject(input: {
   const server = await detectLiveServer({
     codebasePath: scanPath,
     explicitUrl: requestedUrl,
-    configuredUrl: configuredUrl ?? inferredUrl,
+    configuredUrl,
+    inferredUrl,
   })
   const effectiveUrl = server.url ?? requestedUrl ?? configuredUrl ?? inferredUrl
 
@@ -102,8 +103,7 @@ export async function configureProject(input: {
 }
 
 async function resolveScanPath(codebasePath: string): Promise<string> {
-  if (!await detectMonorepo(codebasePath)) return codebasePath
-  return await findFrontendApp(codebasePath) ?? codebasePath
+  return resolveAppRoot(codebasePath)
 }
 
 async function writeIfMissing(filePath: string, content: string): Promise<boolean> {

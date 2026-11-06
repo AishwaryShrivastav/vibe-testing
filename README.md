@@ -243,15 +243,19 @@ Add to `.roo/mcp.json`:
 | `get_context` | Before writing test steps. Returns source files for a feature | Actual source code with real field names and selectors |
 | `login` | When app requires authentication | Post-login screenshot, token state, API calls observed |
 | `scan_page_elements` | To see all interactive elements on a page | Element list with selectors plus page screenshot |
-| `explore_page` | Broad "does everything work?" testing | Interaction results, API calls, errors, screenshot |
+| `explore_page` | Broad "does everything work?" testing | Interaction results, API calls, `problems`, `diagnostics`, `warnings`, `changes_made_to_app`, screenshot. `isError` when `problems` is non-empty |
 | `execute_scenario` | Run specific test steps | Step-by-step logs plus screenshots |
 | `get_coverage` | View coverage map and untested routes | Coverage entries, gaps, available scenarios |
 | `suggest_tests` | Find coverage gaps after exploration | Prioritized, ready-to-run scenarios with steps |
 | `take_screenshot` | Quick visual verification | Screenshot of any URL |
 | `generate_report` | Build HTML report (auto-opens) | Report path plus summary |
-| `run_full_test` | One-shot: scan, execute, explore, report | Full results plus `snapshot_diff` vs last run |
-| `run_converge` | Iterative testing until thresholds | Summary across all rounds plus `snapshot_diff` vs last run |
+| `run_full_test` | One-shot: scan, execute, explore, report | Full results, `summary.failed_scenarios` (name, route, reason) plus `snapshot_diff` vs last run |
+| `run_converge` | Iterative testing until thresholds | Summary across all rounds (incl. `summary.failed_scenarios`) plus `snapshot_diff` vs last run |
 | `cleanup` | Close browsers, free resources | - |
+
+`explore_page` replaces the old `errors` field with `problems` (real app failures: server errors, console errors, broken values, functional failures) and `diagnostics` (vibe-test's own notes, such as navigation or discovery issues). It also returns `warnings` (possible missing data such as "Category: Unknown"; not failures) and `changes_made_to_app` (data-changing requests it sent, per `explore.writes`), and sets `isError` when there are `problems`.
+
+Run results (`run_full_test`, `run_converge`, `generate_report`) carry `summary.failed_scenarios`, a list of `{ name, route, status, reason }` for every failed or errored scenario, alongside `explorer_failures`, `explorer_warnings`, `retry_findings` and `app_changes`. The Markdown and HTML reports list the same findings.
 
 ### Tool inputs
 
@@ -590,7 +594,9 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | `auth.strategy` | `credentials` (form login), `basic` (HTTP Basic Auth), or `skip` |
 | `auth.login_url` | Explicit login route for non-standard paths keyword matching would miss |
 | `auth.credentials` | Login credentials, used for login and for generated scenarios, persisted across runs |
+| `auth.accounts` | More accounts on the same login form: `[{ "name": "Bob", "credentials": { "email": "bob", "password": "…" } }]`. With two different accounts, each run logs in as both and checks that the second cannot open the first one's pages (e.g. `/orders/42` showing the first user's data). |
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
+| `explore.writes` | What exploration may change in the app. `safe` (default): creates new records (add/create forms, "add" buttons, probes on blank forms) but never overwrites a value already in a field, and doesn't probe or create-check forms that edit existing data (settings, profile, branding). `all`: also overwrites existing values and tests edit forms. `none`: no data-changing submissions. Every data-changing request exploration made is listed under "Changes made to the app" in the run summary and the report. |
 | `scope.include` | Route patterns to include; default `/**` includes `/` and all nested routes. `*` stays within one segment; a trailing `/**` includes the subtree root and its descendants. Other characters are literal. |
 | `scope.exclude` | Route patterns to exclude from testing |
 | `scope.max_routes` | Cap how many routes are tested per run |

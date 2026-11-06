@@ -35,6 +35,30 @@ async function serve(contentType = 'text/html', body = '<!doctype html><title>Ap
   return `http://127.0.0.1:${port}`
 }
 
+/** Serve fixed responses per path, e.g. a `/` that redirects to `/login`. */
+async function serveRoutes(
+  routes: Record<string, { status: number; headers?: Record<string, string>; body?: string }>,
+): Promise<string> {
+  const server = http.createServer((request, response) => {
+    const route = routes[new URL(request.url ?? '/', 'http://x').pathname]
+    if (!route) {
+      response.writeHead(404, { 'content-type': 'text/plain' })
+      response.end('not found')
+      return
+    }
+    response.writeHead(route.status, route.headers ?? {})
+    response.end(route.body ?? '')
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  cleanup.push(() => new Promise<void>((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve())
+  }))
+  const { port } = server.address() as AddressInfo
+  return `http://127.0.0.1:${port}`
+}
+
+const HTML = { 'content-type': 'text/html; charset=utf-8' }
+
 function portOf(url: string): number {
   return Number(new URL(url).port)
 }
@@ -55,7 +79,7 @@ describe('detectLiveServer', () => {
     expect(result.attemptedCandidates).toHaveLength(1)
   })
 
-  it('falls through to a valid configured URL', async () => {
+  it('does not fall back from an unusable explicit URL to the configured URL', async () => {
     const codebasePath = await makeProject()
     const configuredUrl = await serve()
 
@@ -71,11 +95,111 @@ describe('detectLiveServer', () => {
       },
     )
 
-    expect(result.url).toBe(configuredUrl)
-    expect(result.attemptedCandidates[0]).toMatchObject({
-      source: 'explicit-url',
-      outcome: 'unreachable',
+    expect(result.url).toBeUndefined()
+    expect(result.attemptedCandidates).toEqual([
+      expect.objectContaining({ source: 'explicit-url', outcome: 'unreachable' }),
+    ])
+    expect(result.failure).toMatch(/URL supplied for this run \(https:\/\/example\.com\).*remote unavailable/)
+  })
+
+  it('never substitutes another running app for an unusable explicit URL', async () => {
+    // Regression: testing NodeGoat on :4000 silently tested Juice Shop on :3000.
+    const codebasePath = await makeProject()
+    const otherApp = await serve()
+    const unusableUrl = await serve('application/json', '{"ok":true}')
+
+    const result = await detectLiveServer(
+      { codebasePath, explicitUrl: unusableUrl },
+      {
+        listActiveLoopbackPorts: async () => [portOf(otherApp)],
+        commonPorts: [portOf(otherApp)],
+      },
+    )
+
+    expect(result.url).toBeUndefined()
+    expect(result.attemptedCandidates).toHaveLength(1)
+    expect(result.failure).toContain('does not substitute another local server')
+  })
+
+  it('selects an explicit URL whose root redirects to a same-origin login page', async () => {
+    const codebasePath = await makeProject()
+    const appUrl = await serveRoutes({
+      '/': { status: 302, headers: { location: '/login' } },
+      '/login': { status: 200, headers: HTML, body: '<!doctype html><form></form>' },
     })
+
+    const result = await detectLiveServer(
+      { codebasePath, explicitUrl: appUrl },
+      { listActiveLoopbackPorts: async () => [], commonPorts: [] },
+    )
+
+    expect(result.url).toBe(appUrl)
+    expect(result.attemptedCandidates).toEqual([
+      expect.objectContaining({ outcome: 'selected', detail: 'followed same-origin redirect to /login' }),
+    ])
+  })
+
+  it('follows a chain of same-origin redirects but stops a redirect loop', async () => {
+    const codebasePath = await makeProject()
+    const chained = await serveRoutes({
+      '/': { status: 301, headers: { location: '/a' } },
+      '/a': { status: 307, headers: { location: '/b?next=%2F' } },
+      '/b': { status: 200, headers: HTML, body: '<!doctype html>' },
+    })
+    const looping = await serveRoutes({
+      '/': { status: 302, headers: { location: '/' } },
+    })
+
+    const chainedResult = await detectLiveServer(
+      { codebasePath, explicitUrl: chained },
+      { listActiveLoopbackPorts: async () => [], commonPorts: [] },
+    )
+    const loopResult = await detectLiveServer(
+      { codebasePath, explicitUrl: looping },
+      { listActiveLoopbackPorts: async () => [], commonPorts: [] },
+    )
+
+    expect(chainedResult.url).toBe(chained)
+    expect(loopResult.url).toBeUndefined()
+    expect(loopResult.attemptedCandidates[0]).toMatchObject({ outcome: 'rejected', detail: 'more than 5 redirects' })
+  })
+
+  it('treats the configured URL as authoritative over discovered ports', async () => {
+    const codebasePath = await makeProject()
+    const activeApp = await serve()
+
+    const result = await detectLiveServer(
+      { codebasePath, configuredUrl: 'http://127.0.0.1:1' },
+      {
+        listActiveLoopbackPorts: async () => [portOf(activeApp)],
+        commonPorts: [],
+        timeoutMs: 50,
+      },
+    )
+
+    expect(result.url).toBeUndefined()
+    expect(result.attemptedCandidates).toEqual([
+      expect.objectContaining({ source: 'configured-url', outcome: 'unreachable' }),
+    ])
+    expect(result.failure).toContain('The URL in vibe.config.json')
+  })
+
+  it('treats an inferred URL as a hint and keeps discovering when it is down', async () => {
+    const codebasePath = await makeProject()
+    const activeApp = await serve()
+
+    const result = await detectLiveServer(
+      { codebasePath, inferredUrl: 'http://localhost:1' },
+      {
+        listActiveLoopbackPorts: async () => [portOf(activeApp)],
+        commonPorts: [],
+        timeoutMs: 50,
+      },
+    )
+
+    expect(result.url).toBe(`http://localhost:${portOf(activeApp)}`)
+    expect(result.attemptedCandidates[0]).toMatchObject({ source: 'inferred-url', outcome: 'unreachable' })
+    expect(result.failure).toBeUndefined()
   })
 
   it('selects a reachable remote HTTPS URL only after an injected HTML probe', async () => {
@@ -187,7 +311,7 @@ describe('detectLiveServer', () => {
     const unreachablePort = 1
 
     const result = await detectLiveServer(
-      { codebasePath, explicitUrl: nonHtmlUrl },
+      { codebasePath, inferredUrl: nonHtmlUrl },
       {
         listActiveLoopbackPorts: async () => [],
         commonPorts: [unreachablePort],
@@ -225,7 +349,8 @@ describe('detectLiveServer', () => {
     expect(redirectMode).toBe('manual')
     expect(result.url).toBeUndefined()
     expect(result.attemptedCandidates).toContainEqual(expect.objectContaining({
-      outcome: 'non-html',
+      outcome: 'rejected',
+      detail: 'HTTP 302 redirects to a different origin (https://example.com)',
     }))
   })
 

@@ -67,15 +67,15 @@ describe('live route recovery', () => {
     })
 
     expect(result.status).toBe('completed')
-    expect(result.routes.map(route => route.path)).toEqual(['/', '/about', '/team'])
+    // A page only linked with a query is kept (one URL), after the plain pages.
+    expect(result.routes.map(route => route.path)).toEqual(['/', '/about', '/team', '/search?q=dynamic'])
     expect(result.routes.every(route => route.origin === 'live-crawl')).toBe(true)
     expect(externalHits).not.toContain('/outside')
     expect(hits).not.toContain('/logout')
     expect(hits).not.toContain('/account/delete')
     expect(hits).not.toContain('/billing')
-    expect(hits).not.toContain('/search?q=dynamic')
 
-    expect(result.scenarios).toHaveLength(3)
+    expect(result.scenarios).toHaveLength(4)
     for (const scenario of result.scenarios) {
       expect(scenario.route_origin).toBe('live-crawl')
       expect(scenario.steps.map(step => step.action)).toEqual(['navigate', 'assert'])

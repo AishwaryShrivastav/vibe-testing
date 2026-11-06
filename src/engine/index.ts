@@ -1,4 +1,5 @@
 import type { RunDiagnostic, VibeRunResult } from '../types/index.js'
+import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings } from './findings.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
@@ -11,6 +12,7 @@ import { runConverge, type ConvergeOptions } from './converge.js'
 import { logger } from '../utils/logger.js'
 import { crawlLiveRoutes } from './browser/live-routes.js'
 import { detectAuthentication } from './context/auth-detector.js'
+import { isRoutePattern } from './context/gap-analyzer.js'
 import { exec } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
@@ -38,22 +40,35 @@ export class VibeTester {
     }
 
     const productModel = await buildProductModel(this.config, memory.getMemory(), recommendations)
+    const crawlRetryFindings: string[] = []
 
-    if (productModel.scenarios.length === 0) {
+    // Crawl the live app when the code gave nothing to run, or when it has
+    // routes with parameters (/rooms/[id]) that only the crawl can turn into
+    // real URLs.
+    const hadStaticScenarios = productModel.scenarios.length > 0
+    const hasRoutePatterns = productModel.routes.some(route => route.type === 'page' && isRoutePattern(route.path))
+    if (!hadStaticScenarios || hasRoutePatterns) {
       const guidance = await import('../utils/vibe-md.js').then(module => module.readVibeGuidance(this.projectRoot))
       const crawl = await crawlLiveRoutes({
         baseUrl: this.config.url,
+        auth: this.config.auth,
+        retries: this.config.retries,
         blockedPatterns: [
           ...(this.config.never_interact ?? []),
           ...(guidance?.never_automate ?? []),
         ],
       })
+      if (crawl.auth?.status === 'logged-in' && (crawl.auth.login_attempts ?? 0) > 1) {
+        crawlRetryFindings.push(`Crawl login: login with valid credentials only succeeded on attempt ${crawl.auth.login_attempts} (first attempt: ${crawl.auth.first_failure ?? 'rejected'})`)
+      }
       if (crawl.scenarios.length > 0) {
-        productModel.routes.push(...crawl.routes.filter(route =>
-          !productModel.routes.some(existing => existing.path === route.path)
-        ))
-        productModel.scenarios.push(...crawl.scenarios)
-      } else {
+        // Pages the code already covers are not added twice (compare without the query).
+        const known = new Set(productModel.routes.map(route => route.path.split('?')[0]))
+        const added = crawl.routes.filter(route => !known.has(route.path.split('?')[0]))
+        productModel.routes.push(...added)
+        const addedPaths = new Set(added.map(route => route.path))
+        productModel.scenarios.push(...crawl.scenarios.filter(scenario => addedPaths.has(scenario.route)))
+      } else if (!hadStaticScenarios) {
         const auth = await detectAuthentication({
           codebasePath: this.projectRoot,
           routePaths: productModel.routes.map(route => route.path),
@@ -77,7 +92,8 @@ export class VibeTester {
       }
     }
 
-    const { results, explorations } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
+    const { results, explorations, retry_findings } = await executeScenarios(productModel.scenarios, this.config, this.projectRoot)
+    const retryFindings = collectRetryFindings(results, [...crawlRetryFindings, ...(retry_findings ?? [])])
 
     if (results.length === 0) throw new Error('No scenarios executed: empty execution result')
 
@@ -109,7 +125,9 @@ export class VibeTester {
     }
 
     const recs = memory.getRecommendations()
-    const report = await generateHtmlReport(results, productModel, this.config, explorations, coverageGaps, recs)
+    const report = await generateHtmlReport(results, productModel, this.config, explorations, coverageGaps, recs, {
+      retryFindings, durationMs: Date.now() - startTime, reportDir: path.join(this.projectRoot, '.vibe'),
+    })
     const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
     await fs.mkdir(path.dirname(reportPath), { recursive: true })
     await fs.writeFile(reportPath, report, 'utf-8')
@@ -120,11 +138,16 @@ export class VibeTester {
     const duration = Date.now() - startTime
     const elementsExplored = explorations.reduce((sum, e) => sum + e.elements_discovered, 0)
     const apiCallsObserved = explorations.reduce((sum, e) => sum + e.api_calls.length, 0)
+    const explorerFailures = collectExplorerFailures(explorations)
 
     logger.section('Run complete')
     logger.success(`Passed: ${passed}`)
     if (failed > 0)  logger.error(`Failed: ${failed}`)
     if (errors > 0)  logger.warn(`Errors: ${errors}`)
+    if (explorerFailures.length > 0) logger.error(`Server errors found while exploring: ${explorerFailures.length}`)
+    if (retryFindings.length > 0) logger.warn(`Only succeeded on retry: ${retryFindings.length}`)
+    const appChanges = collectAppChanges(explorations)
+    if (appChanges.length > 0) logger.dim(`Changes made to the app while exploring: ${appChanges.length} (see report)`)
     if (elementsExplored > 0) logger.dim(`Elements explored: ${elementsExplored} across ${explorations.length} pages`)
     if (apiCallsObserved > 0) logger.dim(`API calls observed: ${apiCallsObserved}`)
     if (coverageGaps.length > 0) logger.warn(`Coverage gaps: ${coverageGaps.length} missing test areas`)
@@ -147,7 +170,15 @@ export class VibeTester {
         new_routes: snapshotDiff.new_routes,
         removed_routes: snapshotDiff.removed_routes,
       } : undefined,
-      summary: { total: results.length, passed, failed, errors, duration_ms: duration, elements_explored: elementsExplored, api_calls_observed: apiCallsObserved },
+      summary: {
+        total: results.length, passed, failed, errors, duration_ms: duration,
+        elements_explored: elementsExplored, api_calls_observed: apiCallsObserved,
+        explorer_failures: explorerFailures,
+        explorer_warnings: collectExplorerWarnings(explorations),
+        retry_findings: retryFindings,
+        app_changes: collectAppChanges(explorations),
+        failed_scenarios: collectFailedScenarios(results),
+      },
     }
   }
 
@@ -224,7 +255,12 @@ export class VibeTester {
       this.config,
       cr.explorations,
       cr.final_gaps,
-      recommendations
+      recommendations,
+      {
+        retryFindings: collectRetryFindings(cr.total_results, cr.retry_findings),
+        durationMs: Date.now() - startTime,
+        reportDir: path.join(this.projectRoot, '.vibe'),
+      },
     )
     const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
     await fs.mkdir(path.dirname(reportPath), { recursive: true })
@@ -258,13 +294,18 @@ export class VibeTester {
         duration_ms: Date.now() - startTime,
         elements_explored: elementsExplored,
         api_calls_observed: apiCallsObserved,
+        explorer_failures: collectExplorerFailures(cr.explorations),
+        explorer_warnings: collectExplorerWarnings(cr.explorations),
+        retry_findings: collectRetryFindings(cr.total_results, cr.retry_findings),
+        app_changes: collectAppChanges(cr.explorations),
+        failed_scenarios: collectFailedScenarios(cr.total_results),
         converge_rounds: cr.rounds,
       },
     }
   }
 }
 
-
+export { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings } from './findings.js'
 export { generateCoverageGaps } from './coverage-gaps.js'
 export type { ConvergeOptions } from './converge.js'
 export { buildProductModel } from './context/index.js'

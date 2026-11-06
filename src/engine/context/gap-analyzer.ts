@@ -1,11 +1,20 @@
 import { Route, CoverageMap, Gap, Memory } from '../../types/index.js'
+import { isDestructivePath } from '../../utils/destructive-path.js'
+
+/** True for a route with path parameters or wildcards ([id], [...slug], :id, *), not a concrete URL. */
+export function isRoutePattern(path: string): boolean {
+  return /\[[^\]]+\]|(?:^|\/):[A-Za-z_]|\*/.test(path)
+}
 
 export function analyzeGaps(
   routes: Route[],
   coverage: CoverageMap,
   memory: Memory
 ): Gap[] {
-  const pageRoutes = routes.filter(r => r.type === 'page')
+  // Logout/delete-style routes act when opened; they are never test pages.
+  // Patterns such as /rooms/[id] or /users/:id can't be opened as written:
+  // concrete URLs come from seed_routes or the live crawl instead.
+  const pageRoutes = routes.filter(r => r.type === 'page' && !isDestructivePath(r.path) && !isRoutePattern(r.path))
 
   const gaps: Gap[] = pageRoutes.map(route => {
     const covered = coverage[route.path]

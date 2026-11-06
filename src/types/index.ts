@@ -12,6 +12,7 @@ export type Framework =
 export type ServerCandidateSource =
   | 'explicit-url'
   | 'configured-url'
+  | 'inferred-url'
   | 'script'
   | 'config'
   | 'active-port'
@@ -41,6 +42,8 @@ export interface ServerDetection {
   evidence: ServerEvidence[]
   attemptedCandidates: ServerCandidateAttempt[]
   diagnostics: ServerDiscoveryDiagnostic[]
+  /** Why a user-supplied URL could not be used. Set only when no server was selected for it. */
+  failure?: string
 }
 
 export type AuthMethod = 'oauth' | 'password' | 'unknown' | 'none'
@@ -197,6 +200,15 @@ export interface LiveRouteCrawl {
   scenarios: TestScenario[]
   attemptedPaths: string[]
   reason?: string
+  /** Outcome of the logged-in crawl pass, when credentials were configured. */
+  auth?: {
+    status: 'logged-in' | 'login-failed' | 'unavailable'
+    pages: number
+    /** Login form submissions made; more than 1 means the first was rejected. */
+    login_attempts?: number
+    /** What the login page showed after the first rejected submission. */
+    first_failure?: string
+  }
 }
 
 export type TestStatus = 'pass' | 'fail' | 'skip' | 'error'
@@ -231,6 +243,10 @@ export interface TestResult {
   verification_status?: VerificationStatus
   step_logs: StepLog[]
   api_errors?: ApiError[]
+  /** Server crashes seen during the scenario (5xx responses, crash text caused by an action). */
+  server_errors?: Array<{ url: string; method?: string; status?: number; evidence: string }>
+  /** Set when the scenario was retried: whether a retry passed and what the first attempt hit. */
+  retry?: { attempts: number; passed_on_retry: boolean; first_failure?: string }
 }
 
 export interface ProductModel {
@@ -320,6 +336,16 @@ export interface VibeRunResult {
     duration_ms: number
     elements_explored: number
     api_calls_observed: number
+    /** Server errors, hangs and uncaught exceptions found while exploring pages, e.g. "/contributions: Server error 500 on POST /contributions: …". */
+    explorer_failures?: string[]
+    /** Lower-confidence explorer findings such as placeholder values ("Category: Unknown"); do not fail a run. */
+    explorer_warnings?: string[]
+    /** Logins and scenarios that only succeeded on a retry (first attempt's evidence included). */
+    retry_findings?: string[]
+    /** Data-changing requests exploration made in the app (page, action, request, values): what to clean up. */
+    app_changes?: string[]
+    /** Scenarios that failed or errored, each with a one-line reason (verdict, else failure reason). */
+    failed_scenarios?: Array<{ name: string; route: string; status: 'fail' | 'error'; reason: string }>
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
   }

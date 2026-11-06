@@ -11,6 +11,18 @@ export const AuthConfigSchema = z.object({
     email: z.string(),
     password: z.string(),
   }).optional(),
+  /**
+   * More accounts on the same login form. With two different accounts
+   * (credentials + one here, or two here), runs check that one user cannot
+   * open the other's pages. `email` is the login identifier (email, username, …).
+   */
+  accounts: z.array(z.object({
+    name: z.string().optional(),
+    credentials: z.object({
+      email: z.string(),
+      password: z.string(),
+    }),
+  })).optional(),
 })
 
 export const VibeConfigSchema = z.object({
@@ -34,7 +46,26 @@ export const VibeConfigSchema = z.object({
     timeout: z.number().default(30000),
   }).optional(),
   mode: z.enum(['fast', 'deep']).default('deep'),
+  /**
+   * Extra attempts for operations that should succeed: logins (resubmitted on
+   * the same page), scenarios and crawl page loads. Success on a retry is
+   * always reported as a finding, never hidden. 0 disables retries (use it
+   * when repeating an action has side effects, e.g. payments).
+   */
+  retries: z.number().int().min(0).max(2).default(1),
   routes: z.enum(['auto', 'config']).default('auto'),
+  /**
+   * What exploration may change in the app under test.
+   * "safe" (default): create new records (add/create forms, "add" buttons,
+   * probes on blank forms) but never overwrite existing values or submit forms
+   * that edit existing data (settings, profile, branding…).
+   * "all": also overwrite existing values and test edit forms.
+   * "none": no data-changing submissions.
+   * Every data-changing request is reported either way.
+   */
+  explore: z.object({
+    writes: z.enum(['safe', 'all', 'none']).default('safe'),
+  }).optional(),
 })
 
 export type VibeConfig = z.infer<typeof VibeConfigSchema>
