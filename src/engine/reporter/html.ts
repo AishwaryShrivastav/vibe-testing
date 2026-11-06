@@ -5,6 +5,15 @@ import type { PageExploration, InteractionOutcome, ApiObservation } from '../bro
 import packageJson from '../../../package.json' with { type: 'json' }
 import fs from 'fs/promises'
 import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
+import { collectExplorerWarnings, collectRetryFindings, findingKind, groupExplorerFailures, isExplorerFailure, type GroupedFinding } from '../findings.js'
+
+export interface ReportFindings {
+  /**
+   * Logins and scenarios that only succeeded on a retry. Defaults to the
+   * scenario retries in `results`; pass it to include login/crawl retries.
+   */
+  retryFindings?: string[]
+}
 
 export async function generateHtmlReport(
   results: TestResult[],
@@ -12,9 +21,13 @@ export async function generateHtmlReport(
   config: VibeConfig,
   explorations: PageExploration[],
   coverageGaps: CoverageGapSuggestion[],
-  recommendations?: MemoryRecommendations
+  recommendations?: MemoryRecommendations,
+  findings: ReportFindings = {},
 ): Promise<string> {
   const metrics = deriveReportMetrics(productModel, results)
+  const explorerFailures = groupExplorerFailures(explorations)
+  const explorerWarnings = collectExplorerWarnings(explorations)
+  const retryFindings = findings.retryFindings ?? collectRetryFindings(results)
   const passed  = results.filter(r => r.status === 'pass')
   const failed  = results.filter(r => r.status === 'fail')
   const errored = results.filter(r => r.status === 'error')
@@ -47,12 +60,13 @@ export async function generateHtmlReport(
     }
   }
 
-  const explorationScreenshots: Record<string, string> = {}
-  for (const exp of explorations) {
+  // Keyed by position: a route can be explored twice (logged out, then signed in).
+  const explorationScreenshots: Array<string | undefined> = []
+  for (const [index, exp] of explorations.entries()) {
     if (exp.screenshot_path) {
       try {
         const buf = await fs.readFile(exp.screenshot_path)
-        explorationScreenshots[exp.route] = buf.toString('base64')
+        explorationScreenshots[index] = buf.toString('base64')
       } catch { /* skip */ }
     }
   }
@@ -93,7 +107,11 @@ ${CSS}
   <div class="summary-stat outcome"><div class="num">${outcomeVerified.length}</div><div class="lbl">Outcome verified</div></div>
   <div class="summary-stat smoke"><div class="num">${smokeChecks.length}</div><div class="lbl">Smoke check passed</div></div>
   <div class="summary-stat not"><div class="num">${notVerified.length}</div><div class="lbl">Not verified</div></div>
+  <div class="summary-stat ${explorerFailures.length > 0 ? 'fail' : 'skip'}"><div class="num">${explorerFailures.length}</div><div class="lbl">Problems found</div></div>
+  <div class="summary-stat ${explorerWarnings.length + retryFindings.length > 0 ? 'error' : 'skip'}"><div class="num">${explorerWarnings.length + retryFindings.length}</div><div class="lbl">Warnings</div></div>
 </div>
+
+${renderFindingsSection(explorerFailures, retryFindings, explorerWarnings)}
 
 ${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
 
@@ -137,16 +155,78 @@ document.getElementById('screenshotModal').addEventListener('click', () => {
 </html>`
 }
 
+// ─── Findings Section ─────────────────────────────────────────────────────────
+
+/**
+ * Problems found outside scripted scenarios: explorer failures (grouped by kind,
+ * with every page they were seen on), operations that only passed on a retry,
+ * and lower-confidence warnings.
+ */
+function renderFindingsSection(failures: GroupedFinding[], retryFindings: string[], warnings: string[]): string {
+  if (failures.length + retryFindings.length + warnings.length === 0) return ''
+
+  const byKind = new Map<string, GroupedFinding[]>()
+  for (const failure of failures) {
+    const kind = findingKind(failure.finding)
+    byKind.set(kind, [...(byKind.get(kind) ?? []), failure])
+  }
+
+  // The kind badge already names it: "Console error: X" reads as "X",
+  // "Checkout (click): Empty-state action: X" as "Checkout (click): X".
+  const withoutKind = (finding: string, kind: string) => finding.replace(new RegExp(`(^|: )${kind}: `), '$1')
+
+  const failureRows = [...byKind].flatMap(([kind, group]) => group.map(({ finding, routes }) => `<tr>
+      <td><span class="badge fail">${esc(kind)}</span></td>
+      <td class="finding-text">${esc(withoutKind(finding, kind))}</td>
+      <td>${routes.map(r => `<code>${esc(r)}</code>`).join(' ')}</td>
+    </tr>`)).join('\n')
+
+  const warningRows = [
+    ...retryFindings.map(finding => ({ kind: 'Passed on retry', finding })),
+    ...warnings.map(finding => ({ kind: findingKind(finding), finding })),
+  ].map(({ kind, finding }) => `<tr>
+      <td><span class="badge medium">${esc(kind)}</span></td>
+      <td class="finding-text" colspan="2">${esc(withoutKind(finding, kind))}</td>
+    </tr>`).join('\n')
+
+  const kindCounts = [...byKind].map(([kind, group]) => `${kind}: ${group.length}`).join(', ')
+
+  return `<h2>Problems Found While Exploring</h2>
+  <p class="section-note">Found by the explorer and built-in checks (server errors, console errors, broken values and resources, empty-state actions, created values that never appear), outside the scripted scenarios.${kindCounts ? ` ${esc(kindCounts)}.` : ''}</p>
+  ${failureRows ? `<div class="section-table findings-table"><table>
+    <thead><tr><th>Kind</th><th>Finding</th><th>Pages</th></tr></thead>
+    <tbody>${failureRows}</tbody>
+  </table></div>` : ''}
+  ${warningRows ? `<h3 class="warn-heading">Warnings (${retryFindings.length + warnings.length})</h3>
+  <p class="section-note">Inconsistent behaviour and lower-confidence findings. They do not fail the run but are worth a look.</p>
+  <div class="section-table findings-table"><table>
+    <thead><tr><th>Kind</th><th colspan="2">Finding</th></tr></thead>
+    <tbody>${warningRows}</tbody>
+  </table></div>` : ''}`
+}
+
 // ─── Exploration Section ──────────────────────────────────────────────────────
 
-function renderExplorationSection(explorations: PageExploration[], screenshots: Record<string, string>): string {
-  const cards = explorations.map(exp => {
+function renderExplorationSection(explorations: PageExploration[], screenshots: Array<string | undefined>): string {
+  const bothSessions = explorations.some(e => e.signed_in) && explorations.some(e => !e.signed_in)
+  const cards = explorations.map((exp, index) => {
     const working = exp.interactions.filter(i => ['success', 'content_updated', 'dialog_opened', 'navigated', 'toast_shown'].includes(i.result)).length
     const broken = exp.interactions.filter(i => i.result === 'error').length
     const skipped = exp.interactions.filter(i => i.result === 'skipped').length
     const noChange = exp.interactions.filter(i => i.result === 'no_change').length
+    const problems = exp.errors.filter(isExplorerFailure)
+    const diagnostics = exp.errors.filter(e => !isExplorerFailure(e))
+    const warnings = exp.warnings ?? []
 
-    const statusClass = broken > 0 ? 'fail' : 'pass'
+    // Logged out, a bounce to sign-in is the page being protected — expected, not broken.
+    const signInWall = !!exp.redirected_to && !exp.signed_in
+    const statusClass = broken > 0 || problems.length > 0 ? 'fail'
+      : warnings.length > 0 || (exp.redirected_to && exp.signed_in) ? 'error'
+      : signInWall ? 'skip' : 'pass'
+    const sessionTag = bothSessions ? `<span class="badge session">${exp.signed_in ? 'signed in' : 'logged out'}</span>` : ''
+    const findingList = (items: string[], cls: string) => items.length === 0 ? '' :
+      `<ul class="page-findings ${cls}">${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul>`
+    const findingsHtml = findingList(problems, 'fail') + findingList(warnings, 'warn') + findingList(diagnostics, 'dim')
 
     const interactionRows = exp.interactions.map(i => {
       const icon = i.result === 'success' || i.result === 'content_updated' ? '✅' :
@@ -161,23 +241,26 @@ function renderExplorationSection(explorations: PageExploration[], screenshots: 
         <td>${esc(i.element)}</td>
         <td>${esc(i.action)}</td>
         <td><span class="badge ${i.result === 'error' ? 'fail' : i.result === 'skipped' ? 'medium' : 'pass'}">${i.result}</span></td>
-        <td style="font-size:12px;color:var(--text-dim)">${esc(i.details.slice(0, 80))}</td>
+        <td style="font-size:12px;color:${i.result === 'error' ? 'var(--fail)' : 'var(--text-dim)'}">${esc(i.result === 'error' ? i.details.slice(0, 240) : i.details.slice(0, 80))}</td>
       </tr>`
     }).join('\n')
 
-    const screenshotHtml = screenshots[exp.route] ? `
+    const screenshotHtml = screenshots[index] ? `
       <div class="screenshot-container">
         <div class="screenshot-label">Page screenshot</div>
-        <img src="data:image/png;base64,${screenshots[exp.route]}" alt="${esc(exp.route)}" loading="lazy">
+        <img src="data:image/png;base64,${screenshots[index]}" alt="${esc(exp.route)}" loading="lazy">
       </div>` : ''
 
-    return `<div class="card${broken > 0 ? ' open' : ''}">
+    return `<div class="card${broken > 0 || problems.length > 0 ? ' open' : ''}">
     <div class="card-header">
       <div class="status-dot ${statusClass}"></div>
       <div class="title">${esc(exp.route)}</div>
       <div class="meta-tags">
-        <span class="badge pass">${working} working</span>
+        ${sessionTag}
+        ${signInWall ? `<span class="badge session">sign-in required</span>` : `<span class="badge pass">${working} working</span>`}
         ${broken > 0 ? `<span class="badge fail">${broken} broken</span>` : ''}
+        ${problems.length > 0 ? `<span class="badge fail">${problems.length} problem${problems.length > 1 ? 's' : ''}</span>` : ''}
+        ${warnings.length > 0 ? `<span class="badge medium">${warnings.length} warning${warnings.length > 1 ? 's' : ''}</span>` : ''}
         <span style="font-size:12px;color:var(--text-dim)">${exp.elements_discovered} elements, ${exp.duration_ms}ms</span>
       </div>
       <span class="chevron">▶</span>
@@ -187,6 +270,7 @@ function renderExplorationSection(explorations: PageExploration[], screenshots: 
         <div class="info-item"><span class="info-label">Elements</span><span>${Object.entries(exp.elements_by_type).map(([k, v]) => `${v} ${k}s`).join(', ')}</span></div>
         <div class="info-item"><span class="info-label">API Calls</span><span>${exp.api_calls.length}${exp.api_calls.filter(a => a.isError).length > 0 ? ` (${exp.api_calls.filter(a => a.isError).length} errors)` : ''}</span></div>
       </div>
+      ${findingsHtml}
       ${interactionRows ? `<table class="step-table">
         <thead><tr><th></th><th>Type</th><th>Element</th><th>Action</th><th>Result</th><th>Details</th></tr></thead>
         <tbody>${interactionRows}</tbody>
@@ -344,13 +428,25 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
       ${finalPath.includes('login') ? ' — requires authentication' : ''}
     </div>` : ''
 
-  return `<div class="card${status !== 'pass' ? ' open' : ''}">
+  const serverErrors = result.server_errors ?? []
+  const serverErrorHtml = serverErrors.length === 0 ? '' : `
+    <ul class="page-findings fail">${serverErrors.map(e => {
+      const where = `${e.method ?? 'GET'} ${extractPath(e.url)}`
+      return `<li>${e.status ? `Server error ${e.status} on ${esc(where)}` : `Crash text on ${esc(extractPath(e.url))}`}${e.evidence ? `: ${esc(e.evidence)}` : ''}</li>`
+    }).join('')}</ul>`
+  const retryHtml = !result.retry || result.retry.attempts <= 1 ? '' : `
+    <div class="redirect-note">${result.retry.passed_on_retry
+      ? `Only passed on attempt ${result.retry.attempts}`
+      : `Failed on all ${result.retry.attempts} attempts`}${result.retry.first_failure ? ` (first attempt: ${esc(result.retry.first_failure)})` : ''}</div>`
+
+  return `<div class="card${status !== 'pass' || result.retry?.passed_on_retry ? ' open' : ''}">
   <div class="card-header">
       <div class="status-dot ${status}"></div>
       <div class="title">${esc(s.name)}</div>
       <div class="meta-tags">
         <span class="badge ${s.priority}">${s.priority}</span>
         <span class="badge ${status}">${status}</span>
+        ${result.retry?.passed_on_retry ? '<span class="badge medium">passed on retry</span>' : ''}
         <span class="badge ${verification}">${verificationLabel}</span>
         <span style="font-size:12px;color:var(--text-dim)">${result.duration_ms}ms</span>
       </div>
@@ -358,6 +454,8 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
   </div>
   <div class="card-body">
     <div class="verdict ${verdictClass}">${esc(explanation)}</div>
+    ${retryHtml}
+    ${serverErrorHtml}
     ${redirectNote}
     <div class="info-grid">
       <div class="info-item"><span class="info-label">Route</span><code>${esc(s.route)}</code></div>
@@ -464,6 +562,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; }
 .card-header .status-dot.pass { background: var(--pass); }
 .card-header .status-dot.fail { background: var(--fail); }
 .card-header .status-dot.error { background: var(--warn); }
+.card-header .status-dot.skip { background: var(--text-dim); }
 .card-header .title { font-weight: 600; flex: 1; font-size: 14px; }
 .card-header .meta-tags { display: flex; gap: 8px; align-items: center; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
@@ -475,6 +574,7 @@ h3 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; }
 .badge.not_verified { background: var(--warn-bg); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
 .badge.high { background: var(--fail-bg); color: var(--fail); border: 1px solid rgba(239,68,68,0.2); }
 .badge.low { background: var(--pass-bg); color: var(--pass); border: 1px solid rgba(34,197,94,0.2); }
+.badge.session { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
 .card-body { display: none; padding: 0 20px 20px; }
 .card.open .card-body { display: block; }
 .card.open .chevron { transform: rotate(90deg); }
@@ -504,6 +604,16 @@ code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-s
 .section-table { margin-bottom: 8px; }
 .section-table table { background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 .redirect-note { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 10px 14px; border-radius: 0 6px 6px 0; margin-bottom: 16px; font-size: 13px; color: var(--warn); }
+.section-note { color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
+.warn-heading { color: var(--warn); margin-top: 20px; }
+.findings-table td:first-child { white-space: nowrap; width: 1%; }
+.findings-table .finding-text { word-break: break-word; }
+.findings-table td:last-child code { display: inline-block; margin: 0 4px 4px 0; }
+.page-findings { list-style: none; margin: 0 0 12px; font-size: 13px; }
+.page-findings li { padding: 6px 12px; border-left: 3px solid; margin-bottom: 4px; border-radius: 0 6px 6px 0; word-break: break-word; }
+.page-findings.fail li { background: var(--fail-bg); border-color: var(--fail); }
+.page-findings.warn li { background: var(--warn-bg); border-color: var(--warn); }
+.page-findings.dim li { background: var(--surface2); border-color: var(--border); color: var(--text-dim); }
 footer { margin-top: 48px; padding: 20px 0; border-top: 1px solid var(--border); text-align: center; font-size: 12px; color: var(--text-dim); }
 ol { color: var(--text); }
 `

@@ -50,6 +50,10 @@ export interface PageExploration {
   errors: string[]
   /** Lower-confidence findings, e.g. placeholder values such as "Category: Unknown". */
   warnings?: string[]
+  /** Set when the page sent the explorer to a sign-in page instead of rendering (its path). */
+  redirected_to?: string
+  /** True for the signed-in exploration pass; false/undefined for the logged-out one. */
+  signed_in?: boolean
   duration_ms: number
   screenshot_path?: string
 }
@@ -642,7 +646,7 @@ export async function explorePage(
   const currentPath = (() => { try { return new URL(page.url()).pathname } catch { return '' } })()
   if (currentPath !== route && /\/(login|signin|auth)\b/.test(currentPath)) {
     await page.close().catch(() => {})
-    return { route, url: fullUrl, elements_discovered: 0, elements_by_type: {}, interactions: [], api_calls: apiCalls, errors: [`Redirected to ${currentPath} — authentication may have failed`], duration_ms: Date.now() - startTime }
+    return { route, url: fullUrl, elements_discovered: 0, elements_by_type: {}, interactions: [], api_calls: apiCalls, errors: [`Redirected to ${currentPath} — sign-in required`], redirected_to: currentPath, duration_ms: Date.now() - startTime }
   }
 
   // Discover all interactive elements

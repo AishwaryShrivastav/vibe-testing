@@ -290,7 +290,14 @@ export async function executeScenarios(
       if (protectedRoutes.length > 0) {
         logger.section(`Exploring ${protectedRoutes.length} pages (element-by-element)`)
         const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist)
-        explorations.push(...authExplorations)
+        // Signed in, a bounce to sign-in means the session was lost, not that the page is protected.
+        explorations.push(...authExplorations.map(exploration => ({
+          ...exploration,
+          signed_in: true,
+          errors: exploration.redirected_to
+            ? [`Redirected to ${exploration.redirected_to} while signed in — the session expired or login did not stick`]
+            : exploration.errors,
+        })))
       }
 
       // ── Phase 4: Logout round-trip (own session, so the others stay signed in) ──
