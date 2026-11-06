@@ -10,7 +10,9 @@ on:
 jobs:
   build:
     name: Build & Test
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest now moves to Ubuntu 26, which Playwright's
+    # `install --with-deps` doesn't support yet (its system package list stops at 24.04).
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         node-version: [20, 22]
