@@ -4,6 +4,8 @@ import { ensureDir } from '../../utils/file.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
 import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
 import { probeForms } from './boundary-probes.js'
+import { verifyCreatedValues } from './form-checks.js'
+import { detectBrokenValues, findEmptyState, newSuccessLines, visibleText, watchConsoleErrors, watchResourceFailures } from './page-checks.js'
 import path from 'path'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ export interface PageExploration {
   interactions: InteractionOutcome[]
   api_calls: ApiObservation[]
   errors: string[]
+  /** Lower-confidence findings, e.g. placeholder values such as "Category: Unknown". */
+  warnings?: string[]
   duration_ms: number
   screenshot_path?: string
 }
@@ -287,6 +291,7 @@ async function testButton(
 
   const before = await capturePageState(page)
   const crashBefore = await detectCrashText(page)
+  const textBefore = await visibleText(page)
   const signalsBefore = serverSignals.length
 
   try {
@@ -298,6 +303,20 @@ async function testButton(
   // Short settle — 400ms is enough for dialogs/toasts; 800ms was wasteful
   await page.waitForTimeout(400)
   await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+
+  // An action that reports success while the page shows an empty state
+  // (e.g. "Checkout successful!" next to "No items in the cart") did nothing.
+  const emptyState = findEmptyState(textBefore)
+  if (emptyState) {
+    const success = newSuccessLines(textBefore, await visibleText(page))[0]
+    if (success) {
+      return {
+        element: element.text, elementType: 'button', action: 'click', result: 'error',
+        details: `Empty-state action: clicking "${element.text}" while the page showed "${emptyState}" reported "${success}"`,
+        duration_ms: Date.now() - start,
+      }
+    }
+  }
 
   // A click that crashed the server is a broken element, whatever else changed.
   const crashAfter = await detectCrashText(page)
@@ -544,6 +563,10 @@ function generateTestValue(element: DiscoveredElement): string {
 export interface ExploreOptions {
   /** Submit forms with malformed/boundary values (G9). Default true. */
   boundaryProbes?: boolean
+  /** Submit add/create forms with a marker and check it is shown. Default true. */
+  createChecks?: boolean
+  /** Repeat add actions and follow in-app links by clicking. Default true. */
+  journey?: boolean
 }
 
 export async function explorePage(
@@ -559,6 +582,8 @@ export async function explorePage(
   const apiCalls: ApiObservation[] = []
   const errors: string[] = []
   const serverWatch = watchServerErrors(page)
+  const consoleWatch = watchConsoleErrors(page)
+  const resourceWatch = watchResourceFailures(page, (() => { try { return new URL(baseUrl).origin } catch { return '' } })())
 
   // Intercept ALL network requests for API monitoring
   const requestTimings = new Map<string, number>()
@@ -643,6 +668,14 @@ export async function explorePage(
   logger.dim(`    ${elements.length} elements: ${Object.entries(elementsByType).map(([k, v]) => `${v} ${k}s`).join(', ')}`)
 
   const interactions: InteractionOutcome[] = []
+  const brokenValues = new Map<string, string>()   // finding -> where
+  const placeholderValues = new Map<string, string>()
+  const scanValues = async (where: string) => {
+    const found = await detectBrokenValues(page)
+    for (const line of found.broken) if (!brokenValues.has(line)) brokenValues.set(line, where)
+    for (const line of found.placeholders) if (!placeholderValues.has(line)) placeholderValues.set(line, where)
+  }
+  await scanValues(route)
 
   const isBlocked = (el: DiscoveredElement) =>
     blocklist?.isBlocked(el.selector, el.text) ?? false
@@ -670,11 +703,18 @@ export async function explorePage(
   for (const btn of buttons.slice(0, 20)) {
     interactions.push(await testButton(page, btn, fullUrl, serverWatch.signals))
   }
+  await scanValues(route)
 
   // ── Phase 5: Links (verify + follow internal ones) ──
   const links = elements.filter(e => e.type === 'link' && !isBlocked(e))
   for (const link of links.slice(0, 12)) {
     interactions.push(await testLink(page, link, fullUrl))
+  }
+
+  // ── Phase 5b: In-app journey — repeat "add" actions, then move through the
+  // app by clicking (client-side navigation keeps app state, like a user) ──
+  if (options.journey !== false) {
+    interactions.push(...await inAppJourney(page, fullUrl, buttons, links, isBlocked, scanValues))
   }
 
   // Take final screenshot
@@ -684,23 +724,38 @@ export async function explorePage(
     await page.screenshot({ path: screenshotPath, fullPage: true })
   } catch { /* non-critical */ }
 
-  // ── Phase 6: Boundary input probes on forms (G9) ──
+  // ── Phase 6: Create-then-verify on add/create/save forms ──
+  if (options.createChecks !== false) {
+    interactions.push(...await verifyCreatedValues(page, fullUrl, blocklist))
+  }
+
+  // ── Phase 7: Boundary input probes on forms (G9) ──
   if (options.boundaryProbes !== false) {
     const probes = await probeForms(page, fullUrl, serverWatch.signals, blocklist)
     interactions.push(...probes)
   }
 
   // Every server failure is reported once (page load, clicks, probes), plus
-  // crash text and hangs that interactions caused.
+  // crash text, hangs and functional failures that interactions caused.
   await settleSignals(serverWatch.signals)
   for (const signal of uniqueSignals(serverWatch.signals)) errors.push(describeSignal(signal))
   for (const interaction of interactions) {
-    if (interaction.result === 'error' && /^(Crash text|No response)/.test(interaction.details)) {
+    if (interaction.result === 'error' && /^(Crash text|No response|Empty-state action|Submitted value not shown)/.test(interaction.details)) {
       errors.push(`${interaction.element} (${interaction.action}): ${interaction.details}`)
     }
   }
+  await consoleWatch.settle()
+  for (const message of consoleWatch.messages) errors.push(`Console error: ${message}`)
+  for (const [line, where] of brokenValues) errors.push(`Broken value on ${where}: "${line}"`)
+  for (const resource of resourceWatch.broken) errors.push(`Broken resource: ${resource}`)
+  const warnings = [
+    ...[...placeholderValues].map(([line, where]) => `Placeholder value on ${where}: "${line}"`),
+    ...resourceWatch.unavailable.map(resource => `Resource unavailable: ${resource}`),
+  ]
 
   serverWatch.stop()
+  consoleWatch.stop()
+  resourceWatch.stop()
   await page.close().catch(() => {})
 
   return {
@@ -711,9 +766,77 @@ export async function explorePage(
     interactions,
     api_calls: apiCalls,
     errors,
+    warnings,
     duration_ms: Date.now() - startTime,
     screenshot_path: screenshotPath,
   }
+}
+
+const ADD_ACTION = /^\+$|\badd\b|\bplus\b|\bincrease\b/i
+
+/**
+ * Repeat each kind of "add" action twice (double-add is a classic source of
+ * duplicates and stale totals), then follow in-app links by clicking them so
+ * single-page apps keep their state, and scan each destination for broken
+ * values. Console errors and server failures are collected by the page-level
+ * watchers while this runs.
+ */
+async function inAppJourney(
+  page: Page,
+  pageUrl: string,
+  buttons: DiscoveredElement[],
+  links: DiscoveredElement[],
+  isBlocked: (el: DiscoveredElement) => boolean,
+  scanValues: (where: string) => Promise<void>,
+): Promise<InteractionOutcome[]> {
+  const outcomes: InteractionOutcome[] = []
+  const start = Date.now()
+  const origin = (() => { try { return new URL(pageUrl).origin } catch { return '' } })()
+  try {
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+    await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
+  } catch {
+    return outcomes
+  }
+
+  const addButtons = buttons.filter(b => ADD_ACTION.test(b.text) && !isDestructiveAction(b.text) && !isBlocked(b)).slice(0, 2)
+  for (const button of addButtons) {
+    try {
+      await resolveAndClick(page, button, 3000)
+      await page.waitForTimeout(250)
+      await resolveAndClick(page, button, 3000)
+      await page.waitForTimeout(250)
+      outcomes.push({ element: button.text, elementType: 'button', action: 'journey: repeat add', result: 'success', details: 'Clicked twice', duration_ms: Date.now() - start })
+    } catch (err) {
+      outcomes.push({ element: button.text, elementType: 'button', action: 'journey: repeat add', result: 'skipped', details: `Could not repeat: ${(err as Error).message.slice(0, 80)}`, duration_ms: Date.now() - start })
+    }
+  }
+
+  const internal = links.filter(link => {
+    if (!link.href || isBlocked(link) || isAuthNavigation(link.text, link.href) || isDestructiveAction(link.text)) return false
+    try {
+      const url = new URL(link.href)
+      return url.origin === origin && url.pathname !== new URL(pageUrl).pathname && !url.hash
+    } catch {
+      return false
+    }
+  }).slice(0, 6)
+
+  for (const link of internal) {
+    const path = new URL(link.href!).pathname
+    const locator = page.locator(`a[href="${link.href}"], a[href="${path}"]`).first()
+    if (!await locator.isVisible({ timeout: 800 }).catch(() => false)) continue
+    try {
+      await locator.click({ timeout: 3000 })
+      await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
+      await page.waitForTimeout(300)
+      await scanValues(`${path} (via in-app navigation)`)
+      outcomes.push({ element: link.text || path, elementType: 'link', action: 'journey: navigate', result: 'navigated', details: `Opened ${path} in-app`, duration_ms: Date.now() - start })
+    } catch (err) {
+      outcomes.push({ element: link.text || path, elementType: 'link', action: 'journey: navigate', result: 'error', details: `In-app navigation failed: ${(err as Error).message.slice(0, 80)}`, duration_ms: Date.now() - start })
+    }
+  }
+  return outcomes
 }
 
 // ─── Multi-page exploration orchestrator ──────────────────────────────────────

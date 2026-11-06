@@ -1274,7 +1274,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatRetryFindings(result.summary.retry_findings)}`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}`
 
   return {
     content: [{ type: 'text', text: summary }],
@@ -1316,7 +1316,7 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatRetryFindings(result.summary.retry_findings)}`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}`
 
   return {
     content: [{ type: 'text', text: roundsLine }],
@@ -1328,7 +1328,14 @@ function formatExplorerFailures(failures: string[] | undefined): string {
   if (!failures?.length) return ''
   const shown = failures.slice(0, 10).map(failure => `  - ${failure.slice(0, 220)}`).join('\n')
   const more = failures.length > 10 ? `\n  - …and ${failures.length - 10} more (see report)` : ''
-  return `\n- Server errors found while exploring: ${failures.length}\n${shown}${more}`
+  return `\n- Problems found while exploring (server errors, console errors, broken values, functional failures): ${failures.length}\n${shown}${more}`
+}
+
+function formatExplorerWarnings(warnings: string[] | undefined): string {
+  if (!warnings?.length) return ''
+  const shown = warnings.slice(0, 10).map(warning => `  - ${warning.slice(0, 220)}`).join('\n')
+  const more = warnings.length > 10 ? `\n  - …and ${warnings.length - 10} more (see report)` : ''
+  return `\n- Warnings (possible missing data, not counted as failures): ${warnings.length}\n${shown}${more}`
 }
 
 function formatRetryFindings(findings: string[] | undefined): string {

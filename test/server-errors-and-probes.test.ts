@@ -202,7 +202,7 @@ describe('explorer boundary probes (G9) and crash detection (V8)', () => {
     }
   }
   const probes = (exploration: Awaited<ReturnType<typeof explore>>) =>
-    exploration.interactions.filter(i => i.elementType === 'form')
+    exploration.interactions.filter(i => i.elementType === 'form' && i.action.startsWith('boundary'))
 
   it('finds the 500 caused by non-numeric input in a numeric-looking field', async () => {
     const exploration = await explore('/calc')

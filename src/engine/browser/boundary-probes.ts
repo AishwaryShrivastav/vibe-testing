@@ -29,7 +29,7 @@ const LARGE_NUMBER = '9'.repeat(20)
 
 const NUMERIC_HINT = /amount|qty|quantity|price|cost|percent|pct|\bage\b|count|total|rate|tax|salary|income|zip|postal|routing|acc(?:oun)?t.?(?:no|num)|number|\byear|month|\bday|score|weight|height|days|hours|minutes|limit|balance|deposit|contribution|pretax|roth|quota/i
 
-interface FieldInfo {
+export interface FieldInfo {
   key: string
   type: string
   numeric: boolean
@@ -38,7 +38,7 @@ interface FieldInfo {
   label: string
 }
 
-interface FormInfo {
+export interface FormInfo {
   key: string
   label: string
   probeable: boolean
@@ -101,7 +101,7 @@ function probeValue(kind: ProbeKind, field: FieldInfo): string | undefined {
 }
 
 /** A valid value for fields a probe does not target, so required fields don't block submission. */
-function fillerValue(field: FieldInfo): string | undefined {
+export function fillerValue(field: FieldInfo): string | undefined {
   if (field.value) return undefined
   if (field.type === 'email') return 'vibe-test@example.com'
   if (field.type === 'url') return 'https://example.com'
@@ -212,13 +212,15 @@ function outcome(
 async function reload(page: Page, url: string): Promise<boolean> {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+    // Single-page apps render their forms after the document has loaded.
+    await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
     return true
   } catch {
     return false
   }
 }
 
-async function submit(page: Page, formKey: string): Promise<void> {
+export async function submit(page: Page, formKey: string): Promise<void> {
   const form = page.locator(`[data-vibe-form="${formKey}"]`).first()
   const button = form.locator('button[type="submit"], input[type="submit"], button:not([type])').first()
   if (await button.isVisible({ timeout: 500 }).catch(() => false)) {
@@ -232,7 +234,7 @@ async function submit(page: Page, formKey: string): Promise<void> {
 }
 
 /** Tag visible forms and their fillable fields; return what can be probed. */
-async function tagForms(page: Page): Promise<FormInfo[]> {
+export async function tagForms(page: Page): Promise<FormInfo[]> {
   return await page.evaluate(`(${TAG_SCRIPT})(${JSON.stringify(NUMERIC_HINT.source)})`) as FormInfo[]
 }
 
@@ -250,6 +252,15 @@ const TAG_SCRIPT = String.raw`function (numericHintSource) {
     if (el.labels) for (var i = 0; i < el.labels.length; i++) parts.push(el.labels[i].innerText || '')
     parts.push(el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || '')
     return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+  }
+  // One readable name for messages: the visible label (or aria-label /
+  // placeholder), plus the field's name attribute when it differs.
+  function displayName(el) {
+    var label = el.labels && el.labels.length ? (el.labels[0].innerText || '').trim() : ''
+    var primary = label || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.id || ''
+    var name = el.getAttribute('name') || ''
+    primary = primary.replace(/\s+/g, ' ').trim().slice(0, 40)
+    return name && name !== primary ? primary + ' [' + name + ']' : primary
   }
   var result = []
   Array.prototype.forEach.call(document.forms, function (form, formIndex) {
@@ -275,7 +286,7 @@ const TAG_SCRIPT = String.raw`function (numericHintSource) {
       fields.push({
         key: String(fieldIndex), type: type, numeric: numeric,
         freeText: !numeric && freeTextTypes.indexOf(type) !== -1,
-        value: value, label: text.slice(0, 40) || type,
+        value: value, label: displayName(el) || type,
       })
     })
     var probeable = !hasPassword && fields.length > 0

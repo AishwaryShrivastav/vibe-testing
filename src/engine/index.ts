@@ -162,6 +162,7 @@ export class VibeTester {
         total: results.length, passed, failed, errors, duration_ms: duration,
         elements_explored: elementsExplored, api_calls_observed: apiCallsObserved,
         explorer_failures: explorerFailures,
+        explorer_warnings: collectExplorerWarnings(explorations),
         retry_findings: retryFindings,
       },
     }
@@ -275,6 +276,7 @@ export class VibeTester {
         elements_explored: elementsExplored,
         api_calls_observed: apiCallsObserved,
         explorer_failures: collectExplorerFailures(cr.explorations),
+        explorer_warnings: collectExplorerWarnings(cr.explorations),
         retry_findings: collectRetryFindings(cr.total_results, cr.retry_findings),
         converge_rounds: cr.rounds,
       },
@@ -288,10 +290,36 @@ export class VibeTester {
  * exceptions) — not its own diagnostics such as navigation or discovery problems.
  */
 export function collectExplorerFailures(explorations: PageExploration[]): string[] {
-  const failures = explorations.flatMap(exploration => exploration.errors
-    .filter(error => /Server error \d{3}|Crash text|No response within|^Uncaught exception/.test(error))
-    .map(error => `${exploration.route}: ${error}`))
-  return [...new Set(failures)]
+  // The same failure seen on several pages (a broken shared script, a console
+  // error in the layout) is one finding: list the first page and a count.
+  const routesByFailure = new Map<string, string[]>()
+  for (const exploration of explorations) {
+    for (const error of exploration.errors) {
+      if (!EXPLORER_FAILURE.test(error)) continue
+      const routes = routesByFailure.get(error) ?? []
+      if (!routes.includes(exploration.route)) routes.push(exploration.route)
+      routesByFailure.set(error, routes)
+    }
+  }
+  return [...routesByFailure].map(([error, routes]) =>
+    `${routes[0]}${routes.length > 1 ? ` (+${routes.length - 1} more page${routes.length > 2 ? 's' : ''})` : ''}: ${error}`)
+}
+
+/** Explorer findings that are real failures, as opposed to its own diagnostics. */
+const EXPLORER_FAILURE = /Server error \d{3}|Crash text|No response within|^Uncaught exception|^Console error|^Broken value|^Broken resource|Empty-state action|Submitted value not shown/
+
+/** Lower-confidence explorer findings (e.g. "Category: Unknown"), reported without failing the run. */
+export function collectExplorerWarnings(explorations: PageExploration[]): string[] {
+  // The same value seen from several explored pages (e.g. via in-app
+  // navigation) is one finding: key by the page it is on and the value.
+  const byKey = new Map<string, string>()
+  for (const exploration of explorations) {
+    for (const warning of exploration.warnings ?? []) {
+      const key = warning.replace(/ \(via in-app navigation\)/, '')
+      if (!byKey.has(key)) byKey.set(key, key)
+    }
+  }
+  return [...byKey.values()]
 }
 
 /**

@@ -2,6 +2,7 @@ import { chromium, BrowserContext, Page, Locator, type Response } from 'playwrig
 import { TestScenario, TestResult, TestStep, StepLog, ApiError } from '../../types/index.js'
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
 import { describeLoginRetry, performLoginDetailed, type LoginOutcome } from './auth.js'
+import { checkLogoutRoundTrip } from './session-checks.js'
 import { verifyResult } from './verifier.js'
 import { exploreAllPages, PageExploration } from './explorer.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
@@ -290,6 +291,16 @@ export async function executeScenarios(
         logger.section(`Exploring ${protectedRoutes.length} pages (element-by-element)`)
         const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist)
         explorations.push(...authExplorations)
+      }
+
+      // ── Phase 4: Logout round-trip (own session, so the others stay signed in) ──
+      const protectedPage = protectedRoutes.find(route => !/[:[*]/.test(route))
+      if (protectedPage) {
+        const logout = await checkLogoutRoundTrip(browser2, config, protectedPage, screenshotsDir, blocklist)
+        if (logout) {
+          results.push(logout)
+          logResult(logout)
+        }
       }
 
       await authCtx.close().catch(() => {})

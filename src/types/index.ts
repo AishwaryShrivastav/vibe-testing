@@ -338,6 +338,8 @@ export interface VibeRunResult {
     api_calls_observed: number
     /** Server errors, hangs and uncaught exceptions found while exploring pages, e.g. "/contributions: Server error 500 on POST /contributions: …". */
     explorer_failures?: string[]
+    /** Lower-confidence explorer findings such as placeholder values ("Category: Unknown"); do not fail a run. */
+    explorer_warnings?: string[]
     /** Logins and scenarios that only succeeded on a retry (first attempt's evidence included). */
     retry_findings?: string[]
     /** Set by `converge`: baseline + follow-up rounds executed */

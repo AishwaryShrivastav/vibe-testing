@@ -1,6 +1,7 @@
 import { Page } from 'playwright'
 import { TestScenario, ApiError, VerificationStatus } from '../../types/index.js'
 import { hasExplicitAssertion, hasStrongExplicitAssertion } from './assertions.js'
+import { countVisibleControls } from './page-checks.js'
 
 export interface VerificationResult {
   passed: boolean
@@ -163,9 +164,12 @@ async function heuristicVerification(
   apiErrors?: ApiError[]
 ): Promise<VerificationResult> {
   const bodyText = await page.locator('body').innerText().catch(() => '')
-  const hasContent = bodyText.trim().length > 50
   const isErrorPage = /404|500|not found|server error/i.test(bodyText.slice(0, 500))
-  const isBlankPage = bodyText.trim().length < 10
+  // Short pages such as a sign-in form have little text but clearly rendered:
+  // visible form controls count as content, so they are not left inconclusive.
+  const controls = bodyText.trim().length > 50 ? 0 : await countVisibleControls(page)
+  const hasContent = bodyText.trim().length > 50 || (controls > 0 && bodyText.trim().length >= 3)
+  const isBlankPage = bodyText.trim().length < 10 && controls === 0
   const currentPath = extractPath(currentUrl)
   const isFormScenario = scenario.steps.some(s => s.action === 'fill')
 
