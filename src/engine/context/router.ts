@@ -1,6 +1,7 @@
 import { Framework, Route } from '../../types/index.js'
 import { glob, readFile } from '../../utils/file.js'
 import path from 'path'
+import { parseExpressRoutes } from './express-routes.js'
 
 export async function parseRoutes(framework: Framework, codebasePath: string): Promise<Route[]> {
   switch (framework) {
@@ -468,24 +469,6 @@ function readBalanced(text: string, openIdx: number): string | null {
   return null
 }
 
-async function parseExpressRoutes(codebasePath: string): Promise<Route[]> {
-  // Cover both TS layouts (src/routes, src/index.ts) and the common plain-JS
-  // layout (routes/, app.js, server.js at the root), incl. ESM/CJS extensions.
-  const exts = '{ts,js,mts,mjs,cts,cjs}'
-  const routeFiles = await glob(`{src/,}routes/**/*.${exts}`, codebasePath)
-  const mainFiles  = await glob(`{src/,}{index,app,server}.${exts}`, codebasePath)
-
-  const routes: Route[] = []
-
-  for (const f of new Set([...routeFiles, ...mainFiles])) {
-    const content = await readFile(path.join(codebasePath, f))
-    const extracted = extractExpressRoutes(content)
-    routes.push(...extracted)
-  }
-
-  return routes
-}
-
 function extractDynamicSegments(routePath: string): string[] {
   const matches = routePath.match(/\[([^\]]+)\]|:([a-zA-Z]+)/g) || []
   return matches.map(m => m.replace(/[\[\]:]/g, ''))
@@ -545,27 +528,6 @@ function extractRoutesFromContent(content: string): Route[] {
         type: 'page',
         requires_auth: false,
         dynamic_segments: extractDynamicSegments(routePath),
-      })
-    }
-  }
-
-  return routes
-}
-
-function extractExpressRoutes(content: string): Route[] {
-  const routes: Route[] = []
-  const methods = ['get', 'post', 'put', 'delete', 'patch'] as const
-
-  for (const method of methods) {
-    const pattern = new RegExp(`\\.(${method})\\(['"\`]([^'"\`]+)['"\`]`, 'gi')
-    const matches = content.matchAll(pattern)
-    for (const match of matches) {
-      routes.push({
-        path: match[2],
-        method: method.toUpperCase() as Route['method'],
-        type: 'api',
-        requires_auth: false,
-        dynamic_segments: extractDynamicSegments(match[2]),
       })
     }
   }

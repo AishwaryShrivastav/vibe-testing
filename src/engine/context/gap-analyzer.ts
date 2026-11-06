@@ -1,11 +1,13 @@
 import { Route, CoverageMap, Gap, Memory } from '../../types/index.js'
+import { isDestructivePath } from '../../utils/destructive-path.js'
 
 export function analyzeGaps(
   routes: Route[],
   coverage: CoverageMap,
   memory: Memory
 ): Gap[] {
-  const pageRoutes = routes.filter(r => r.type === 'page')
+  // Logout/delete-style routes act when opened; they are never test pages.
+  const pageRoutes = routes.filter(r => r.type === 'page' && !isDestructivePath(r.path))
 
   const gaps: Gap[] = pageRoutes.map(route => {
     const covered = coverage[route.path]
