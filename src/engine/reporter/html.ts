@@ -6,6 +6,8 @@ import packageJson from '../../../package.json' with { type: 'json' }
 import fs from 'fs/promises'
 import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
 import { collectExplorerWarnings, collectRetryFindings, findingKind, groupExplorerFailures, isExplorerFailure, type GroupedFinding } from '../findings.js'
+import { PAGE_THUMB, STEP_THUMB, prepareReportImages, type ReportImage } from './images.js'
+import path from 'path'
 
 export interface ReportFindings {
   /**
@@ -13,7 +15,20 @@ export interface ReportFindings {
    * scenario retries in `results`; pass it to include login/crawl retries.
    */
   retryFindings?: string[]
+  /**
+   * Wall-clock duration of the whole run (scan, scenarios, exploration and
+   * checks). Without it the header shows the time spent in scenarios only,
+   * labelled as such.
+   */
+  durationMs?: number
+  /**
+   * Folder the report is written to. Full-size screenshots under it are linked
+   * relative to the report; defaults to <codebase>/.vibe.
+   */
+  reportDir?: string
 }
+
+type ImageMap = Map<string, ReportImage>
 
 export async function generateHtmlReport(
   results: TestResult[],
@@ -41,35 +56,20 @@ export async function generateHtmlReport(
   const apiErrors = explorations.reduce((s, e) => s + e.api_calls.filter(a => a.isError).length, 0)
   const brokenElements = explorations.reduce((s, e) => s + e.interactions.filter(i => i.result === 'error').length, 0)
 
-  const screenshotCache: Record<string, string> = {}
-  const stepScreenshotCache: Record<string, string> = {}
-  for (const result of results) {
-    if (result.screenshot_path) {
-      try {
-        const buf = await fs.readFile(result.screenshot_path)
-        screenshotCache[result.scenario.id] = buf.toString('base64')
-      } catch { /* skip */ }
-    }
-    for (const log of result.step_logs ?? []) {
-      if (log.screenshot_path) {
-        try {
-          const buf = await fs.readFile(log.screenshot_path)
-          stepScreenshotCache[log.screenshot_path] = buf.toString('base64')
-        } catch { /* skip */ }
-      }
-    }
-  }
+  // Screenshots: small embedded JPEG thumbnails, full-size files linked.
+  const reportDir = findings.reportDir ?? (config.codebase_path ? path.join(config.codebase_path, '.vibe') : undefined)
+  const images = await prepareReportImages([
+    ...results.flatMap(r => [
+      ...(r.screenshot_path ? [{ path: r.screenshot_path, size: PAGE_THUMB }] : []),
+      ...(r.step_logs ?? []).flatMap(log => log.screenshot_path ? [{ path: log.screenshot_path, size: STEP_THUMB }] : []),
+    ]),
+    ...explorations.flatMap(e => e.screenshot_path ? [{ path: e.screenshot_path, size: PAGE_THUMB }] : []),
+  ], reportDir)
 
-  // Keyed by position: a route can be explored twice (logged out, then signed in).
-  const explorationScreenshots: Array<string | undefined> = []
-  for (const [index, exp] of explorations.entries()) {
-    if (exp.screenshot_path) {
-      try {
-        const buf = await fs.readFile(exp.screenshot_path)
-        explorationScreenshots[index] = buf.toString('base64')
-      } catch { /* skip */ }
-    }
-  }
+  const changesCount = explorations.reduce((sum, e) => sum + (e.changes?.length ?? 0), 0)
+  const durationTile = findings.durationMs !== undefined
+    ? `<div class="meta-item"><div class="label">Duration</div><div class="value">${formatDuration(findings.durationMs)}</div><div class="sub">scenarios ${formatDuration(totalMs)}</div></div>`
+    : `<div class="meta-item"><div class="label">Scenario time</div><div class="value">${formatDuration(totalMs)}</div><div class="sub">excludes exploration</div></div>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -94,32 +94,50 @@ ${CSS}
     <div class="meta-item"><div class="label">Scenarios executed</div><div class="value">${metrics.scenariosExecuted}</div></div>
     <div class="meta-item"><div class="label">Elements</div><div class="value">${totalElements}</div></div>
     <div class="meta-item"><div class="label">API Calls</div><div class="value">${totalApis}${apiErrors > 0 ? ` <span style="color:var(--fail)">(${apiErrors} errors)</span>` : ''}</div></div>
-    <div class="meta-item"><div class="label">Duration</div><div class="value">${(totalMs / 1000).toFixed(1)}s</div></div>
+    ${durationTile}
   </div>
   <p class="metric-summary">${formatReportMetrics(metrics)}</p>
 </header>
 
-<div class="summary-bar">
-  <div class="summary-stat pass"><div class="num">${metrics.scenariosPassed}</div><div class="lbl">Passed</div></div>
-  <div class="summary-stat fail"><div class="num">${metrics.scenariosFailed}</div><div class="lbl">Failed</div></div>
-  <div class="summary-stat skip"><div class="num">${metrics.scenariosSkipped}</div><div class="lbl">Skipped</div></div>
-  <div class="summary-stat error"><div class="num">${errored.length}</div><div class="lbl">Errors</div></div>
-  <div class="summary-stat outcome"><div class="num">${outcomeVerified.length}</div><div class="lbl">Outcome verified</div></div>
-  <div class="summary-stat smoke"><div class="num">${smokeChecks.length}</div><div class="lbl">Smoke check passed</div></div>
-  <div class="summary-stat not"><div class="num">${notVerified.length}</div><div class="lbl">Not verified</div></div>
-  <div class="summary-stat ${explorerFailures.length > 0 ? 'fail' : 'skip'}"><div class="num">${explorerFailures.length}</div><div class="lbl">Problems found</div></div>
-  <div class="summary-stat ${explorerWarnings.length + retryFindings.length > 0 ? 'error' : 'skip'}"><div class="num">${explorerWarnings.length + retryFindings.length}</div><div class="lbl">Warnings</div></div>
+${renderBugsFound([...failed, ...errored], explorerFailures, { warnings: explorerWarnings.length, retries: retryFindings.length, changes: changesCount })}
+
+<div class="summary-groups">
+  <div class="summary-group">
+    <div class="group-label">Scenarios</div>
+    <div class="summary-bar">
+      <div class="summary-stat pass"><div class="num">${metrics.scenariosPassed}</div><div class="lbl">Passed</div></div>
+      <div class="summary-stat fail"><div class="num">${metrics.scenariosFailed}</div><div class="lbl">Failed</div></div>
+      <div class="summary-stat error"><div class="num">${errored.length}</div><div class="lbl">Errors</div></div>
+      <div class="summary-stat skip"><div class="num">${metrics.scenariosSkipped}</div><div class="lbl">Skipped</div></div>
+    </div>
+  </div>
+  <div class="summary-group">
+    <div class="group-label">How passes were verified</div>
+    <div class="summary-bar">
+      <div class="summary-stat outcome"><div class="num">${outcomeVerified.length}</div><div class="lbl">Outcome verified</div></div>
+      <div class="summary-stat smoke"><div class="num">${smokeChecks.length}</div><div class="lbl">Smoke check passed</div></div>
+      <div class="summary-stat not"><div class="num">${notVerified.length}</div><div class="lbl">Not verified</div></div>
+    </div>
+  </div>
+  <div class="summary-group">
+    <div class="group-label">Exploration</div>
+    <div class="summary-bar">
+      <div class="summary-stat ${explorerFailures.length > 0 ? 'fail' : 'skip'}"><div class="num">${explorerFailures.length}</div><div class="lbl">Problems found</div></div>
+      <div class="summary-stat ${explorerWarnings.length + retryFindings.length > 0 ? 'error' : 'skip'}"><div class="num">${explorerWarnings.length + retryFindings.length}</div><div class="lbl">Warnings</div></div>
+      <div class="summary-stat ${changesCount > 0 ? 'smoke' : 'skip'}"><div class="num">${changesCount}</div><div class="lbl">Changes made</div></div>
+    </div>
+  </div>
 </div>
 
-${renderFindingsSection(explorerFailures, retryFindings, explorerWarnings)}
+${renderWarningsSection(retryFindings, explorerWarnings)}
 
 ${renderAppChangesSection(explorations)}
 
-${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
+${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, images)).join('\n')}` : ''}
 
-${passed.length > 0 ? `<h2>Passed Scenarios</h2>\n${passed.map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
+${passed.length > 0 ? `<h2>Passed Scenarios</h2>\n${passed.map(r => renderScenarioCard(r, images)).join('\n')}` : ''}
 
-${explorations.length > 0 ? renderExplorationSection(explorations, explorationScreenshots) : ''}
+${explorations.length > 0 ? renderExplorationSection(explorations, images) : ''}
 
 ${coverageGaps.length > 0 ? renderCoverageGapsSection(coverageGaps) : ''}
 
@@ -140,12 +158,15 @@ ${renderIntelligenceSection(recommendations)}
 document.querySelectorAll('.card-header').forEach(h => {
   h.addEventListener('click', () => h.closest('.card').classList.toggle('open'))
 })
-// Enlarge step screenshots on click
-document.querySelectorAll('.step-thumb').forEach(img => {
+// Enlarge a screenshot on click: load the full-size file (falls back to the thumbnail)
+document.querySelectorAll('.zoomable').forEach(img => {
   img.addEventListener('click', e => {
+    e.preventDefault()
     e.stopPropagation()
     const modal = document.getElementById('screenshotModal')
-    document.getElementById('modalImg').src = img.src
+    const modalImg = document.getElementById('modalImg')
+    modalImg.onerror = () => { modalImg.onerror = null; modalImg.src = img.src }
+    modalImg.src = img.dataset.full || img.src
     modal.classList.add('active')
   })
 })
@@ -157,54 +178,111 @@ document.getElementById('screenshotModal').addEventListener('click', () => {
 </html>`
 }
 
-// ─── Findings Section ─────────────────────────────────────────────────────────
+// ─── Bugs Found (top of the report) ───────────────────────────────────────────
+
+/** The kind badge already names it: "Console error: X" reads as "X", "Checkout (click): Empty-state action: X" as "Checkout (click): X". */
+function withoutKind(finding: string, kind: string): string {
+  return finding.replace(new RegExp(`(^|: )${kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: `), '$1')
+}
+
+/** A verdict as one trimmed line for the summary. */
+function oneLine(text: string, max = 220): string {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
 
 /**
- * Problems found outside scripted scenarios: explorer failures (grouped by kind,
- * with every page they were seen on), operations that only passed on a retry,
- * and lower-confidence warnings.
+ * Everything that is a bug, in one place, first: failed and errored scenarios
+ * (name, route, one-line reason) and explorer problems grouped by kind with the
+ * pages they were seen on. Details stay in the sections below.
  */
-function renderFindingsSection(failures: GroupedFinding[], retryFindings: string[], warnings: string[]): string {
-  if (failures.length + retryFindings.length + warnings.length === 0) return ''
+function renderBugsFound(
+  failedScenarios: TestResult[],
+  failures: GroupedFinding[],
+  counts: { warnings: number; retries: number; changes: number },
+): string {
+  const total = failedScenarios.length + failures.length
+  const pointers = [
+    counts.retries > 0 ? `${counts.retries} passed only on retry` : '',
+    counts.warnings > 0 ? `${counts.warnings} warning${counts.warnings > 1 ? 's' : ''}` : '',
+    counts.changes > 0 ? `${counts.changes} change${counts.changes > 1 ? 's' : ''} made to the app` : '',
+  ].filter(Boolean)
+  const pointerLine = pointers.length > 0
+    ? `<p class="section-note bugs-also">Also: ${pointers.map(p => esc(p)).join(' &middot; ')} (see below).</p>`
+    : ''
+
+  if (total === 0) {
+    return `<h2 id="bugs-found">Bugs Found</h2>
+  <div class="bugs-none">No failing scenarios and no problems found while exploring.</div>
+  ${pointerLine}`
+  }
+
+  const scenarioRows = failedScenarios.map(r => `<tr>
+      <td><span class="badge ${r.status === 'error' ? 'error' : 'fail'}">${r.status === 'error' ? 'Scenario error' : 'Scenario failed'}</span></td>
+      <td class="finding-text"><strong>${esc(r.scenario.name)}</strong><br>${esc(oneLine(r.ai_verdict ?? r.failure_reason ?? ''))}</td>
+      <td><code>${esc(r.scenario.route)}</code></td>
+    </tr>`)
 
   const byKind = new Map<string, GroupedFinding[]>()
   for (const failure of failures) {
     const kind = findingKind(failure.finding)
     byKind.set(kind, [...(byKind.get(kind) ?? []), failure])
   }
-
-  // The kind badge already names it: "Console error: X" reads as "X",
-  // "Checkout (click): Empty-state action: X" as "Checkout (click): X".
-  const withoutKind = (finding: string, kind: string) => finding.replace(new RegExp(`(^|: )${kind}: `), '$1')
-
-  const failureRows = [...byKind].flatMap(([kind, group]) => group.map(({ finding, routes }) => `<tr>
+  const problemRows = [...byKind].flatMap(([kind, group]) => group.map(({ finding, routes }) => `<tr>
       <td><span class="badge fail">${esc(kind)}</span></td>
       <td class="finding-text">${esc(withoutKind(finding, kind))}</td>
       <td>${routes.map(r => `<code>${esc(r)}</code>`).join(' ')}</td>
-    </tr>`)).join('\n')
+    </tr>`))
 
-  const warningRows = [
+  const parts = [
+    failedScenarios.length > 0 ? `${failedScenarios.length} failing scenario${failedScenarios.length > 1 ? 's' : ''}` : '',
+    failures.length > 0 ? `${failures.length} problem${failures.length > 1 ? 's' : ''} found while exploring` : '',
+  ].filter(Boolean).join(' and ')
+
+  return `<h2 id="bugs-found">Bugs Found (${total})</h2>
+  <p class="section-note">${esc(parts)}. Explorer problems come from built-in checks (server errors, console errors, broken values and resources, empty-state actions, created values that never appear, totals that don't add up) outside the scripted scenarios.</p>
+  <div class="section-table findings-table bugs-table"><table>
+    <thead><tr><th>Kind</th><th>Finding</th><th>Pages</th></tr></thead>
+    <tbody>${[...scenarioRows, ...problemRows].join('\n')}</tbody>
+  </table></div>
+  ${pointerLine}`
+}
+
+// ─── Warnings ────────────────────────────────────────────────────────────────
+
+/** Operations that only passed on a retry, and lower-confidence findings. They don't fail the run. */
+function renderWarningsSection(retryFindings: string[], warnings: string[]): string {
+  const rows = [
     ...retryFindings.map(finding => ({ kind: 'Passed on retry', finding })),
     ...warnings.map(finding => ({ kind: findingKind(finding), finding })),
-  ].map(({ kind, finding }) => `<tr>
-      <td><span class="badge medium">${esc(kind)}</span></td>
-      <td class="finding-text" colspan="2">${esc(withoutKind(finding, kind))}</td>
-    </tr>`).join('\n')
-
-  const kindCounts = [...byKind].map(([kind, group]) => `${kind}: ${group.length}`).join(', ')
-
-  return `<h2>Problems Found While Exploring</h2>
-  <p class="section-note">Found by the explorer and built-in checks (server errors, console errors, broken values and resources, empty-state actions, created values that never appear), outside the scripted scenarios.${kindCounts ? ` ${esc(kindCounts)}.` : ''}</p>
-  ${failureRows ? `<div class="section-table findings-table"><table>
-    <thead><tr><th>Kind</th><th>Finding</th><th>Pages</th></tr></thead>
-    <tbody>${failureRows}</tbody>
-  </table></div>` : ''}
-  ${warningRows ? `<h3 class="warn-heading">Warnings (${retryFindings.length + warnings.length})</h3>
+  ]
+  if (rows.length === 0) return ''
+  return `<h2 class="warn-heading">Warnings (${rows.length})</h2>
   <p class="section-note">Inconsistent behaviour and lower-confidence findings. They do not fail the run but are worth a look.</p>
   <div class="section-table findings-table"><table>
-    <thead><tr><th>Kind</th><th colspan="2">Finding</th></tr></thead>
-    <tbody>${warningRows}</tbody>
-  </table></div>` : ''}`
+    <thead><tr><th>Kind</th><th>Finding</th></tr></thead>
+    <tbody>${rows.map(({ kind, finding }) => `<tr>
+      <td><span class="badge medium">${esc(kind)}</span></td>
+      <td class="finding-text">${esc(withoutKind(finding, kind))}</td>
+    </tr>`).join('\n')}</tbody>
+  </table></div>`
+}
+
+/** A thumbnail linked to the full-size screenshot; clicking enlarges it. */
+function screenshotFigure(image: ReportImage | undefined, label: string, alt: string): string {
+  if (!image) return ''
+  return `
+    <div class="screenshot-container">
+      <div class="screenshot-label">${esc(label)} &middot; <a href="${esc(image.full)}" target="_blank" rel="noopener">full size</a></div>
+      <img src="${esc(image.thumb ?? image.full)}" data-full="${esc(image.full)}" alt="${esc(alt)}" class="zoomable screenshot-thumb" loading="lazy">
+    </div>`
+}
+
+function formatDuration(ms: number): string {
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`
 }
 
 // ─── Changes Made to the App ──────────────────────────────────────────────────
@@ -241,9 +319,9 @@ function renderAppChangesSection(explorations: PageExploration[]): string {
 
 // ─── Exploration Section ──────────────────────────────────────────────────────
 
-function renderExplorationSection(explorations: PageExploration[], screenshots: Array<string | undefined>): string {
+function renderExplorationSection(explorations: PageExploration[], images: ImageMap): string {
   const bothSessions = explorations.some(e => e.signed_in) && explorations.some(e => !e.signed_in)
-  const cards = explorations.map((exp, index) => {
+  const cards = explorations.map(exp => {
     const working = exp.interactions.filter(i => ['success', 'content_updated', 'dialog_opened', 'navigated', 'toast_shown'].includes(i.result)).length
     const broken = exp.interactions.filter(i => i.result === 'error').length
     const skipped = exp.interactions.filter(i => i.result === 'skipped').length
@@ -279,11 +357,7 @@ function renderExplorationSection(explorations: PageExploration[], screenshots: 
       </tr>`
     }).join('\n')
 
-    const screenshotHtml = screenshots[index] ? `
-      <div class="screenshot-container">
-        <div class="screenshot-label">Page screenshot</div>
-        <img src="data:image/png;base64,${screenshots[index]}" alt="${esc(exp.route)}" loading="lazy">
-      </div>` : ''
+    const screenshotHtml = screenshotFigure(exp.screenshot_path ? images.get(exp.screenshot_path) : undefined, 'Page screenshot', exp.route)
 
     return `<div class="card${broken > 0 || problems.length > 0 ? ' open' : ''}">
     <div class="card-header">
@@ -417,7 +491,7 @@ function renderCoverageTable(productModel: ProductModel): string {
 
 // ─── Scenario Card ────────────────────────────────────────────────────────────
 
-function renderScenarioCard(result: TestResult, screenshots: Record<string, string>, stepScreenshots: Record<string, string>): string {
+function renderScenarioCard(result: TestResult, images: ImageMap): string {
   const s = result.scenario
   const status = result.status
   const verdictClass = status === 'pass' ? 'pass-verdict' : status === 'fail' ? 'fail-verdict' : 'error-verdict'
@@ -434,9 +508,9 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
     const sel = log.selector_used ? `<code>${esc(log.selector_used)}</code>` : '—'
     const urlPath = extractPath(log.url_after)
     const err = log.error ? `<br><span style="color:var(--fail);font-size:11px">${esc(log.error.slice(0, 80))}</span>` : ''
-    const stepScreenB64 = log.screenshot_path ? stepScreenshots[log.screenshot_path] : undefined
-    const screenshotCell = stepScreenB64
-      ? `<td class="step-screenshot-cell"><img src="data:image/png;base64,${stepScreenB64}" alt="step" class="step-thumb" loading="lazy"></td>`
+    const stepImage = log.screenshot_path ? images.get(log.screenshot_path) : undefined
+    const screenshotCell = stepImage
+      ? `<td class="step-screenshot-cell"><img src="${esc(stepImage.thumb ?? stepImage.full)}" data-full="${esc(stepImage.full)}" alt="step" class="step-thumb zoomable" loading="lazy"></td>`
       : `<td></td>`
     return `<tr>
       <td>${icon}</td>
@@ -449,12 +523,7 @@ function renderScenarioCard(result: TestResult, screenshots: Record<string, stri
     </tr>`
   }).join('\n')
 
-  const screenshotB64 = screenshots[s.id]
-  const screenshotHtml = screenshotB64 ? `
-    <div class="screenshot-container">
-      <div class="screenshot-label">Screenshot at end of test</div>
-      <img src="data:image/png;base64,${screenshotB64}" alt="${esc(s.name)}" loading="lazy">
-    </div>` : ''
+  const screenshotHtml = screenshotFigure(result.screenshot_path ? images.get(result.screenshot_path) : undefined, 'Screenshot at end of test', s.name)
 
   const redirectNote = wasRedirected ? `
     <div class="redirect-note">
@@ -639,6 +708,20 @@ code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-s
 .section-table table { background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 .redirect-note { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 10px 14px; border-radius: 0 6px 6px 0; margin-bottom: 16px; font-size: 13px; color: var(--warn); }
 .section-note { color: var(--text-dim); font-size: 14px; margin-bottom: 12px; }
+.meta-item .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+#bugs-found { margin-top: 8px; }
+.bugs-table table { border-color: rgba(239,68,68,0.35); }
+.bugs-none { background: var(--pass-bg); border: 1px solid rgba(34,197,94,0.25); border-left: 3px solid var(--pass); border-radius: 8px; padding: 12px 16px; font-size: 14px; margin-bottom: 12px; }
+.bugs-also { margin-top: 8px; }
+.summary-groups { display: flex; gap: 16px; flex-wrap: wrap; margin: 24px 0; }
+.summary-group { flex: 1 1 260px; }
+.summary-group .group-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.summary-group .summary-bar { margin: 0; gap: 8px; }
+.summary-group .summary-stat { min-width: 0; padding: 12px 8px; }
+.summary-group .summary-stat .num { font-size: 26px; }
+.screenshot-label a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
+.screenshot-thumb { cursor: zoom-in; max-width: 480px; }
+.screenshot-container:has(.screenshot-thumb) { display: inline-block; max-width: 100%; }
 .warn-heading { color: var(--warn); margin-top: 20px; }
 .findings-table td:first-child { white-space: nowrap; width: 1%; }
 .findings-table .finding-text { word-break: break-word; }

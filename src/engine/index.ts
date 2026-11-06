@@ -1,5 +1,5 @@
 import type { RunDiagnostic, VibeRunResult } from '../types/index.js'
-import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectRetryFindings } from './findings.js'
+import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings } from './findings.js'
 import { VibeConfigSchema, type VibeConfig, type VibeConfigInput } from '../types/config.js'
 import { buildProductModel } from './context/index.js'
 import { executeScenarios, type PageExploration } from './browser/index.js'
@@ -125,7 +125,9 @@ export class VibeTester {
     }
 
     const recs = memory.getRecommendations()
-    const report = await generateHtmlReport(results, productModel, this.config, explorations, coverageGaps, recs, { retryFindings })
+    const report = await generateHtmlReport(results, productModel, this.config, explorations, coverageGaps, recs, {
+      retryFindings, durationMs: Date.now() - startTime, reportDir: path.join(this.projectRoot, '.vibe'),
+    })
     const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
     await fs.mkdir(path.dirname(reportPath), { recursive: true })
     await fs.writeFile(reportPath, report, 'utf-8')
@@ -175,6 +177,7 @@ export class VibeTester {
         explorer_warnings: collectExplorerWarnings(explorations),
         retry_findings: retryFindings,
         app_changes: collectAppChanges(explorations),
+        failed_scenarios: collectFailedScenarios(results),
       },
     }
   }
@@ -253,7 +256,11 @@ export class VibeTester {
       cr.explorations,
       cr.final_gaps,
       recommendations,
-      { retryFindings: collectRetryFindings(cr.total_results, cr.retry_findings) },
+      {
+        retryFindings: collectRetryFindings(cr.total_results, cr.retry_findings),
+        durationMs: Date.now() - startTime,
+        reportDir: path.join(this.projectRoot, '.vibe'),
+      },
     )
     const reportPath = path.join(this.projectRoot, '.vibe', 'report.html')
     await fs.mkdir(path.dirname(reportPath), { recursive: true })
@@ -291,13 +298,14 @@ export class VibeTester {
         explorer_warnings: collectExplorerWarnings(cr.explorations),
         retry_findings: collectRetryFindings(cr.total_results, cr.retry_findings),
         app_changes: collectAppChanges(cr.explorations),
+        failed_scenarios: collectFailedScenarios(cr.total_results),
         converge_rounds: cr.rounds,
       },
     }
   }
 }
 
-export { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectRetryFindings } from './findings.js'
+export { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings } from './findings.js'
 export { generateCoverageGaps } from './coverage-gaps.js'
 export type { ConvergeOptions } from './converge.js'
 export { buildProductModel } from './context/index.js'

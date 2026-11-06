@@ -65,7 +65,8 @@ describe('HTML report: explorer findings', () => {
   it('lists explorer problems grouped by finding, with every page they were seen on', async () => {
     const report = await generateHtmlReport(results, productModel, config, explorations, [], undefined)
 
-    expect(report).toContain('<h2>Problems Found While Exploring</h2>')
+    // 1 failed scenario + 3 explorer problems, listed together at the top.
+    expect(report).toContain('<h2 id="bugs-found">Bugs Found (4)</h2>')
     expect(report).toMatch(/<div class="summary-stat fail"><div class="num">3<\/div><div class="lbl">Problems found<\/div>/)
     expect(report).toContain('<span class="badge fail">Console error</span>')
     expect(report).toContain('<span class="badge fail">Broken value</span>')
@@ -78,7 +79,7 @@ describe('HTML report: explorer findings', () => {
 
   it('keeps explorer diagnostics out of the problems list', async () => {
     const report = await generateHtmlReport(results, productModel, config, explorations, [], undefined)
-    const section = report.slice(report.indexOf('Problems Found While Exploring'), report.indexOf('<h2>Failures'))
+    const section = report.slice(report.indexOf('id="bugs-found"'), report.indexOf('<h2>Failures'))
     expect(section).not.toContain('Navigation failed')
     // …but the page card still shows it, dimmed.
     expect(report).toContain('<ul class="page-findings dim"><li>Navigation failed: net::ERR_ABORTED</li></ul>')
@@ -122,7 +123,7 @@ describe('HTML report: explorer findings', () => {
     expect(report).toContain('<span class="badge session">signed in</span>')
     expect(report).toContain('<span class="badge session">sign-in required</span>')
     expect(report).toContain('<div class="status-dot skip"></div>')
-    expect(report).not.toContain('Problems Found While Exploring')
+    expect(report).toContain('<div class="bugs-none">')
   })
 
   it('keeps each pass its own screenshot', async () => {
@@ -135,15 +136,16 @@ describe('HTML report: explorer findings', () => {
     const report = await generateHtmlReport([], productModel, config, [
       { ...exploration('/products', []), screenshot_path: path.join(dir, 'a.png') },
       { ...exploration('/products', []), screenshot_path: path.join(dir, 'b.png'), signed_in: true },
-    ], [], undefined)
-    expect(report).toContain(Buffer.from('first-pass').toString('base64'))
-    expect(report).toContain(Buffer.from('second-pass').toString('base64'))
+    ], [], undefined, { reportDir: dir })
+    // Not real images, so no thumbnails: each card still links its own full-size file.
+    expect(report).toContain('data-full="a.png"')
+    expect(report).toContain('data-full="b.png"')
     await fs.rm(dir, { recursive: true, force: true })
   })
 
-  it('omits the section when nothing was found', async () => {
+  it('says so at the top when nothing was found', async () => {
     const report = await generateHtmlReport([], productModel, config, [exploration('/ok', [])], [], undefined)
-    expect(report).not.toContain('Problems Found While Exploring')
+    expect(report).toContain('<div class="bugs-none">No failing scenarios and no problems found while exploring.</div>')
     expect(report).toMatch(/<div class="summary-stat skip"><div class="num">0<\/div><div class="lbl">Problems found<\/div>/)
   })
 })
