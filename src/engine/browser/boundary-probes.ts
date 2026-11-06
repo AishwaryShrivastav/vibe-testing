@@ -27,7 +27,7 @@ const SPECIAL_CHARS = `O'Brien "quoted" <b>tag</b> 100% ; -- \\ {{7*7}}`
 const LONG_TEXT = 'A'.repeat(1000)
 const LARGE_NUMBER = '9'.repeat(20)
 
-const NUMERIC_HINT = /amount|qty|quantity|price|cost|percent|pct|\bage\b|count|total|rate|tax|salary|income|zip|postal|routing|acc(?:oun)?t.?(?:no|num)|number|\byear|month|\bday|score|weight|height|days|hours|minutes|limit|balance|deposit|contribution|pretax|roth|quota/i
+export const NUMERIC_HINT = /amount|qty|quantity|price|cost|percent|pct|\bage\b|count|total|rate|tax|salary|income|zip|postal|routing|acc(?:oun)?t.?(?:no|num)|number|\byear|month|\bday|score|weight|height|days|hours|minutes|limit|balance|deposit|contribution|pretax|roth|quota/i
 
 export interface FieldInfo {
   key: string
@@ -53,6 +53,8 @@ export async function probeForms(
   pageUrl: string,
   serverSignals: ServerErrorSignal[],
   blocklist?: ActionBlocklist,
+  /** Write policy: why a form must not be submitted, or undefined. */
+  gate?: (form: FormInfo) => Promise<string | undefined>,
 ): Promise<InteractionOutcome[]> {
   const outcomes: InteractionOutcome[] = []
   if (!await reload(page, pageUrl)) return outcomes
@@ -64,6 +66,11 @@ export async function probeForms(
     const blocked = blocklist?.isBlocked(`form ${form.label}`, form.label) || DESTRUCTIVE.test(form.label)
     if (!form.probeable || blocked) {
       outcomes.push(outcome(form, 'boundary', 'skipped', blocked ? 'Skipped — blocked or destructive form' : `Skipped — ${form.skipReason}`, 0))
+      continue
+    }
+    const policySkip = await gate?.(form)
+    if (policySkip) {
+      outcomes.push(outcome(form, 'boundary', 'skipped', policySkip, 0))
       continue
     }
     probed++

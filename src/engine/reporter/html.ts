@@ -113,6 +113,8 @@ ${CSS}
 
 ${renderFindingsSection(explorerFailures, retryFindings, explorerWarnings)}
 
+${renderAppChangesSection(explorations)}
+
 ${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
 
 ${passed.length > 0 ? `<h2>Passed Scenarios</h2>\n${passed.map(r => renderScenarioCard(r, screenshotCache, stepScreenshotCache)).join('\n')}` : ''}
@@ -203,6 +205,38 @@ function renderFindingsSection(failures: GroupedFinding[], retryFindings: string
     <thead><tr><th>Kind</th><th colspan="2">Finding</th></tr></thead>
     <tbody>${warningRows}</tbody>
   </table></div>` : ''}`
+}
+
+// ─── Changes Made to the App ──────────────────────────────────────────────────
+
+/**
+ * Every data-changing request exploration made (records created, forms saved),
+ * so the user knows what to clean up. Repeats of the same request by the same
+ * action on a page are one row with a count.
+ */
+function renderAppChangesSection(explorations: PageExploration[]): string {
+  const rows = new Map<string, { route: string; action: string; request: string; status?: number; values?: string; count: number }>()
+  for (const exp of explorations) {
+    for (const change of exp.changes ?? []) {
+      const key = `${exp.route} ${change.action} ${change.method} ${change.path}`
+      const row = rows.get(key)
+      if (row) { row.count++; continue }
+      rows.set(key, { route: exp.route, action: change.action, request: `${change.method} ${change.path}`, status: change.status, values: change.values, count: 1 })
+    }
+  }
+  if (rows.size === 0) return ''
+  const body = [...rows.values()].map(row => `<tr>
+      <td><code>${esc(row.route)}</code></td>
+      <td>${esc(row.action)}${row.count > 1 ? ` <span class="badge session">×${row.count}</span>` : ''}</td>
+      <td><code>${esc(row.request)}</code>${row.status ? ` <span class="badge ${row.status >= 400 ? 'fail' : 'pass'}">${row.status}</span>` : ''}</td>
+      <td class="finding-text">${esc(row.values ?? '')}</td>
+    </tr>`).join('\n')
+  return `<h2>Changes Made to the App</h2>
+  <p class="section-note">Data-changing requests the explorer sent while testing (${rows.size}). Records it created and forms it saved stay in the app, so clean them up on a shared environment. Set <code>explore.writes</code> to <code>"none"</code> to avoid them, or <code>"all"</code> to also test forms that edit existing data.</p>
+  <div class="section-table findings-table"><table>
+    <thead><tr><th>Page</th><th>Action</th><th>Request</th><th>Values sent</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`
 }
 
 // ─── Exploration Section ──────────────────────────────────────────────────────

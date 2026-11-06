@@ -592,6 +592,7 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | `auth.credentials` | Login credentials, used for login and for generated scenarios, persisted across runs |
 | `auth.accounts` | More accounts on the same login form: `[{ "name": "Bob", "credentials": { "email": "bob", "password": "…" } }]`. With two different accounts, each run logs in as both and checks that the second cannot open the first one's pages (e.g. `/orders/42` showing the first user's data). |
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
+| `explore.writes` | What exploration may change in the app. `safe` (default): creates new records (add/create forms, "add" buttons, probes on blank forms) but never overwrites a value already in a field, and doesn't probe or create-check forms that edit existing data (settings, profile, branding). `all`: also overwrites existing values and tests edit forms. `none`: no data-changing submissions. Every data-changing request exploration made is listed under "Changes made to the app" in the run summary and the report. |
 | `scope.include` | Route patterns to include; default `/**` includes `/` and all nested routes. `*` stays within one segment; a trailing `/**` includes the subtree root and its descendants. Other characters are literal. |
 | `scope.exclude` | Route patterns to exclude from testing |
 | `scope.max_routes` | Cap how many routes are tested per run |

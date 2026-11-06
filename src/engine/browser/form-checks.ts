@@ -3,6 +3,7 @@ import type { ActionBlocklist } from '../../utils/blocklist.js'
 import { fillerValue, submit, tagForms, type FormInfo } from './boundary-probes.js'
 import type { InteractionOutcome } from './explorer.js'
 import { newFailureLines, newSuccessLines, visibleText } from './page-checks.js'
+import { isInputGroup, submitGroup, tagInputGroups } from './form-groups.js'
 
 /**
  * Create-then-verify: submit "add / create / save" forms with a unique marker
@@ -19,15 +20,19 @@ const CREATE_FORM = /\b(?:add|create|save|new|post|submit|send|publish)\b/i
 const NOT_CREATE_FORM = /\b(?:search|filter|find|log ?in|sign ?in|sign ?up|register|subscribe|newsletter)\b/i
 const MAX_FORMS = 2
 
+/** Returns why a form must not be submitted (write policy), or undefined. */
+export type FormGate = (form: FormInfo) => Promise<string | undefined>
+
 export async function verifyCreatedValues(
   page: Page,
   pageUrl: string,
   blocklist?: ActionBlocklist,
+  gate?: FormGate,
 ): Promise<InteractionOutcome[]> {
   const outcomes: InteractionOutcome[] = []
   if (!await reload(page, pageUrl)) return outcomes
 
-  const candidates = (await tagForms(page)).filter(form =>
+  const candidates = (await tagFormsAndGroups(page)).filter(form =>
     form.probeable &&
     CREATE_FORM.test(form.label) && !NOT_CREATE_FORM.test(form.label) &&
     form.fields.some(field => field.freeText) &&
@@ -35,6 +40,11 @@ export async function verifyCreatedValues(
   ).slice(0, MAX_FORMS)
 
   for (const form of candidates) {
+    const skip = await gate?.(form)
+    if (skip) {
+      outcomes.push({ element: `form ${form.label}`, elementType: 'form', action: 'create-then-verify', result: 'skipped', details: skip, duration_ms: 0 })
+      continue
+    }
     outcomes.push(await checkForm(page, pageUrl, form))
   }
   return outcomes
@@ -48,7 +58,7 @@ async function checkForm(page: Page, pageUrl: string, form: FormInfo): Promise<I
   })
 
   if (!await reload(page, pageUrl)) return result('skipped', 'Could not reload the page')
-  await tagForms(page)
+  await tagFormsAndGroups(page)
 
   const target = form.fields.find(field => field.freeText)!
   const marker = `vibe-${Math.random().toString(36).slice(2, 8)}`
@@ -68,7 +78,8 @@ async function checkForm(page: Page, pageUrl: string, form: FormInfo): Promise<I
   const before = await visibleText(page)
   const urlBefore = page.url()
   try {
-    await submit(page, form.key)
+    if (isInputGroup(form.key)) await submitGroup(page, form.key)
+    else await submit(page, form.key)
   } catch (error) {
     return result('error', `Submit failed: ${(error as Error).message.slice(0, 100)}`)
   }
@@ -93,6 +104,11 @@ async function checkForm(page: Page, pageUrl: string, form: FormInfo): Promise<I
       `Submitted value not shown: the form accepted "${marker}" in ${label} (field cleared, no message) but the page does not show it`)
   }
   return result('no_change', 'Not judged: the form kept its values and showed no message')
+}
+
+/** Real <form>s plus input groups with an Add/Create/Save button and no <form> around them. */
+async function tagFormsAndGroups(page: Page): Promise<FormInfo[]> {
+  return [...await tagForms(page), ...await tagInputGroups(page, CREATE_FORM)]
 }
 
 async function reload(page: Page, url: string): Promise<boolean> {

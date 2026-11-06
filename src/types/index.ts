@@ -342,6 +342,8 @@ export interface VibeRunResult {
     explorer_warnings?: string[]
     /** Logins and scenarios that only succeeded on a retry (first attempt's evidence included). */
     retry_findings?: string[]
+    /** Data-changing requests exploration made in the app (page, action, request, values): what to clean up. */
+    app_changes?: string[]
     /** Set by `converge`: baseline + follow-up rounds executed */
     converge_rounds?: number
   }

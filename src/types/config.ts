@@ -54,6 +54,18 @@ export const VibeConfigSchema = z.object({
    */
   retries: z.number().int().min(0).max(2).default(1),
   routes: z.enum(['auto', 'config']).default('auto'),
+  /**
+   * What exploration may change in the app under test.
+   * "safe" (default): create new records (add/create forms, "add" buttons,
+   * probes on blank forms) but never overwrite existing values or submit forms
+   * that edit existing data (settings, profile, branding…).
+   * "all": also overwrite existing values and test edit forms.
+   * "none": no data-changing submissions.
+   * Every data-changing request is reported either way.
+   */
+  explore: z.object({
+    writes: z.enum(['safe', 'all', 'none']).default('safe'),
+  }).optional(),
 })
 
 export type VibeConfig = z.infer<typeof VibeConfigSchema>

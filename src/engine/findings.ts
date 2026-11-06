@@ -1,9 +1,10 @@
 import type { TestResult } from '../types/index.js'
 import type { PageExploration } from './browser/explorer.js'
 import { describeScenarioRetry } from './browser/runner.js'
+import { describeChange } from './browser/write-policy.js'
 
 /** Explorer findings that are real failures, as opposed to its own diagnostics. */
-const EXPLORER_FAILURE = /Server error \d{3}|Crash text|No response within|^Uncaught exception|^Console error|^Broken value|^Broken resource|Empty-state action|Submitted value not shown/
+const EXPLORER_FAILURE = /Server error \d{3}|Crash text|No response within|^Uncaught exception|^Console error|^Broken value|^Broken resource|Empty-state action|Submitted value not shown|^Total mismatch/
 
 /** True when an explorer error is a real failure in the app (not a navigation or discovery diagnostic). */
 export function isExplorerFailure(error: string): boolean {
@@ -20,6 +21,7 @@ const FINDING_KINDS: Array<[RegExp, string]> = [
   [/^Broken resource/, 'Broken resource'],
   [/Empty-state action/, 'Empty-state action'],
   [/Submitted value not shown/, 'Submitted value not shown'],
+  [/^Total mismatch/, 'Total mismatch'],
   [/^Placeholder value/, 'Placeholder value'],
   [/^Resource unavailable/, 'Resource unavailable'],
 ]
@@ -83,4 +85,25 @@ export function collectExplorerWarnings(explorations: PageExploration[]): string
 export function collectRetryFindings(results: TestResult[], operationFindings: string[] = []): string[] {
   const scenarioFindings = results.map(describeScenarioRetry).filter((finding): finding is string => !!finding)
   return [...new Set([...operationFindings, ...scenarioFindings])]
+}
+
+/**
+ * Data-changing requests exploration made, one line each: "<page>: <action>:
+ * POST /path (201) — values". Repeats of the same request from the same
+ * action on a page are counted, not repeated.
+ */
+export function collectAppChanges(explorations: PageExploration[]): string[] {
+  const counts = new Map<string, number>()
+  const lines = new Map<string, string>()
+  for (const exploration of explorations) {
+    for (const change of exploration.changes ?? []) {
+      const key = `${exploration.route} ${change.action} ${change.method} ${change.path}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+      if (!lines.has(key)) lines.set(key, `${exploration.route}: ${describeChange(change)}`)
+    }
+  }
+  return [...lines].map(([key, line]) => {
+    const count = counts.get(key) ?? 1
+    return count > 1 ? `${line} (×${count})` : line
+  })
 }

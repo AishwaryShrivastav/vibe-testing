@@ -12,6 +12,7 @@ import { fillLoginForm, readLoginError } from './engine/browser/login-form.js'
 import { loadRunConfig } from './utils/run-config.js'
 import { waitForLoginOutcome } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
+import { describeChange } from './engine/browser/write-policy.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
 import { readVibeGuidance } from './utils/vibe-md.js'
@@ -699,7 +700,7 @@ async function handleExplorePage(args: Record<string, unknown>) {
   const ctx = useAuth ? session.authContext : await getOrCreateUnauthContext()
   if (!ctx) throw new Error(useAuth ? 'No authenticated context. Call login first.' : 'Failed to create browser context.')
 
-  const exploration = await explorePage(ctx, route, session.config.url, session.screenshotsDir, session.blocklist)
+  const exploration = await explorePage(ctx, route, session.config.url, session.screenshotsDir, session.blocklist, { writes: session.config.explore?.writes })
   session.explorations.push(exploration)
 
   const screenshotBase64 = exploration.screenshot_path ? await screenshotToBase64(exploration.screenshot_path) : null
@@ -726,6 +727,9 @@ async function handleExplorePage(args: Record<string, unknown>) {
       is_error: a.isError,
     })),
     errors: exploration.errors,
+    ...(exploration.warnings?.length ? { warnings: exploration.warnings } : {}),
+    // Data-changing requests this exploration made — what to clean up.
+    changes_made_to_app: (exploration.changes ?? []).map(describeChange),
     summary: {
       tested: exploration.interactions.filter(i => i.result !== 'skipped').length,
       working: exploration.interactions.filter(i => ['success', 'content_updated', 'dialog_opened', 'navigated', 'toast_shown'].includes(i.result)).length,
@@ -1275,7 +1279,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}${formatAppChanges(result.summary.app_changes)}`
 
   return {
     content: [{ type: 'text', text: summary }],
@@ -1317,7 +1321,7 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}`
+- Report: ${result.report_path} (opened in browser)${formatExplorerFailures(result.summary.explorer_failures)}${formatExplorerWarnings(result.summary.explorer_warnings)}${formatRetryFindings(result.summary.retry_findings)}${formatAppChanges(result.summary.app_changes)}`
 
   return {
     content: [{ type: 'text', text: roundsLine }],
@@ -1344,6 +1348,13 @@ function formatRetryFindings(findings: string[] | undefined): string {
   const shown = findings.slice(0, 10).map(finding => `  - ${finding.slice(0, 260)}`).join('\n')
   const more = findings.length > 10 ? `\n  - …and ${findings.length - 10} more (see report)` : ''
   return `\n- Only succeeded on retry (inconsistent behaviour worth a look): ${findings.length}\n${shown}${more}`
+}
+
+function formatAppChanges(changes: string[] | undefined): string {
+  if (!changes?.length) return ''
+  const shown = changes.slice(0, 10).map(change => `  - ${change.slice(0, 260)}`).join('\n')
+  const more = changes.length > 10 ? `\n  - …and ${changes.length - 10} more (see report)` : ''
+  return `\n- Changes made to the app while exploring (data-changing requests; clean up if needed): ${changes.length}\n${shown}${more}`
 }
 
 // ─── get_context ─────────────────────────────────────────────────────────────

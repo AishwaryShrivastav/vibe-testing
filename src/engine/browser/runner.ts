@@ -84,7 +84,7 @@ export async function executeScenarios(
     const publicRoutes = [...new Set(unauthScenarios.map(s => s.route).filter(r => !r.includes('redirect')))]
     if (publicRoutes.length > 0) {
       logger.section(`Exploring ${publicRoutes.length} public pages (element-by-element)`)
-      const publicExplorations = await exploreAllPages(unauthCtx, publicRoutes, config.url, screenshotsDir, blocklist)
+      const publicExplorations = await exploreAllPages(unauthCtx, publicRoutes, config.url, screenshotsDir, blocklist, { writes: config.explore?.writes })
       explorations.push(...publicExplorations)
     }
 
@@ -290,7 +290,7 @@ export async function executeScenarios(
       const protectedRoutes = [...new Set(authScenarios.map(s => s.route))]
       if (protectedRoutes.length > 0) {
         logger.section(`Exploring ${protectedRoutes.length} pages (element-by-element)`)
-        const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist)
+        const authExplorations = await exploreAllPages(authCtx, protectedRoutes, config.url, screenshotsDir, blocklist, { writes: config.explore?.writes })
         // Signed in, a bounce to sign-in means the session was lost, not that the page is protected.
         explorations.push(...authExplorations.map(exploration => ({
           ...exploration,
@@ -309,9 +309,10 @@ export async function executeScenarios(
       }
 
       // ── Phase 4b: Logout round-trip (own session, so the others stay signed in) ──
-      const protectedPage = protectedRoutes.find(route => !/[:[*]/.test(route))
-      if (protectedPage) {
-        const logout = await checkLogoutRoundTrip(browser2, config, protectedPage, screenshotsDir, blocklist)
+      // The check confirms which of these really asks a signed-out visitor to sign in.
+      const protectedPages = protectedRoutes.filter(route => !/[:[*]/.test(route))
+      if (protectedPages.length > 0) {
+        const logout = await checkLogoutRoundTrip(browser2, config, protectedPages, screenshotsDir, blocklist)
         if (logout) {
           results.push(logout)
           logResult(logout)
