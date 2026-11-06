@@ -11,6 +11,18 @@ export const AuthConfigSchema = z.object({
     email: z.string(),
     password: z.string(),
   }).optional(),
+  /**
+   * More accounts on the same login form. With two different accounts
+   * (credentials + one here, or two here), runs check that one user cannot
+   * open the other's pages. `email` is the login identifier (email, username, …).
+   */
+  accounts: z.array(z.object({
+    name: z.string().optional(),
+    credentials: z.object({
+      email: z.string(),
+      password: z.string(),
+    }),
+  })).optional(),
 })
 
 export const VibeConfigSchema = z.object({

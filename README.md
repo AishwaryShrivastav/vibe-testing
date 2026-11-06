@@ -590,6 +590,7 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | `auth.strategy` | `credentials` (form login), `basic` (HTTP Basic Auth), or `skip` |
 | `auth.login_url` | Explicit login route for non-standard paths keyword matching would miss |
 | `auth.credentials` | Login credentials, used for login and for generated scenarios, persisted across runs |
+| `auth.accounts` | More accounts on the same login form: `[{ "name": "Bob", "credentials": { "email": "bob", "password": "…" } }]`. With two different accounts, each run logs in as both and checks that the second cannot open the first one's pages (e.g. `/orders/42` showing the first user's data). |
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
 | `scope.include` | Route patterns to include; default `/**` includes `/` and all nested routes. `*` stays within one segment; a trailing `/**` includes the subtree root and its descendants. Other characters are literal. |
 | `scope.exclude` | Route patterns to exclude from testing |

@@ -3,6 +3,7 @@ import { TestScenario, TestResult, TestStep, StepLog, ApiError } from '../../typ
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
 import { describeLoginRetry, performLoginDetailed, type LoginOutcome } from './auth.js'
 import { checkLogoutRoundTrip } from './session-checks.js'
+import { checkCrossUserAccess } from './access-checks.js'
 import { verifyResult } from './verifier.js'
 import { exploreAllPages, PageExploration } from './explorer.js'
 import { ActionBlocklist } from '../../utils/blocklist.js'
@@ -300,7 +301,14 @@ export async function executeScenarios(
         })))
       }
 
-      // ── Phase 4: Logout round-trip (own session, so the others stay signed in) ──
+      // ── Phase 4a: Cross-user access (only with two configured accounts; own sessions) ──
+      const crossUser = await checkCrossUserAccess(browser2, config, protectedRoutes, screenshotsDir, blocklist)
+      if (crossUser) {
+        results.push(crossUser)
+        logResult(crossUser)
+      }
+
+      // ── Phase 4b: Logout round-trip (own session, so the others stay signed in) ──
       const protectedPage = protectedRoutes.find(route => !/[:[*]/.test(route))
       if (protectedPage) {
         const logout = await checkLogoutRoundTrip(browser2, config, protectedPage, screenshotsDir, blocklist)
