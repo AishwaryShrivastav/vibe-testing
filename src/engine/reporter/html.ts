@@ -5,7 +5,7 @@ import type { PageExploration, InteractionOutcome, ApiObservation } from '../bro
 import packageJson from '../../../package.json' with { type: 'json' }
 import fs from 'fs/promises'
 import { deriveReportMetrics, formatReportMetrics } from './metrics.js'
-import { collectExplorerWarnings, collectRetryFindings, findingKind, groupExplorerFailures, isExplorerFailure, type GroupedFinding } from '../findings.js'
+import { alsoNote, collectExplorerWarnings, collectRetryFindings, findingKind, groupExplorerFailures, isExplorerFailure, uniqueFailures, type GroupedFinding, type UniqueFailure } from '../findings.js'
 import { PAGE_THUMB, STEP_THUMB, prepareReportImages, type ReportImage } from './images.js'
 import path from 'path'
 
@@ -48,6 +48,7 @@ export async function generateHtmlReport(
   const passed  = results.filter(r => r.status === 'pass')
   const failed  = results.filter(r => r.status === 'fail')
   const errored = results.filter(r => r.status === 'error')
+  const skipped = results.filter(r => r.status === 'skip')
   const totalMs = results.reduce((sum, r) => sum + r.duration_ms, 0)
   const outcomeVerified = results.filter(r => r.verification_status === 'outcome_verified')
   const smokeChecks = results.filter(r => r.verification_status === 'smoke_check_passed')
@@ -101,7 +102,7 @@ ${CSS}
   <p class="metric-summary">${formatReportMetrics(metrics)}</p>
 </header>
 
-${renderBugsFound([...failed, ...errored], explorerFailures, { warnings: explorerWarnings.length, retries: retryFindings.length, changes: changesCount })}
+${renderBugsFound(uniqueFailures(results), explorerFailures, { warnings: explorerWarnings.length, retries: retryFindings.length, changes: changesCount })}
 
 <div class="summary-groups">
   <div class="summary-group">
@@ -138,6 +139,13 @@ ${renderWarningsSection(retryFindings, explorerWarnings)}
 ${renderAppChangesSection(explorations)}
 
 ${failed.length + errored.length > 0 ? `<h2>Failures & Errors</h2>\n${[...failed, ...errored].map(r => renderScenarioCard(r, images)).join('\n')}` : ''}
+
+${skipped.length > 0 ? `<h2>Skipped Scenarios</h2>
+  <p class="section-note">Not run to a result, so neither a pass nor a bug: for example a generated scenario whose target is not on the page.</p>
+  <div class="section-table findings-table"><table>
+    <thead><tr><th>Scenario</th><th>Page</th><th>Why</th></tr></thead>
+    <tbody>${skipped.map(r => `<tr><td>${esc(r.scenario.name)}</td><td><code>${esc(r.scenario.route)}</code></td><td class="finding-text">${esc(oneLine(r.failure_reason ?? 'Skipped'))}</td></tr>`).join('\n')}</tbody>
+  </table></div>` : ''}
 
 ${passed.length > 0 ? `<h2>Passed Scenarios</h2>\n${passed.map(r => renderScenarioCard(r, images)).join('\n')}` : ''}
 
@@ -201,7 +209,7 @@ function oneLine(text: string, max = 220): string {
  * pages they were seen on. Details stay in the sections below.
  */
 function renderBugsFound(
-  failedScenarios: TestResult[],
+  failedScenarios: UniqueFailure[],
   failures: GroupedFinding[],
   counts: { warnings: number; retries: number; changes: number },
 ): string {
@@ -221,9 +229,9 @@ function renderBugsFound(
   ${pointerLine}`
   }
 
-  const scenarioRows = failedScenarios.map(r => `<tr>
+  const scenarioRows = failedScenarios.map(({ result: r, also }) => `<tr>
       <td><span class="badge ${r.status === 'error' ? 'error' : 'fail'}">${r.status === 'error' ? 'Scenario error' : 'Scenario failed'}</span></td>
-      <td class="finding-text"><strong>${esc(r.scenario.name)}</strong><br>${esc(oneLine(r.ai_verdict ?? r.failure_reason ?? ''))}</td>
+      <td class="finding-text"><strong>${esc(r.scenario.name)}</strong><br>${esc(oneLine(r.ai_verdict ?? r.failure_reason ?? ''))}${esc(alsoNote(also))}</td>
       <td><code>${esc(r.scenario.route)}</code></td>
     </tr>`)
 

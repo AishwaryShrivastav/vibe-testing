@@ -192,6 +192,12 @@ export interface TestScenario {
   expected_outcome: string
   is_gap: boolean
   generated_by: 'ai' | 'heuristic'
+  /**
+   * True for scenarios whose step targets were guessed from the code (a
+   * button label, a field name, link text) and never seen on the page. When
+   * such a target is not on the page the scenario is skipped, not failed.
+   */
+  targets_guessed?: boolean
   requires_auth?: boolean
   route_origin?: 'static' | 'live-crawl'
 }

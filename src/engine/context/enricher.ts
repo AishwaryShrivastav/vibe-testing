@@ -123,7 +123,7 @@ function generateFunctionalScenarios(
 
     if (hasInteractions) {
       consolidatedSteps.push({ action: 'assert', description: 'Page interactive features work correctly' })
-      scenarios.push(makeScenario(gap.route, `Interact with ${gap.route}`, consolidatedSteps, gap.priority, 'heuristic'))
+      scenarios.push(makeScenario(gap.route, `Interact with ${gap.route}`, consolidatedSteps, gap.priority, 'heuristic', true))
     }
   }
 
@@ -441,7 +441,7 @@ function generateAuthFlowScenarios(
           `Create via ${dialog.title || dialog.trigger} on ${protectedGap.route}`,
           createSteps,
           'high',
-          'heuristic'
+          'heuristic', true
         )
         createScenario.requires_auth = true
         scenarios.push(createScenario)
@@ -462,7 +462,7 @@ function generateAuthFlowScenarios(
           `Cancel ${dialog.title || dialog.trigger} on ${protectedGap.route}`,
           cancelSteps,
           'medium',
-          'heuristic'
+          'heuristic', true
         )
         cancelScenario.requires_auth = true
         scenarios.push(cancelScenario)
@@ -482,7 +482,7 @@ function generateAuthFlowScenarios(
           `Empty submit ${dialog.title || dialog.trigger} on ${protectedGap.route}`,
           emptySteps,
           'medium',
-          'heuristic'
+          'heuristic', true
         )
         emptyScenario.requires_auth = true
         scenarios.push(emptyScenario)
@@ -527,7 +527,7 @@ function generateAuthFlowScenarios(
           `Search and filter on ${protectedGap.route}`,
           interactSteps,
           'high',
-          'heuristic'
+          'heuristic', true
         )
         interactScenario.requires_auth = true
         scenarios.push(interactScenario)
@@ -565,7 +565,7 @@ function generateAuthFlowScenarios(
           `Edit and save on ${protectedGap.route}`,
           editSteps,
           'high',
-          'heuristic'
+          'heuristic', true
         )
         editScenario.requires_auth = true
         scenarios.push(editScenario)
@@ -593,7 +593,7 @@ function generateAuthFlowScenarios(
           `Submit form on ${protectedGap.route}`,
           formSteps,
           protectedGap.priority,
-          'heuristic'
+          'heuristic', true
         )
         formScenario.requires_auth = true
         scenarios.push(formScenario)
@@ -617,7 +617,7 @@ function generateAuthFlowScenarios(
             { action: 'assert', description: `Navigated to ${nav.destination}` },
           ],
           'low',
-          'heuristic'
+          'heuristic', true
         )
         navScenario.requires_auth = true
         scenarios.push(navScenario)
@@ -658,7 +658,9 @@ function makeScenario(
   name: string,
   steps: TestStep[],
   priority: Gap['priority'],
-  generatedBy: 'ai' | 'heuristic'
+  generatedBy: 'ai' | 'heuristic',
+  /** The steps' targets (buttons, fields, link text) were read from the code, not seen on the page. */
+  targetsGuessed = false,
 ): TestScenario {
   return {
     id: `VTS-${String(scenarioCounter++).padStart(3, '0')}`,
@@ -669,6 +671,7 @@ function makeScenario(
     expected_outcome: steps[steps.length - 1].description,
     is_gap: true,
     generated_by: generatedBy,
+    ...(targetsGuessed ? { targets_guessed: true } : {}),
   }
 }
 

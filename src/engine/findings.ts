@@ -116,17 +116,49 @@ export interface FailedScenario {
   reason: string
 }
 
+type FailedResult = TestResult & { status: 'fail' | 'error' }
+
+/** A failed or errored scenario, with the other scenarios on the same page that hit the same error. */
+export interface UniqueFailure {
+  result: FailedResult
+  /** Names of further scenarios on this page that failed for the same reason. */
+  also: string[]
+}
+
+/**
+ * Failed and errored scenarios, failures first, one entry per underlying
+ * error: several scenarios that open the same page and hit the same error
+ * (e.g. the page itself shows a configuration error) are one bug, not three.
+ */
+export function uniqueFailures(results: TestResult[]): UniqueFailure[] {
+  const failed = results
+    .filter((r): r is FailedResult => r.status === 'fail' || r.status === 'error')
+    .sort((a, b) => (a.status === b.status ? 0 : a.status === 'fail' ? -1 : 1))
+  const byError = new Map<string, UniqueFailure>()
+  for (const result of failed) {
+    const reason = (result.ai_verdict ?? result.failure_reason ?? '').replace(/\s+/g, ' ').trim()
+    // Without a reason there is nothing to say two failures are the same.
+    const key = reason ? `${result.scenario.route}\n${reason}` : `${result.scenario.route}\n${result.scenario.id}\n${byError.size}`
+    const existing = byError.get(key)
+    if (existing) existing.also.push(result.scenario.name)
+    else byError.set(key, { result, also: [] })
+  }
+  return [...byError.values()]
+}
+
+/** "(same error in 2 more scenarios on this page)", or '' when the failure stands alone. */
+export function alsoNote(also: string[]): string {
+  return also.length > 0 ? ` (same error in ${also.length} more scenario${also.length > 1 ? 's' : ''} on this page)` : ''
+}
+
 /** Failed and errored scenarios, failures first, each with a one-line reason (verdict, else failure reason). */
 export function collectFailedScenarios(results: TestResult[]): FailedScenario[] {
-  return results
-    .filter((r): r is TestResult & { status: 'fail' | 'error' } => r.status === 'fail' || r.status === 'error')
-    .sort((a, b) => (a.status === b.status ? 0 : a.status === 'fail' ? -1 : 1))
-    .map(r => {
-      const base = (r.ai_verdict ?? r.failure_reason ?? 'no reason recorded').replace(/\s+/g, ' ').trim()
-      const retry = r.retry && r.retry.attempts > 1 && !r.retry.passed_on_retry ? ` (failed on all ${r.retry.attempts} attempts)` : ''
-      const reason = base.length > 200 ? `${base.slice(0, 199)}…` : base
-      return { name: r.scenario.name, route: r.scenario.route, status: r.status, reason: `${reason}${retry}` }
-    })
+  return uniqueFailures(results).map(({ result: r, also }) => {
+    const base = (r.ai_verdict ?? r.failure_reason ?? 'no reason recorded').replace(/\s+/g, ' ').trim()
+    const retry = r.retry && r.retry.attempts > 1 && !r.retry.passed_on_retry ? ` (failed on all ${r.retry.attempts} attempts)` : ''
+    const reason = base.length > 200 ? `${base.slice(0, 199)}…` : base
+    return { name: r.scenario.name, route: r.scenario.route, status: r.status, reason: `${reason}${retry}${alsoNote(also)}` }
+  })
 }
 
 /**

@@ -269,6 +269,8 @@ export class MemoryManager {
       failed_selectors: [],
     }
 
+    // A skipped scenario (e.g. its guessed target is not on the page) says nothing about the route.
+    if (result.status === 'skip') return
     ri.last_status = result.status === 'pass' ? 'pass' : result.status === 'fail' ? 'fail' : 'error'
 
     if (result.duration_ms > 0) {
