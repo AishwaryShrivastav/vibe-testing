@@ -119,6 +119,15 @@ export async function waitForLoginOutcome(page: Page, loginUrl: string): Promise
     { loginPath, loginPattern: LOGIN_PATH.source },
     { timeout: 10000, polling: 250 },
   ).catch(() => {})
+  // Some apps unmount the form first and change the URL a moment later
+  // (state machine, then redirect). Give the URL time to follow before judging.
+  if (isStillOnLoginPage(page.url())) {
+    await page.waitForFunction(
+      ({ loginPattern }) => !new RegExp(loginPattern, 'i').test(location.pathname),
+      { loginPattern: LOGIN_PATH.source },
+      { timeout: 3000, polling: 100 },
+    ).catch(() => {})
+  }
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
   return loginFormStillShown(page, loginUrl)
 }

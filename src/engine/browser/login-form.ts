@@ -36,6 +36,9 @@ export interface FillLoginResult {
   multiStep: boolean
 }
 
+/** How long to wait for a login form that renders after the page loads. */
+export const LOGIN_FIELDS_WAIT_MS = 10000
+
 const IDENTITY_ATTR = 'data-vibe-login-identity'
 const PASSWORD_ATTR = 'data-vibe-login-password'
 
@@ -79,6 +82,16 @@ export async function fillLoginForm(
   timeoutMs = 3000,
 ): Promise<FillLoginResult> {
   let fields = await locateLoginFields(page, hints)
+  // Client-rendered login pages (a dev server compiling on first load) show
+  // their inputs late: wait for them before deciding there is no form.
+  // A page that already shows other inputs gets a short grace period only.
+  const started = Date.now()
+  const deadline = started + LOGIN_FIELDS_WAIT_MS
+  const waiting = () => Date.now() < (fields.visibleInputs.length === 0 ? deadline : started + 1500)
+  while (!fields.identity && waiting()) {
+    await page.waitForTimeout(250)
+    fields = await locateLoginFields(page, hints)
+  }
   if (!fields.identity) {
     throw new Error(
       'No login identifier field (email, username, phone number or ID) found. ' +
@@ -115,7 +128,7 @@ export async function fillLoginForm(
  * a credential error. Undefined when nothing recognisable is shown.
  */
 export async function readLoginError(page: Page): Promise<string | undefined> {
-  const alert = page.locator('[role="alert"]:visible, .error:visible, .alert:visible, [data-error]:visible, .toast-error:visible').first()
+  const alert = page.locator('[role="alert"]:visible, .error:visible, .alert:visible, [data-error]:not([data-error="false"]):visible, .toast-error:visible').first()
   const alertText = (await alert.innerText({ timeout: 500 }).catch(() => '')).trim()
   if (alertText) return alertText.replace(/\s+/g, ' ').slice(0, 160)
   const body = await page.locator('body').innerText({ timeout: 1000 }).catch(() => '')

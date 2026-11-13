@@ -301,7 +301,7 @@ export async function runConverge(
     logger.success('Coverage threshold already met after baseline')
   } else {
     while (followUps < o.max_followup_rounds) {
-      const followUp = buildFollowUpBatch(lastGaps, allResults.filter(r => r.status !== 'pass'), config, o.scenarios_per_round)
+      const followUp = buildFollowUpBatch(lastGaps, allResults.filter(r => r.status !== 'pass' && r.status !== 'skip'), config, o.scenarios_per_round)
       if (followUp.length === 0) {
         logger.info('No follow-up scenarios produced — stopping')
         break

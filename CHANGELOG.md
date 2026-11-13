@@ -4,7 +4,11 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
-## [Unreleased]
+## [0.5.0] — 2026-11-13
+
+Detection, depth modes and coverage work by [@nrhirani](https://github.com/nrhirani) (#12, #13, #14).
+
+**Breaking:** `explore_page` returns `problems` and `diagnostics` instead of `errors`, and the `routes` setting is ignored (use `scope`).
 
 ### Added
 
@@ -26,6 +30,7 @@ All notable changes to **vibe-test** are documented here.
 - **Cross-user check.** With two accounts (`auth.accounts`), each run checks that one user cannot open another user's pages.
 - **`explore.writes`.** `safe` (default) never overwrites existing data, re-saves edit forms or submits sign-up forms. `all` and `none` are also available. Every data-changing request exploration made is listed under "Changes made to the app".
 - **Retry rule (`retries`, default 1).** Logins, scenarios and page loads get one more try, and success on a retry is reported under "Needs attention", never hidden.
+- **Codex setup.** `init` detects Codex and registers vibe-test in `~/.codex/config.toml` (shared by the CLI, IDE extension and desktop app). It appends its table, keeps the rest of the file, and does nothing on a second run. `init --editor codex` forces it.
 - **More routes found.** Express routes anywhere in server code (including mounted routers), web apps in subfolders (for example Next.js under a Maven root), and crawled links with query strings.
 
 ### Changed
@@ -41,6 +46,12 @@ All notable changes to **vibe-test** are documented here.
   - The Markdown report carries the same findings.
 - **Faster runs in every mode.** Links are checked by request instead of navigating away and back. Pages settle on a quiet network and DOM. Pages built from one template are tested thoroughly once.
 - **`routes` setting.** It is deprecated and ignored. Use `scope`.
+- **`init`, Claude Code.** The global registration now goes to `~/.claude.json` (user scope). Earlier versions wrote `~/.claude/settings.json`, which Claude Code does not read for MCP servers, so vibe-test only worked in projects that had `.mcp.json`. Run `init` again to register it everywhere.
+- **`init`, safer and clearer.**
+  - A config file that is not plain JSON is left untouched with a warning. Earlier versions replaced it.
+  - Entries for VS Code, Cursor and Claude Code carry `"type": "stdio"`, which VS Code requires.
+  - A project folder that contains `.cursor/` no longer causes writes to the home directory when Cursor is not installed. With no editor installed, `init` writes project configs only and prints the one-line commands.
+  - The closing "Next steps" lists what to do in each configured editor and the sentence to say to the agent.
 
 ### Fixed
 
@@ -56,6 +67,15 @@ All notable changes to **vibe-test** are documented here.
   - Search/filter/pagination/upload scenarios guessed from prose.
   - Duplicate reports of one bug.
 - **Report metrics.** "Live pages observed" counts crawled and explored pages.
+- **First run on real apps.** Found by running vibe-test on cypress-realworld-app and shadcn-admin:
+  - shadcn/ui forms are no longer reported as "error visible on page". Healthy labels carry `data-error="false"`, which was read as an error.
+  - Framework dev overlays (TanStack Query and Router devtools, the Next.js dev overlay, Vite error overlay, Vue/Nuxt devtools, Astro dev toolbar) are no longer explored.
+  - A login whose form disappears before the URL changes is accepted on the first attempt, and a login form that renders late is waited for.
+  - React Router routes declared outside `App`/`router` files are found, including guard tags such as `<PrivateRoute>` and v5 paths like `/(a|b)?`.
+  - A generated scenario whose guessed target isn't on the page is skipped in 4 seconds with the reason, and listed under "Skipped Scenarios". It used to wait 15 seconds and appear under "Bugs Found".
+  - One error seen by several scenarios on a page is reported once.
+  - A short error screen (for example the app's own 404 page) fails with what it shows; it used to read "Could not determine result".
+- **Report footer.** Reads "Tested with vibe-testing" and links to the project.
 - **CI.** The Build & Test job is pinned to `ubuntu-24.04`. Playwright 1.59 can't install its browser dependencies on Ubuntu 26.
 
 ---

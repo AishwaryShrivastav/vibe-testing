@@ -7,12 +7,12 @@
     "url": "https://github.com/AishwaryShrivastav/vibe-testing",
     "source": "github"
   },
-  "version": "0.4.6",
+  "version": "0.5.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "vibe-testing",
-      "version": "0.4.6",
+      "version": "0.5.0",
       "transport": {
         "type": "stdio"
       },

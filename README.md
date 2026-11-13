@@ -27,6 +27,35 @@ Then open your editor and say:
 
 > "Scan this codebase and test it against http://localhost:3000"
 
+No source code? Point it at a URL from an empty folder and it tests the app black-box:
+
+```bash
+npx vibe-testing@latest run https://staging.example.com
+```
+
+---
+
+## It finds bugs you didn't write a test for
+
+While it explores, vibe-testing checks for server crashes, console errors, broken values (`NaN`, `[object Object]`, `Invalid Date`), totals that don't match their line items, saved values that never appear, a logout that doesn't end the session, and one user opening another user's pages. No scenarios to write.
+
+Measured on intentionally buggy apps (0.5.0, [details in #13](https://github.com/AishwaryShrivastav/vibe-testing/pull/13)):
+
+| App | Mode | Before | 0.5.0 |
+|---|---|---|---|
+| react-simple-project (7 planted functional bugs) | with source code | 1 of 7 | **7 of 7** |
+| react-simple-project | URL only | 0 of 7 | **7 of 7** |
+| OWASP NodeGoat | with source code | 0 issues | `/contributions` crash, `/allocations` 500s, a redirect to `/undefined` |
+| restful-booker-platform (no planted bugs) | both | 3 pages, 4 false errors | 8+ pages, 1 real bug: `/api/room/:id` returns 500 |
+
+No false findings on these three apps in either mode. Run it against a test environment: exploration creates records and lists every change it made.
+
+Using it on your project? Add the badge:
+
+```markdown
+[![tested with vibe-testing](https://img.shields.io/badge/tested%20with-vibe--testing-7c3aed)](https://github.com/AishwaryShrivastav/vibe-testing)
+```
+
 ---
 
 ## What code-aware testing adds
@@ -83,7 +112,7 @@ No test cases to write. The AI reads your source code to understand real field n
 `init` also:
 
 - Detects which AI editors you have installed
-- Registers vibe-test in global editor configs (`~/.claude/settings.json`, `~/.cursor/mcp.json`, and so on) so the tools are available in every project, every session
+- Registers vibe-test in global editor configs (`~/.claude.json`, `~/.cursor/mcp.json`, `~/.codex/config.toml`, and so on) so the tools are available in every project, every session
 - Creates project-level MCP configs and AI instruction files
 - Auto-detects your app's URL (reads `.env`, `vite.config`, framework defaults)
 - Creates `VIBE.md` (edit with your test credentials) and `vibe.config.json`
@@ -125,18 +154,35 @@ The artifact is written to `artifacts/vibe-testing-<version>.mcpb`. See the [MCP
 npx vibe-testing@latest init
 ```
 
-Detects and configures all installed editors. Done.
+Detects Claude Code, Cursor, Codex, Windsurf, VS Code and Roo Code, registers vibe-test in each, and prints what to do next in each editor. It never overwrites a config file it cannot parse, and running it twice changes nothing.
 
-### Option 2: manual per editor
+### Option 2: one command per editor
+
+| Editor | Run this | Then |
+|---|---|---|
+| Claude Code | `claude mcp add --scope user vibe-test -- npx -y vibe-testing@latest --mcp` | Start a new `claude` session. `/mcp` shows vibe-test as connected. |
+| Codex (CLI, IDE extension, desktop app) | `codex mcp add vibe-test -- npx -y vibe-testing@latest --mcp` | Start a new `codex` session. `/mcp` lists vibe-test. |
+| VS Code (Copilot) | `code --add-mcp '{"name":"vibe-test","type":"stdio","command":"npx","args":["-y","vibe-testing@latest","--mcp"]}'` | Use Agent mode in Copilot Chat. |
+| Cursor | Add the JSON below to `~/.cursor/mcp.json` | Cursor Settings > MCP: check vibe-test is switched on. |
+| Windsurf | Add the JSON below to `~/.codeium/windsurf/mcp_config.json` | Press Refresh in the Cascade MCP panel. |
+
+Then say to your agent:
+
+> "Scan this codebase and test it against http://localhost:3000"
+
+The first run downloads a Chromium build (one-time, roughly 150 MB). `npx vibe-testing@latest install-browser` does it ahead of time.
+
+### Option 3: edit the config file yourself
 
 #### Claude Code
 
-Add to `~/.claude/settings.json` (global, works in every project):
+For every project, the user-scope config is `~/.claude.json` (top-level `mcpServers`). Claude Code does not read MCP servers from `~/.claude/settings.json`. For one project, use `.mcp.json` in the project root, which you can commit for your team:
 
 ```json
 {
   "mcpServers": {
     "vibe-test": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "vibe-testing@latest", "--mcp"]
     }
@@ -144,18 +190,19 @@ Add to `~/.claude/settings.json` (global, works in every project):
 }
 ```
 
-Or add to `.mcp.json` in your project root (project-level only):
+Claude Code asks you to approve a project-scoped server the first time it sees it.
 
-```json
-{
-  "mcpServers": {
-    "vibe-test": {
-      "command": "npx",
-      "args": ["-y", "vibe-testing@latest", "--mcp"]
-    }
-  }
-}
+#### Codex
+
+Add to `~/.codex/config.toml`. The Codex CLI, IDE extension and desktop app share this file:
+
+```toml
+[mcp_servers.vibe-test]
+command = "npx"
+args = ["-y", "vibe-testing@latest", "--mcp"]
 ```
+
+`init` also writes `AGENTS.md`, which Codex reads for project instructions.
 
 #### Cursor
 
@@ -195,6 +242,7 @@ Add to `.vscode/mcp.json` in your project:
 {
   "servers": {
     "vibe-test": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "vibe-testing@latest", "--mcp"]
     }
@@ -440,7 +488,8 @@ What it creates:
 | File | Where | Purpose |
 |------|-------|---------|
 | `.mcp.json` | Project root | Claude Code MCP config (project-level) |
-| `~/.claude/settings.json` | Global | Claude Code MCP config (all projects) |
+| `~/.claude.json` | Global | Claude Code MCP config, user scope (all projects) |
+| `~/.codex/config.toml` | Global | Codex MCP config (CLI, IDE extension, desktop app) |
 | `.cursor/mcp.json` | Project root | Cursor MCP config |
 | `~/.cursor/mcp.json` | Global | Cursor MCP config (all projects) |
 | `.cursor/rules/vibe-test.mdc` | Project | Cursor rules, `alwaysApply: true` |
@@ -462,6 +511,7 @@ npx vibe-testing@latest init --no-global         # project-level only, skip glob
 npx vibe-testing@latest init --skip-browser-install
 npx vibe-testing@latest init --editor cursor     # only configure Cursor
 npx vibe-testing@latest init --editor claude-code windsurf
+npx vibe-testing@latest init --editor codex      # register Codex even if ~/.codex is not there yet
 ```
 
 After init, edit `VIBE.md` with your login URL and test credentials.

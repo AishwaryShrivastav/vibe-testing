@@ -33,7 +33,7 @@ describe('MCP distribution metadata', () => {
   })
 
   it('keeps release identity and canonical links aligned', () => {
-    expect(packageJson.version).toBe('0.4.6')
+    expect(packageJson.version).toBe('0.5.0')
     expect(packageJson.homepage).toBe('https://vibetesting.tfgstudio.com/')
     expect(pluginJson.version).toBe(packageJson.version)
     expect(pluginJson.homepage).toBe(packageJson.homepage)

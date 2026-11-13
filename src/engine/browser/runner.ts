@@ -65,7 +65,7 @@ export async function executeScenarios(
     decide: plan.decide,
     templateOf: plan.templateOf,
     recheck: plan.recheck,
-    failedRoutes: new Set(results.filter(result => result.status !== 'pass').map(result => result.scenario.route)),
+    failedRoutes: new Set(results.filter(result => result.status !== 'pass' && result.status !== 'skip').map(result => result.scenario.route)),
     onSkip: route => skippedRoutes.add(route),
   })
 
@@ -385,6 +385,8 @@ function logResult(result: TestResult): void {
   const finalUrl = result.current_url ? ` [${extractUrlPath(result.current_url)}]` : ''
   if (result.status === 'pass') {
     logger.success(`  Passed (${result.duration_ms}ms)${finalUrl}`)
+  } else if (result.status === 'skip') {
+    logger.dim(`    ${result.failure_reason ?? 'Skipped'}`)
   } else if (result.status === 'fail') {
     logger.error(`  Failed${finalUrl}: ${result.ai_verdict ?? result.failure_reason}`)
   } else {
@@ -411,7 +413,7 @@ export async function runScenarioWithRetry(
   projectRoot = config.codebase_path ?? process.cwd(),
 ): Promise<TestResult> {
   const first = await runOneScenario(scenario, context, config, screenshotsDir, projectRoot)
-  if (first.status === 'pass' || (config.retries ?? 0) < 1) return first
+  if (first.status === 'pass' || first.status === 'skip' || (config.retries ?? 0) < 1) return first
 
   const firstFailure = (first.failure_reason ?? first.ai_verdict ?? first.status).slice(0, 200)
   let attempts = 1
@@ -491,7 +493,7 @@ export async function runOneScenario(
 
       try {
         const crashBefore = step.action === 'click' ? await detectCrashText(page) : undefined
-        selectorUsed = await executeStep(page, step, config.url, apiErrors, projectRoot)
+        selectorUsed = await executeStep(page, guessedTargetStep(scenario, step), config.url, apiErrors, projectRoot)
         if (step.action === 'navigate') { fillsSinceNavigate = []; passwordFilled = false }
         if (step.action === 'fill' && step.value) {
           fillsSinceNavigate.push(step)
@@ -547,6 +549,7 @@ export async function runOneScenario(
           selector_used: selectorUsed,
           screenshot_path: stepScreenshotPath,
         })
+        if (isGuessedTargetMissing(scenario, step, stepErr)) throw new GuessedTargetMissing(step)
         throw stepErr
       }
     }
@@ -577,6 +580,25 @@ export async function runOneScenario(
   } catch (err: unknown) {
     try { await page.screenshot({ path: screenshotPath, fullPage: false }) } catch { /* ignore */ }
 
+    // A scenario built from a guess about the page (a selector read from the
+    // code) whose target is not on the page says nothing about the app: it is
+    // skipped with the reason, not reported as a bug. A server crash seen on
+    // the way still fails it (withServerErrors).
+    if (err instanceof GuessedTargetMissing) {
+      return await withServerErrors({
+        scenario,
+        status: 'skip',
+        duration_ms: Date.now() - startTime,
+        screenshot_path: screenshotPath,
+        current_url: page.url(),
+        navigated_url: navigatedUrl,
+        failure_reason: err.message,
+        verification_status: 'not_verified',
+        step_logs: stepLogs,
+        api_errors: apiErrors.length > 0 ? apiErrors : undefined,
+      })
+    }
+
     return await withServerErrors({
       scenario,
       status: err instanceof AssertionFailure ? 'fail' : 'error',
@@ -593,6 +615,41 @@ export async function runOneScenario(
     serverWatch.stop()
     await page.close()
   }
+}
+
+/** How long a step generated from a guess waits for its target before the scenario is skipped. */
+export const GUESSED_TARGET_TIMEOUT_MS = 4000
+
+/** The page has no element for a step that was generated from a guess about the page. */
+export class GuessedTargetMissing extends Error {
+  constructor(step: TestStep) {
+    super(`Skipped — the page has no element for the generated step "${step.description}"` +
+      `${step.selector ? ` (${step.selector})` : ''}. The scenario was guessed from the code and does not apply to this page.`)
+  }
+}
+
+/** Fill, click and select steps of scenarios guessed from the code: their targets are guesses, except a form's submit button. */
+function isGuessedTarget(scenario: TestScenario, step: TestStep): boolean {
+  if (!scenario.targets_guessed || step.timeout !== undefined) return false
+  if (step.action !== 'fill' && step.action !== 'click' && step.action !== 'select') return false
+  return !(step.action === 'click' && isSubmitStep(step))
+}
+
+/** A guessed target gets a short wait: an element that is not there after a few seconds is not coming. */
+function guessedTargetStep(scenario: TestScenario, step: TestStep): TestStep {
+  return isGuessedTarget(scenario, step) ? { ...step, timeout: GUESSED_TARGET_TIMEOUT_MS } : step
+}
+
+/**
+ * True when a guessed step timed out because nothing on the page matched it.
+ * An element that was found but could not be used (covered, disabled,
+ * detached) is a real failure and stays one.
+ */
+export function isGuessedTargetMissing(scenario: TestScenario, step: TestStep, error: unknown): boolean {
+  if (!isGuessedTarget(scenario, step)) return false
+  const message = error instanceof Error ? error.message : String(error)
+  if (!/Timeout \d+ms exceeded/.test(message) || !/waiting for (locator|getBy)/.test(message)) return false
+  return !/locator resolved to|element is not|intercepts pointer events|not attached|not stable|not enabled|not editable/.test(message)
 }
 
 /** True when a scenario types into a password field (a login or sign-up flow). */

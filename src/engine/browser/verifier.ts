@@ -19,7 +19,7 @@ export async function verifyResult(
   const currentUrl  = page.url()
 
   const hasErrorMessage = await page.locator(
-    '[role="alert"]:visible:not(:empty), [data-error]:visible:not(:empty), .toast-error:visible:not(:empty)'
+    '[role="alert"]:visible:not(:empty), [data-error]:not([data-error="false"]):visible:not(:empty), .toast-error:visible:not(:empty)'
   ).count().then(n => n > 0).catch(() => false)
 
   const hasSuccessIndicator = await page.locator(
@@ -151,6 +151,22 @@ function extractPath(url: string): string {
   } catch {
     return url
   }
+}
+
+/**
+ * The headline of an error screen ("404 Oops! Page Not Found!"), or undefined
+ * when the page is not one. Only short pages count: a dashboard that happens
+ * to show the number 500 is not an error screen.
+ */
+export function describeErrorScreen(bodyText: string): string | undefined {
+  const text = bodyText.trim()
+  if (text.length === 0 || text.length > 600) return undefined
+  const lines = text.split('\n').map(line => line.trim()).filter(Boolean)
+  const head = lines.slice(0, 3).join(' ')
+  const isErrorScreen =
+    /\b(page|route|resource)?\s*(was\s+)?not found\b|\bdoes(n't| not) exist\b|\binternal server error\b|\bsomething went wrong\b|\bservice unavailable\b/i.test(head) ||
+    /^(404|500|502|503)\b/.test(lines[0] ?? '')
+  return isErrorScreen ? lines.slice(0, 2).join(' ').slice(0, 120) : undefined
 }
 
 async function heuristicVerification(
@@ -409,6 +425,17 @@ async function heuristicVerification(
       passed: true,
       explanation: 'Page rendered with content, no errors detected',
       verification: 'smoke_check_passed',
+    }
+  }
+
+  // The app's own error screen (a "404 Page Not Found" page behind a link, a
+  // "500" page) is a result, not an unknown: say what the page shows.
+  const errorScreen = describeErrorScreen(bodyText)
+  if (errorScreen) {
+    return {
+      passed: false,
+      explanation: `${currentPath} shows an error page: "${errorScreen}"`,
+      verification: 'not_verified',
     }
   }
 
