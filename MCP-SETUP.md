@@ -18,16 +18,22 @@ Add to `.mcp.json` in your project root:
 }
 ```
 
-Or globally in `~/.claude/settings.json`:
-```json
-{
-  "mcpServers": {
-    "vibe-test": {
-      "command": "npx",
-      "args": ["-y", "vibe-testing@latest", "--mcp"]
-    }
-  }
-}
+For every project, register it at user scope (stored in `~/.claude.json`; Claude Code does not read MCP servers from `~/.claude/settings.json`):
+```bash
+claude mcp add --scope user vibe-test -- npx -y vibe-testing@latest --mcp
+```
+
+## Codex
+
+```bash
+codex mcp add vibe-test -- npx -y vibe-testing@latest --mcp
+```
+
+Or add to `~/.codex/config.toml` (shared by the Codex CLI, IDE extension and desktop app):
+```toml
+[mcp_servers.vibe-test]
+command = "npx"
+args = ["-y", "vibe-testing@latest", "--mcp"]
 ```
 
 ## Cursor

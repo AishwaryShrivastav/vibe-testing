@@ -30,6 +30,7 @@ Detection, depth modes and coverage work by [@nrhirani](https://github.com/nrhir
 - **Cross-user check.** With two accounts (`auth.accounts`), each run checks that one user cannot open another user's pages.
 - **`explore.writes`.** `safe` (default) never overwrites existing data, re-saves edit forms or submits sign-up forms. `all` and `none` are also available. Every data-changing request exploration made is listed under "Changes made to the app".
 - **Retry rule (`retries`, default 1).** Logins, scenarios and page loads get one more try, and success on a retry is reported under "Needs attention", never hidden.
+- **Codex setup.** `init` detects Codex and registers vibe-test in `~/.codex/config.toml` (shared by the CLI, IDE extension and desktop app). It appends its table, keeps the rest of the file, and does nothing on a second run. `init --editor codex` forces it.
 - **More routes found.** Express routes anywhere in server code (including mounted routers), web apps in subfolders (for example Next.js under a Maven root), and crawled links with query strings.
 
 ### Changed
@@ -45,6 +46,12 @@ Detection, depth modes and coverage work by [@nrhirani](https://github.com/nrhir
   - The Markdown report carries the same findings.
 - **Faster runs in every mode.** Links are checked by request instead of navigating away and back. Pages settle on a quiet network and DOM. Pages built from one template are tested thoroughly once.
 - **`routes` setting.** It is deprecated and ignored. Use `scope`.
+- **`init`, Claude Code.** The global registration now goes to `~/.claude.json` (user scope). Earlier versions wrote `~/.claude/settings.json`, which Claude Code does not read for MCP servers, so vibe-test only worked in projects that had `.mcp.json`. Run `init` again to register it everywhere.
+- **`init`, safer and clearer.**
+  - A config file that is not plain JSON is left untouched with a warning. Earlier versions replaced it.
+  - Entries for VS Code, Cursor and Claude Code carry `"type": "stdio"`, which VS Code requires.
+  - A project folder that contains `.cursor/` no longer causes writes to the home directory when Cursor is not installed. With no editor installed, `init` writes project configs only and prints the one-line commands.
+  - The closing "Next steps" lists what to do in each configured editor and the sentence to say to the agent.
 
 ### Fixed
 

@@ -14,6 +14,13 @@ import fs from 'fs/promises'
 import { createRequire } from 'module'
 import { isDirectExecution } from './utils/direct-execution.js'
 import { configureProject } from './configure.js'
+import {
+  buildNextSteps,
+  MANUAL_COMMANDS,
+  upsertCodexToml,
+  upsertJsonMcpConfig,
+  type UpsertResult,
+} from './init-editors.js'
 const require = createRequire(import.meta.url)
 const PKG_VERSION: string = require('../package.json').version
 
@@ -257,91 +264,99 @@ See \`VIBE.md\` for test credentials, blocklist patterns, and project notes.
 Setup: run \`npx vibe-testing@latest init\` to configure for any editor.
 `
 
-const MCP_SERVER_ENTRY = {
-  command: 'npx',
-  args: ['-y', 'vibe-testing@latest', '--mcp'],
-}
-
 // ─── Editor detection and configuration ─────────────────────────────────────
+
+interface McpConfigTarget {
+  path: string
+  /** JSON root key; unused for Codex's TOML file. */
+  rootKey: 'mcpServers' | 'servers'
+  format?: 'json' | 'codex-toml'
+  /** Write `"type": "stdio"` on the entry. */
+  withType?: boolean
+}
 
 interface EditorTarget {
   name: string
-  projectConfigs: { path: string; rootKey: string; format: 'mcpServers' | 'servers' | 'context_servers' }[]
-  globalConfigs: { path: () => string; rootKey: string; format: 'mcpServers' | 'servers' | 'context_servers' }[]
+  aliases: string[]
+  projectConfigs: McpConfigTarget[]
+  globalConfigs: (Omit<McpConfigTarget, 'path'> & { path: () => string })[]
   rulesFiles: { path: string; content: string }[]
   detect: () => Promise<boolean>
+  /** True when the editor itself is installed for this user (not just configured in this project). */
+  detectHome?: () => Promise<boolean>
 }
 
 function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? ''
 }
 
+async function anyExists(paths: string[]): Promise<boolean> {
+  for (const candidate of paths) { try { await fs.access(candidate); return true } catch {} }
+  return false
+}
+
 const EDITORS: EditorTarget[] = [
   {
     name: 'Cursor',
-    projectConfigs: [{ path: '.cursor/mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
-    globalConfigs: [{ path: () => path.join(homeDir(), '.cursor', 'mcp.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    aliases: ['cursor'],
+    projectConfigs: [{ path: '.cursor/mcp.json', rootKey: 'mcpServers', withType: true }],
+    globalConfigs: [{ path: () => path.join(homeDir(), '.cursor', 'mcp.json'), rootKey: 'mcpServers', withType: true }],
     rulesFiles: [{ path: '.cursor/rules/vibe-test.mdc', content: CURSOR_RULE_CONTENT }],
-    detect: async () => {
-      const dirs = [path.join(homeDir(), '.cursor'), path.join(process.cwd(), '.cursor')]
-      for (const d of dirs) { try { await fs.access(d); return true } catch {} }
-      return false
-    },
+    detect: () => anyExists([path.join(homeDir(), '.cursor'), path.join(process.cwd(), '.cursor')]),
+    detectHome: () => anyExists([path.join(homeDir(), '.cursor')]),
   },
   {
     name: 'Claude Code',
-    projectConfigs: [{ path: '.mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
-    globalConfigs: [{ path: () => path.join(homeDir(), '.claude', 'settings.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    aliases: ['claude-code', 'claude', 'claudecode'],
+    projectConfigs: [{ path: '.mcp.json', rootKey: 'mcpServers', withType: true }],
+    // User scope lives in ~/.claude.json (top-level mcpServers). Claude Code does
+    // not read MCP servers from ~/.claude/settings.json.
+    globalConfigs: [{ path: () => path.join(process.env.CLAUDE_CONFIG_DIR || homeDir(), '.claude.json'), rootKey: 'mcpServers', withType: true }],
     rulesFiles: [{ path: 'CLAUDE.md', content: CLAUDE_MD_CONTENT }],
-    detect: async () => {
-      const paths = [path.join(homeDir(), '.claude'), path.join(homeDir(), '.claude.json')]
-      for (const p of paths) { try { await fs.access(p); return true } catch {} }
-      return false
-    },
+    detect: () => anyExists([path.join(homeDir(), '.claude'), path.join(homeDir(), '.claude.json')]),
+  },
+  {
+    name: 'Codex',
+    aliases: ['codex', 'codex-cli', 'openai-codex', 'openai'],
+    projectConfigs: [],
+    // Shared by the Codex CLI, IDE extension and desktop app.
+    globalConfigs: [{ path: () => path.join(process.env.CODEX_HOME || path.join(homeDir(), '.codex'), 'config.toml'), rootKey: 'mcpServers', format: 'codex-toml' }],
+    rulesFiles: [],
+    detect: () => anyExists([process.env.CODEX_HOME || path.join(homeDir(), '.codex')]),
   },
   {
     name: 'Windsurf',
+    aliases: ['windsurf', 'cascade'],
     projectConfigs: [],
-    globalConfigs: [{ path: () => path.join(homeDir(), '.codeium', 'windsurf', 'mcp_config.json'), rootKey: 'mcpServers', format: 'mcpServers' }],
+    globalConfigs: [{ path: () => path.join(homeDir(), '.codeium', 'windsurf', 'mcp_config.json'), rootKey: 'mcpServers' }],
     rulesFiles: [{ path: '.windsurfrules', content: CURSOR_RULE_CONTENT.replace(/^---[\s\S]*?---\n\n/, '') }],
-    detect: async () => {
-      try { await fs.access(path.join(homeDir(), '.codeium', 'windsurf')); return true } catch { return false }
-    },
+    detect: () => anyExists([path.join(homeDir(), '.codeium', 'windsurf')]),
   },
   {
     name: 'VS Code (Copilot)',
-    projectConfigs: [{ path: '.vscode/mcp.json', rootKey: 'servers', format: 'servers' }],
+    aliases: ['vscode', 'vs-code', 'copilot', 'github-copilot'],
+    projectConfigs: [{ path: '.vscode/mcp.json', rootKey: 'servers', withType: true }],
     globalConfigs: [],
     rulesFiles: [{ path: '.github/copilot-instructions.md', content: AGENTS_MD_CONTENT }],
-    detect: async () => {
-      try { await fs.access(path.join(process.cwd(), '.vscode')); return true } catch { return false }
-    },
+    detect: () => anyExists([path.join(process.cwd(), '.vscode')]),
   },
   {
     name: 'Roo Code',
-    projectConfigs: [{ path: '.roo/mcp.json', rootKey: 'mcpServers', format: 'mcpServers' }],
+    aliases: ['roo', 'roo-code', 'roocode', 'roo-cline'],
+    projectConfigs: [{ path: '.roo/mcp.json', rootKey: 'mcpServers' }],
     globalConfigs: [],
     rulesFiles: [],
-    detect: async () => {
-      try { await fs.access(path.join(process.cwd(), '.roo')); return true } catch { return false }
-    },
+    detect: () => anyExists([path.join(process.cwd(), '.roo')]),
   },
 ]
 
-async function upsertMcpConfig(filePath: string, rootKey: string): Promise<'created' | 'updated' | 'skipped'> {
-  let config: any = {}
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8')
-    config = JSON.parse(raw)
-  } catch { /* file doesn't exist */ }
+/** Editors configured (project-level only) when none is detected on this machine. */
+const FALLBACK_EDITORS = ['Claude Code', 'Cursor', 'VS Code (Copilot)']
 
-  if (!config[rootKey]) config[rootKey] = {}
-  if (config[rootKey]['vibe-test']) return 'skipped'
-
-  config[rootKey]['vibe-test'] = { ...MCP_SERVER_ENTRY }
-  await fs.mkdir(path.dirname(filePath), { recursive: true })
-  await fs.writeFile(filePath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
-  return Object.keys(config[rootKey]).length === 1 ? 'created' : 'updated'
+function upsertMcpConfig(target: Omit<McpConfigTarget, 'path'>, filePath: string): Promise<UpsertResult> {
+  return target.format === 'codex-toml'
+    ? upsertCodexToml(filePath)
+    : upsertJsonMcpConfig(filePath, target.rootKey, { withType: target.withType })
 }
 
 async function writeIfMissing(filePath: string, content: string): Promise<boolean> {
@@ -368,7 +383,7 @@ export function buildInitCompletionPrompt(input: { appUrl: string }): string {
     '2) get_context({ "feature": "' + route + '" })',
     '3) execute_scenario({',
     '  "scenario": {',
-    `    "id": "smoke-${route.replace(/\\W+/g, '-').replace(/^-|-$/g, '') || 'route'}",`,
+    `    "id": "smoke-${route.replace(/\W+/g, '-').replace(/^-|-$/g, '') || 'route'}",`,
     `    "name": "Smoke check: ${route}",`,
     `    "route": "${route}",`,
     '    "priority": "medium",',
@@ -400,7 +415,7 @@ async function setupChromium(): Promise<boolean> {
     return true
   }
 
-  logger.info('Downloading the Chromium browser used by vibe-testing...')
+  logger.info('Downloading the Chromium browser vibe-testing runs tests in (one-time, roughly 150 MB)...')
   const installed = await installChromium()
   if (installed && await isChromiumInstalled()) {
     logger.success('Chromium installed.')
@@ -540,10 +555,10 @@ program
 
 program
   .command('init')
-  .description('Set up Vibe Test — auto-detects editors (Cursor, Claude Code, Windsurf, VS Code, Roo Code) and configures all of them globally + per-project')
+  .description('Set up Vibe Test — auto-detects editors (Claude Code, Cursor, Codex, Windsurf, VS Code, Roo Code) and configures all of them globally + per-project')
   .option('--no-global', 'Skip global editor config registration (project-level only)')
   .option('--skip-browser-install', 'Skip the Chromium download')
-  .option('--editor <names...>', 'Only configure specific editors (cursor, claude-code, windsurf, vscode, roo)')
+  .option('--editor <names...>', 'Only configure specific editors (claude-code, cursor, codex, windsurf, vscode, roo)')
   .action(async (opts: { global?: boolean; skipBrowserInstall?: boolean; editor?: string[] }) => {
     const cwd = process.cwd()
     const projectName = path.basename(cwd)
@@ -558,16 +573,8 @@ program
     const filterNames = opts.editor?.map(e => e.toLowerCase())
 
     for (const editor of EDITORS) {
-      const aliases: Record<string, string[]> = {
-        'Cursor': ['cursor'],
-        'Claude Code': ['claude-code', 'claude', 'claudecode'],
-        'Windsurf': ['windsurf', 'cascade'],
-        'VS Code (Copilot)': ['vscode', 'vs-code', 'copilot', 'github-copilot'],
-        'Roo Code': ['roo', 'roo-code', 'roocode', 'roo-cline'],
-      }
       if (filterNames && !filterNames.some(f =>
-        editor.name.toLowerCase().includes(f) ||
-        (aliases[editor.name] ?? []).includes(f)
+        editor.name.toLowerCase().includes(f) || editor.aliases.includes(f)
       )) continue
 
       const found = await editor.detect()
@@ -576,13 +583,19 @@ program
       }
     }
 
-    if (detected.length === 0) {
-      logger.dim('  No specific editors detected — configuring for Cursor + Claude Code + VS Code')
-      detected.push(EDITORS[0], EDITORS[1], EDITORS[3])
+    // Nothing detected: write project-level configs for the common editors and
+    // leave the home directory alone.
+    let registerGlobally = opts.global !== false
+    const noneDetected = detected.length === 0
+    if (noneDetected) {
+      logger.dim('  No editor detected on this machine. Writing project-level configs for Claude Code, Cursor and VS Code.')
+      detected.push(...EDITORS.filter(editor => FALLBACK_EDITORS.includes(editor.name)))
+      registerGlobally = false
     }
+    const needsManualSetup: string[] = []
 
     const editorNames = detected.map(e => e.name).join(', ')
-    logger.info(`  Detected editors: ${editorNames}`)
+    logger.info(`  ${noneDetected ? 'Configuring' : 'Detected editors'}: ${editorNames}`)
     console.log('')
 
     for (const editor of detected) {
@@ -590,10 +603,13 @@ program
 
       for (const pc of editor.projectConfigs) {
         const fullPath = path.join(cwd, pc.path)
-        const result = await upsertMcpConfig(fullPath, pc.rootKey)
+        const result = await upsertMcpConfig(pc, fullPath)
         if (result === 'skipped') {
           logger.dim(`    ${pc.path} — vibe-test already registered`)
           skipped++
+        } else if (result === 'unreadable') {
+          logger.warn(`    ${pc.path} could not be read as JSON, so it was left unchanged. Add vibe-test by hand (see README, "MCP setup").`)
+          needsManualSetup.push(editor.name)
         } else {
           logger.success(`    ${result === 'created' ? 'Created' : 'Updated'} ${pc.path}`)
           created++
@@ -601,15 +617,22 @@ program
       }
 
       // Global configs — always register unless --no-global passed
-      if (opts.global !== false) {
+      // A project folder that mentions an editor (.cursor/) does not mean the
+      // editor is installed: only write to the home directory when it is, or
+      // when the user named the editor with --editor.
+      const installed = !!filterNames || !editor.detectHome || await editor.detectHome()
+      if (registerGlobally && installed) {
         for (const gc of editor.globalConfigs) {
           try {
             const fullPath = gc.path()
-            const result = await upsertMcpConfig(fullPath, gc.rootKey)
+            const result = await upsertMcpConfig(gc, fullPath)
             const shortPath = fullPath.replace(homeDir(), '~')
             if (result === 'skipped') {
               logger.dim(`    ${shortPath} — already registered globally`)
               skipped++
+            } else if (result === 'unreadable') {
+              logger.warn(`    ${shortPath} could not be updated safely, so it was left unchanged. Add vibe-test by hand (see README, "MCP setup").`)
+              needsManualSetup.push(editor.name)
             } else {
               logger.success(`    ${result === 'created' ? 'Created' : 'Updated'} ${shortPath} (global)`)
               created++
@@ -638,7 +661,7 @@ program
     logger.info('  Universal:')
     const agentsMdPath = path.join(cwd, 'AGENTS.md')
     if (await writeIfMissing(agentsMdPath, AGENTS_MD_CONTENT)) {
-      logger.success('    Created AGENTS.md (Codex, Devin, Copilot, Zed, Windsurf)')
+      logger.success('    Created AGENTS.md (read by Codex, Devin, Copilot, Zed, Windsurf)')
       created++
     } else {
       logger.dim('    AGENTS.md already exists')
@@ -675,7 +698,7 @@ program
     console.log('')
     if (opts.skipBrowserInstall) {
       if (!await isChromiumInstalled()) {
-        logger.warn(`Chromium is not installed. Run ${chromiumInstallCommand} before your first test.`)
+        logger.warn(`Chromium is not installed yet. Tests run in it, so run this before your first test: ${chromiumInstallCommand}`)
       }
     } else if (!await setupChromium()) {
       process.exitCode = 1
@@ -690,15 +713,22 @@ program
       logger.info('Everything is already set up.')
     }
 
+    const manualFor = [...new Set([...needsManualSetup, ...(noneDetected ? ['Claude Code', 'Codex', 'VS Code (Copilot)'] : [])])]
+      .filter(name => MANUAL_COMMANDS[name])
+    if (manualFor.length > 0) {
+      console.log('')
+      logger.info(noneDetected ? 'To register vibe-test for every project, run the line for your editor:' : 'Register by hand:')
+      for (const name of manualFor) logger.dim(`  ${name}: ${MANUAL_COMMANDS[name]}`)
+      if (noneDetected) logger.dim('  Cursor, Windsurf, Roo Code: copy the JSON snippet from the README ("MCP setup").')
+    }
+
     console.log('')
     logger.info('Next steps:')
     const promptUrl = initializedUrl || 'http://localhost:3000'
-    const prompt = buildInitCompletionPrompt({ appUrl: promptUrl })
-    logger.dim('  1. Open your editor and paste the starter flow below:')
+    const steps = buildNextSteps({ editors: detected.map(editor => editor.name), appUrl: promptUrl })
+    steps.forEach((step, index) => logger.dim(`  ${index + 1}. ${step}`))
     console.log('')
-    console.log(prompt.split('\n').map(l => `     ${l}`).join('\n'))
-    console.log('')
-    logger.dim('  Your editor will pick up vibe-test tools automatically in every project.')
+    logger.dim('  Signing in needed? Put the login URL and a test account in VIBE.md first.')
     console.log('')
   })
 
