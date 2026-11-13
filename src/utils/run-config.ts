@@ -10,13 +10,15 @@ export interface RunConfigOverrides {
   codebasePath?: string
   /** URL for this run. Falls back to the file's url. */
   url?: string
-  mode?: 'fast' | 'deep'
+  mode?: 'fast' | 'deep' | 'auto' | 'changed'
   /** Show the browser. When omitted: the file's browser.headed (unless ignored), then defaultHeaded. */
   headed?: boolean
   defaultHeaded?: boolean
   /** MCP runs stay headless unless the caller asks, whatever the file says. */
   ignoreFileHeaded?: boolean
   scopeInclude?: string[]
+  /** mode auto/changed: compare against this ref instead of the last run. */
+  since?: string
 }
 
 /**
@@ -37,6 +39,14 @@ export async function loadRunConfig(overrides: RunConfigOverrides): Promise<Omit
     mode: overrides.mode ?? fileConfig.mode ?? 'deep',
     codebase_path: overrides.codebasePath ?? fileConfig.codebase_path ?? overrides.projectRoot,
     browser: { ...fileConfig.browser, headed },
-    ...(overrides.scopeInclude?.length ? { scope: { ...fileConfig.scope, include: overrides.scopeInclude } } : {}),
+    ...(overrides.scopeInclude?.length || overrides.since
+      ? {
+          scope: {
+            ...fileConfig.scope,
+            ...(overrides.scopeInclude?.length ? { include: overrides.scopeInclude } : {}),
+            ...(overrides.since ? { since: overrides.since } : {}),
+          },
+        }
+      : {}),
   }
 }

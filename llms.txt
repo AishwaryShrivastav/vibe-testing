@@ -1,13 +1,13 @@
 # Vibe Test — Code-Aware Browser Testing Agent (MCP Server)
 
 > npm package: `vibe-testing` | CLI command: `vibe-test`
-> An MCP server + CLI for AI-powered browser testing. Gives AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 13 Playwright-based testing tools via Model Context Protocol.
+> An MCP server + CLI for AI-powered browser testing. Gives AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 14 Playwright-based testing tools via Model Context Protocol.
 
 ## What is Vibe Test?
 
 Vibe Test is a browser testing agent that reads your codebase, understands every route/form/component, opens a real Playwright browser, explores every interactive element, and reports what works and what breaks — with screenshots.
 
-It works as an **MCP (Model Context Protocol) server** that gives your code editor 13 testing tools, or as a standalone CLI. No internal LLM — the editor's AI is the brain, vibe-test is the hands.
+It works as an **MCP (Model Context Protocol) server** that gives your code editor 14 testing tools, or as a standalone CLI. No internal LLM — the editor's AI is the brain, vibe-test is the hands.
 
 ## When to Use
 
@@ -40,19 +40,20 @@ npx vibe-testing@latest run http://localhost:3000
 npx vibe-testing@latest converge http://localhost:3000
 ```
 
-## MCP Tools (13)
+## MCP Tools (14)
 
+0. `configure` — Detect framework, running server and authentication; create `VIBE.md` / `vibe.config.json`. **Start here on a new project.**
 1. `scan_codebase` — Analyze project: routes, forms, existing tests, coverage gaps, generated scenarios. Also returns `route_changes` (new/removed routes since last scan). **Call first.**
 2. `get_context` — Return actual source files for a feature (real selectors, field names, API endpoints). **Call before writing test steps.**
 3. `login` — Authenticate in a real browser, capture tokens and cookies
 4. `scan_page_elements` — Discover all interactive elements on a page
-5. `explore_page` — Click every button, fill every input, monitor API calls, report breakage
+5. `explore_page` — Click every button, fill every input, monitor API calls; returns `problems` (real app failures), `diagnostics`, `warnings` and `changes_made_to_app`
 6. `execute_scenario` — Run a multi-step test scenario with step-by-step screenshots
 7. `get_coverage` — View test coverage map and gap analysis
 8. `suggest_tests` — Get prioritized, executable test scenarios for untested features
 9. `take_screenshot` — Visual verification of any page
 10. `generate_report` — HTML report with screenshots (auto-opens in browser)
-11. `run_full_test` — All-in-one: scan → execute → explore → report. Includes `snapshot_diff` vs the previous run.
+11. `run_full_test` — All-in-one: scan → execute → explore → report. Lists failed scenarios with reasons and problems found while exploring. `mode`: deep (default), fast, auto (changed pages thorough, rest light) or changed (only changed pages). Includes `snapshot_diff` vs the previous run.
 12. `run_converge` — Iterative testing: keeps running follow-up rounds until coverage thresholds met. Includes `snapshot_diff` vs the previous run.
 13. `cleanup` — Close browsers and reset session
 
@@ -64,6 +65,9 @@ Next.js (App Router, Pages Router, src/ variants), React SPA, SvelteKit, Nuxt, V
 
 - **Code-aware**: Reads source code to understand real routes, forms, selectors — no guessing
 - **Framework detection**: Auto-detects 8+ frameworks and parses their route conventions
+- **Finds functional bugs on its own**: server crashes, console errors, broken values and resources, actions that report success on an empty page, created values that never appear, totals that don't add up, logout that doesn't end the session, and (with two accounts) one user opening another's pages
+- **Test depth modes**: `fast`, `deep`, `auto` and `changed` test pages lightly or thoroughly, and test only what changed (from git, or page fingerprints without source code)
+- **Safe by default**: never overwrites existing data while exploring (`explore.writes`), and lists every change it made
 - **Self-improving**: Learns working selectors, route timings, and failure patterns across runs
 - **Route manifest diffing**: Detects new/removed routes between scans (`.vibe/route-manifest.json`)
 - **Run snapshot regression detection**: Detects newly-passing fixes and newly-failing regressions between runs (`.vibe/run-snapshot.json`)

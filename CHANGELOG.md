@@ -4,6 +4,62 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Test depth modes.**
+  - `mode` now sets how deeply each page is tested: `deep` (default, every page thoroughly), `fast` (every page lightly: load, server and console errors, broken values), `auto` (pages changed since the last run thoroughly, the rest lightly) and `changed` (only changed pages).
+  - `scope.since` (CLI `--since`, MCP `since`) picks what "changed" is compared against.
+  - With source code, changes come from git and the import graph. Without source code, from page fingerprints saved each run.
+  - A page that shows a problem at a light depth is retested thoroughly in the same run.
+  - Each page's depth and reason is listed in the run summary (`summary.plan`) and the report.
+- **Functional checks while exploring.**
+  - Server crashes and boundary-input probes.
+  - Console errors.
+  - Broken values and resources (`[object Object]`, `NaN`, `Invalid Date`, leaked templates, missing images and scripts), with placeholders such as "Category: Unknown" as warnings.
+  - Actions that report success on an empty page.
+  - Created values that never appear (create-then-verify).
+  - Totals that don't match their items.
+  - A logout round-trip.
+  - An in-app journey that keeps client-side state.
+- **Cross-user check.** With two accounts (`auth.accounts`), each run checks that one user cannot open another user's pages.
+- **`explore.writes`.** `safe` (default) never overwrites existing data, re-saves edit forms or submits sign-up forms. `all` and `none` are also available. Every data-changing request exploration made is listed under "Changes made to the app".
+- **Retry rule (`retries`, default 1).** Logins, scenarios and page loads get one more try, and success on a retry is reported under "Needs attention", never hidden.
+- **More routes found.** Express routes anywhere in server code (including mounted routers), web apps in subfolders (for example Next.js under a Maven root), and crawled links with query strings.
+
+### Changed
+
+- **MCP summaries.**
+  - `run_full_test`, `run_converge` and `generate_report` list failed scenarios with a one-line reason (`summary.failed_scenarios`), problems found while exploring, retries, warnings and changes.
+  - One `isError` rule applies across tools.
+- **`explore_page` output.** It returns `problems` (real app failures, which set `isError`) and `diagnostics` (vibe-test's own notes) instead of `errors`, plus `warnings` and `changes_made_to_app`.
+- **HTML report.**
+  - Opens with a "Bugs Found" table.
+  - Shows the real run duration.
+  - Embeds small JPEG thumbnails and links the full-size screenshots in `.vibe/screenshots/`, for example 19 MB → 770 KB.
+  - The Markdown report carries the same findings.
+- **Faster runs in every mode.** Links are checked by request instead of navigating away and back. Pages settle on a quiet network and DOM. Pages built from one template are tested thoroughly once.
+- **`routes` setting.** It is deprecated and ignored. Use `scope`.
+
+### Fixed
+
+- **URLs and login.**
+  - User-supplied URLs are honoured, with same-origin redirects followed.
+  - Login fields are found for username, phone and ID logins.
+  - Login success is judged by the form going away, not a "login" URL.
+- **Config and the crawl.** `vibe.config.json` is honoured in MCP runs. The crawl and the explorer wait for client-rendered pages.
+- **Memory.** It no longer permanently skips routes that errored before, and learns "needs sign-in" only from evidence. Stored intelligence is migrated.
+- **False findings removed.**
+  - "Failed to fetch" console errors caused by navigation.
+  - Checkboxes treated as text fields.
+  - Search/filter/pagination/upload scenarios guessed from prose.
+  - Duplicate reports of one bug.
+- **Report metrics.** "Live pages observed" counts crawled and explored pages.
+- **CI.** The Build & Test job is pinned to `ubuntu-24.04`. Playwright 1.59 can't install its browser dependencies on Ubuntu 26.
+
+---
+
 ## [0.4.6] — 2026-09-22
 
 ### Added

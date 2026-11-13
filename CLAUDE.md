@@ -25,20 +25,27 @@ src/
     │   ├── router.ts   # Route parsing per framework
     │   ├── extractor.ts # Extract forms, buttons, dialogs, features
     │   ├── test-reader.ts # Parse existing Jest/Cypress/Playwright tests
+    │   ├── express-routes.ts # Express/Fastify routes anywhere in server code
+    │   ├── change-impact.ts # git diff + import graph → changed pages (mode auto/changed)
     │   ├── gap-analyzer.ts # Score untested routes by priority
     │   └── enricher.ts # Generate TestScenarios from gaps
     ├── browser/        # Playwright execution
     │   ├── runner.ts   # Execute scenarios step-by-step
-    │   ├── explorer.ts # Click everything, monitor APIs
+    │   ├── explorer.ts # Click everything, monitor APIs; runs the checks below per page depth
+    │   ├── page-checks.ts / form-checks.ts / totals-check.ts / session-checks.ts / access-checks.ts # functional checks
+    │   ├── write-policy.ts # explore.writes gating + change disclosure
+    │   ├── depth.ts / fingerprint.ts # light/standard/thorough options; black-box change detection
     │   └── verifier.ts # Heuristic pass/fail (no LLM)
     ├── memory/         # Persist learning across runs
     │   ├── index.ts    # MemoryManager — selectors, timings, credentials, flaky routes
     │   └── manifest.ts # Route manifest + run snapshot diffing (regression detection)
-    ├── reporter/       # Generate HTML reports
+    ├── reporter/       # Generate HTML (thumbnails + Bugs Found) and Markdown reports
+    ├── findings.ts     # Collect failed scenarios, explorer problems, warnings, retries
+    ├── test-plan.ts    # Per-page depth plan for mode fast/deep/auto/changed
     └── coverage-gaps.ts # Post-execution gap analysis
 ```
 
-## MCP Tools (13)
+## MCP Tools (14)
 
 | Tool | Purpose |
 |------|---------|
@@ -46,13 +53,13 @@ src/
 | `get_context` | Return relevant source files for a feature (real selectors) |
 | `login` | Auth in real browser, capture tokens |
 | `scan_page_elements` | Discover interactive elements on a page |
-| `explore_page` | Click everything, monitor APIs, report breakage |
+| `explore_page` | Click everything, monitor APIs; returns `problems`, `diagnostics`, `warnings`, `changes_made_to_app` |
 | `execute_scenario` | Run multi-step test flows |
 | `get_coverage` | View coverage map and gaps |
 | `suggest_tests` | Get prioritized, executable scenarios |
 | `take_screenshot` | Visual verification |
 | `generate_report` | HTML report with screenshots |
-| `run_full_test` | One-shot: scan → execute → explore → report (+ snapshot_diff) |
+| `run_full_test` | One-shot: scan → execute → explore → report (+ snapshot_diff); `mode` deep/fast/auto/changed |
 | `run_converge` | Iterative testing until thresholds (+ snapshot_diff) |
 | `cleanup` | Close browsers |
 
@@ -62,7 +69,7 @@ src/
 npm run build      # tsc compile → dist/
 npm run dev        # Run CLI via tsx (no compile)
 npm run mcp        # Run MCP server via tsx
-npm test           # vitest — 63 tests (config, framework, manifest, ...)
+npm test           # vitest — ~640 tests, many with real-browser fixtures (needs `npx playwright install chromium`)
 ```
 
 Node 20+ required (vitest 4.x).

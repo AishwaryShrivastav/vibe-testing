@@ -1,4 +1,5 @@
 import type { Page, Request } from 'playwright'
+import { waitForSettled } from './settle.js'
 import type { ActionBlocklist } from '../../utils/blocklist.js'
 import { describeSignal, detectCrashText, settleSignals, type ServerErrorSignal } from './error-signals.js'
 import type { InteractionOutcome } from './explorer.js'
@@ -220,7 +221,7 @@ async function reload(page: Page, url: string): Promise<boolean> {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
     // Single-page apps render their forms after the document has loaded.
-    await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
+    await waitForSettled(page, { capMs: 4000 })
     return true
   } catch {
     return false

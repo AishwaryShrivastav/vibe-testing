@@ -1,4 +1,5 @@
 import type { Page } from 'playwright'
+import { waitForSettled } from './settle.js'
 import type { InteractionOutcome } from './explorer.js'
 import { findEmptyState } from './page-checks.js'
 
@@ -244,7 +245,7 @@ export async function exerciseTotalActions(
     if (!await button.isVisible().catch(() => false)) continue
     try {
       await button.click({ timeout: 3000 })
-      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {})
+      await waitForSettled(page, { capMs: 3000 })
       await page.waitForTimeout(300)
       const mismatch = await tracker.check(page, `${where} after clicking "${label}"`)
       outcomes.push({

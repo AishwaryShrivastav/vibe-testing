@@ -3,13 +3,9 @@ import type { PageExploration } from './browser/explorer.js'
 import { describeScenarioRetry } from './browser/runner.js'
 import { describeChange } from './browser/write-policy.js'
 
-/** Explorer findings that are real failures, as opposed to its own diagnostics. */
-const EXPLORER_FAILURE = /Server error \d{3}|Crash text|No response within|^Uncaught exception|^Console error|^Broken value|^Broken resource|Empty-state action|Submitted value not shown|^Total mismatch/
+import { isExplorerFailure } from './finding-kinds.js'
 
-/** True when an explorer error is a real failure in the app (not a navigation or discovery diagnostic). */
-export function isExplorerFailure(error: string): boolean {
-  return EXPLORER_FAILURE.test(error)
-}
+export { isExplorerFailure }
 
 const FINDING_KINDS: Array<[RegExp, string]> = [
   [/Server error \d{3}/, 'Server error'],
@@ -43,16 +39,41 @@ export interface GroupedFinding {
  * pages (a broken shared script, a console error in the layout) is one entry.
  */
 export function groupExplorerFailures(explorations: PageExploration[]): GroupedFinding[] {
-  const routesByFailure = new Map<string, string[]>()
+  const groups = new Map<string, GroupedFinding>()
   for (const exploration of explorations) {
     for (const error of exploration.errors) {
       if (!isExplorerFailure(error)) continue
-      const routes = routesByFailure.get(error) ?? []
-      if (!routes.includes(exploration.route)) routes.push(exploration.route)
-      routesByFailure.set(error, routes)
+      const key = findingKey(error)
+      const group = groups.get(key)
+      if (!group) {
+        groups.set(key, { finding: error, routes: [exploration.route] })
+        continue
+      }
+      if (!group.routes.includes(exploration.route)) group.routes.push(exploration.route)
+      if (wordingRank(error) < wordingRank(group.finding)) group.finding = error
     }
   }
-  return [...routesByFailure].map(([finding, routes]) => ({ finding, routes }))
+  return [...groups.values()]
+}
+
+/**
+ * Identity of a defect: findings with the same key describe the same problem.
+ * Most findings are their own key. A total mismatch is keyed by the page the
+ * total is on and the discrepancy itself with amounts normalized, so the same
+ * stale total reached by two routes (or shown with two amounts) is one defect.
+ */
+export function findingKey(finding: string): string {
+  const total = finding.match(/^Total mismatch on (\S+)[^:]*: (.*)$/)
+  if (total) {
+    const core = total[2].replace(/[$€£]\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\.\d{1,2}\b/g, '#').replace(/\s+/g, ' ')
+    return `Total mismatch|${total[1]}|${core}`
+  }
+  return finding
+}
+
+/** Lower is clearer: wording without the "(via in-app navigation)" marker wins, then the more specific state. */
+function wordingRank(finding: string): number {
+  return (finding.includes('(via in-app navigation)') ? 10_000 : 0) - Math.min(finding.length, 9_999)
 }
 
 /**

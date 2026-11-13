@@ -14,7 +14,7 @@ import { waitForLoginOutcome } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
 import { describeChange } from './engine/browser/write-policy.js'
 import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings, isExplorerFailure } from './engine/findings.js'
-import { formatRunFindings, runHasFailures, type RunFindings } from './run-findings-text.js'
+import { formatPlan, formatRunFindings, runHasFailures, type RunFindings } from './run-findings-text.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
 import { readVibeGuidance } from './utils/vibe-md.js'
@@ -85,6 +85,9 @@ async function screenshotToBase64(filepath: string): Promise<string | null> {
 
 // ─── MCP Server ───────────────────────────────────────────────────────────────
 
+const MODE_DESCRIPTION = 'How much to test each page (default: vibe.config.json mode, else deep). deep = every page thoroughly (all checks). fast = every page lightly: load, server/console errors, broken values; no clicks or submissions. auto = pages changed since the last run (or `since`) thoroughly, affected pages at standard depth, the rest lightly; the first run behaves like deep. changed = only changed and affected pages, thoroughly. The run summary lists each page\'s depth and why.'
+const SINCE_DESCRIPTION = 'For mode auto/changed: compare against this branch, tag or commit (e.g. "main") instead of the last vibe-test run.'
+
 const server = new Server(
   { name: 'vibe-test', version: PKG_VERSION },
   {
@@ -111,10 +114,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           mode: {
             type: 'string',
-            enum: ['fast', 'deep'],
-            description: 'fast = quick heuristic scan. deep = full extraction with dialogs/features (default).',
-            default: 'deep',
+            enum: ['fast', 'deep', 'auto', 'changed'],
+            description: MODE_DESCRIPTION,
           },
+          since: { type: 'string', description: SINCE_DESCRIPTION },
         },
         required: ['codebase_path', 'url'],
       },
@@ -268,7 +271,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           url: { type: 'string', description: 'Base URL of the running application (e.g. http://localhost:3000 or https://staging.myapp.com).' },
           codebase_path: { type: 'string', description: 'Absolute path to the project root directory. Defaults to the current working directory.' },
-          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
+          mode: { type: 'string', enum: ['fast', 'deep', 'auto', 'changed'], description: MODE_DESCRIPTION },
+          since: { type: 'string', description: SINCE_DESCRIPTION },
           headed: { type: 'boolean', default: false, description: 'Show the browser window during testing. Defaults to headless (false) when used via MCP. Set true to watch the browser.' },
         },
         required: [],
@@ -282,7 +286,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           url: { type: 'string', description: 'Base URL of the running application (e.g. http://localhost:3000).' },
           codebase_path: { type: 'string', description: 'Absolute path to the project root directory. Defaults to the current working directory.' },
-          mode: { type: 'string', enum: ['fast', 'deep'], default: 'deep', description: 'fast = quick heuristic scan. deep = full feature extraction with dialogs and CRUD detection.' },
+          mode: { type: 'string', enum: ['fast', 'deep', 'auto', 'changed'], description: MODE_DESCRIPTION },
+          since: { type: 'string', description: SINCE_DESCRIPTION },
           headed: { type: 'boolean', default: false, description: 'Show the browser window during testing. Defaults to headless (false) when used via MCP. Set true to watch the browser.' },
           max_followup_rounds: { type: 'number', description: 'Max extra rounds after baseline (default 4).', default: 4 },
           target_pass_rate: { type: 'number', description: 'Stop when last batch pass rate reaches this 0–1 (default 0.92).', default: 0.92 },
@@ -384,7 +389,7 @@ async function handleConfigure(args: Record<string, unknown>) {
 async function handleScanCodebase(args: Record<string, unknown>) {
   const codebasePath = (args.codebase_path as string) ?? process.cwd()
   const url = args.url as string
-  const mode = (args.mode as 'fast' | 'deep') ?? 'deep'
+  const mode = (args.mode as 'fast' | 'deep' | 'auto' | 'changed') ?? 'deep'
 
   session.projectRoot = codebasePath
   session.screenshotsDir = path.join(codebasePath, '.vibe', 'screenshots')
@@ -1289,7 +1294,8 @@ async function handleRunFullTest(args: Record<string, unknown>) {
     projectRoot: codebasePath,
     codebasePath,
     url: configured.server.url,
-    mode: args.mode as 'fast' | 'deep' | undefined,
+    mode: args.mode as 'fast' | 'deep' | 'auto' | 'changed' | undefined,
+    since: (args.since as string | undefined)?.trim() || undefined,
     headed: args.headed as boolean | undefined,
     defaultHeaded: false,
     ignoreFileHeaded: true,
@@ -1315,7 +1321,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatRunFindings(result.summary)}`
+- Report: ${result.report_path} (opened in browser)${formatPlan(result.summary.plan)}${formatRunFindings(result.summary)}`
 
   return {
     content: [{ type: 'text', text: summary }],
@@ -1331,7 +1337,8 @@ async function handleRunConverge(args: Record<string, unknown>) {
     projectRoot: codebasePath,
     codebasePath,
     url: (args.url as string | undefined)?.trim() || undefined,
-    mode: args.mode as 'fast' | 'deep' | undefined,
+    mode: args.mode as 'fast' | 'deep' | 'auto' | 'changed' | undefined,
+    since: (args.since as string | undefined)?.trim() || undefined,
     headed: args.headed as boolean | undefined,
     defaultHeaded: false,
     ignoreFileHeaded: true,
@@ -1357,7 +1364,7 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)${formatRunFindings(result.summary)}`
+- Report: ${result.report_path} (opened in browser)${formatPlan(result.summary.plan)}${formatRunFindings(result.summary)}`
 
   return {
     content: [{ type: 'text', text: roundsLine }],
