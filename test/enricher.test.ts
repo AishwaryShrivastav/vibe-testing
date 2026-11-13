@@ -164,4 +164,23 @@ describe('generateScenarios', () => {
     const hasLogin = withConfig.find(s => s.route === '/access' && s.name.toLowerCase().includes('login'))
     expect(hasLogin).toBeDefined()
   })
+
+  it('asserts a sign-in redirect only for routes known to be protected', async () => {
+    const page = (path: string, requires_auth: boolean): RouteBehaviour =>
+      ({ route: { path, type: 'page', requires_auth, dynamic_segments: [] }, forms: [], api_calls: [] })
+    const gaps: Gap[] = ['/login', '/cookie', '/admin/rooms'].map(route => ({ route, reason: 'no_tests', priority_score: 5, priority: 'medium' }))
+    const scenarios = await generateScenarios(gaps, [page('/login', false), page('/cookie', false), page('/admin/rooms', true)], {}, 'deep')
+    const redirects = scenarios.filter(s => s.name.includes('redirects to login')).map(s => s.route)
+    // /cookie is only guessed as protected; asserting a redirect there would be a false failure.
+    expect(redirects).toEqual(['/admin/rooms'])
+  })
+
+  it('falls back to a username-or-email selector when the login form was not read from code', async () => {
+    const gaps: Gap[] = [{ route: '/admin', reason: 'no_tests', priority_score: 9, priority: 'high' }]
+    const scenarios = await generateScenarios(gaps, [], {}, 'deep', undefined, '/admin')
+    const login = scenarios.find(s => s.route === '/admin' && s.name.toLowerCase().includes('login'))
+    const identity = login!.steps.find(s => s.action === 'fill' && !/password/i.test(s.description))
+    expect(identity?.selector).toContain('[id*="user" i]')
+    expect(identity?.selector).toContain('[type="email"]')
+  })
 })

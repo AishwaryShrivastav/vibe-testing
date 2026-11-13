@@ -7,8 +7,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { chromium, BrowserContext, Page } from 'playwright'
 import { VibeTester, buildProductModel, MemoryManager } from './engine/index.js'
-import { runOneScenario } from './engine/browser/runner.js'
+import { runScenarioWithRetry } from './engine/browser/runner.js'
+import { fillLoginForm, readLoginError } from './engine/browser/login-form.js'
+import { loadRunConfig } from './utils/run-config.js'
+import { waitForLoginOutcome } from './engine/browser/auth.js'
 import { explorePage, exploreAllPages } from './engine/browser/explorer.js'
+import { describeChange } from './engine/browser/write-policy.js'
+import { collectAppChanges, collectExplorerFailures, collectExplorerWarnings, collectFailedScenarios, collectRetryFindings, isExplorerFailure } from './engine/findings.js'
+import { formatRunFindings, runHasFailures, type RunFindings } from './run-findings-text.js'
 import type { PageExploration } from './engine/browser/explorer.js'
 import { generateHtmlReport } from './engine/reporter/html.js'
 import { readVibeGuidance } from './utils/vibe-md.js'
@@ -48,6 +54,8 @@ interface Session {
   unauthContext: BrowserContext | null
   results: TestResult[]
   explorations: PageExploration[]
+  /** Logins (login tool) that only succeeded on a retry, for generate_report. */
+  loginFindings: string[]
   projectRoot: string
   screenshotsDir: string
 }
@@ -63,6 +71,7 @@ const session: Session = {
   unauthContext: null,
   results: [],
   explorations: [],
+  loginFindings: [],
   projectRoot: process.cwd(),
   screenshotsDir: '',
 }
@@ -116,9 +125,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object' as const,
         properties: {
-          email: { type: 'string', description: 'Email/username to log in with. If omitted, uses saved credentials.' },
+          email: { type: 'string', description: 'Login identifier: email, username, phone/mobile number or account/employee ID. If omitted, uses saved credentials.' },
           password: { type: 'string', description: 'Password. If omitted, uses saved credentials.' },
           login_url: { type: 'string', description: 'Login page URL path (e.g. /login). Defaults to /login.' },
+          identity_field: { type: 'string', description: 'Optional name, id, autocomplete value or label of the identifier field (e.g. "userName", "phoneNumber"). Auto-detected when omitted.' },
+          password_field: { type: 'string', description: 'Optional name, id or label of the password field. Auto-detected when omitted.' },
         },
         required: [],
       },
@@ -144,7 +155,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'explore_page',
-      description: `Perform a full interactive exploration of a page: discover all elements, click buttons, fill inputs, test tabs, observe API calls, and report what happened. Returns detailed interaction outcomes, API observations, and screenshots. This is the "senior tester" mode — it tries every element and reports what works and what breaks.`,
+      description: `Perform a full interactive exploration of a page: discover all elements, click buttons, fill inputs, test tabs, observe API calls, and report what happened. Returns detailed interaction outcomes, API observations, "problems" (real failures in the app: server errors, console errors, broken values, functional failures — these mark the result as an error), "diagnostics" (vibe-test's own notes, e.g. navigation issues), "warnings", "changes_made_to_app" (data-changing requests it sent), and a screenshot. This is the "senior tester" mode — it tries every element and reports what works and what breaks.`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -216,7 +227,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'generate_report',
-      description: `Generate a self-contained HTML test report with embedded screenshots from all collected results, explorations, and coverage data. Returns the report file path and a text summary. The report includes: pass/fail results per scenario, step-by-step screenshots, element exploration findings, API error monitoring, and coverage gap suggestions. Call this after executing scenarios and explorations. The report auto-opens in the browser.`,
+      description: `Generate a self-contained HTML test report with embedded screenshots from all collected results, explorations, and coverage data. Returns the report path and a summary listing failed scenarios (with reasons), problems found while exploring, retries that need attention, warnings, and changes made to the app — the same findings as run_full_test; it is an error result when a scenario failed or a problem was found. The report includes: pass/fail results per scenario, step-by-step screenshots, element exploration findings, API error monitoring, and coverage gap suggestions. Call this after executing scenarios and explorations. The report auto-opens in the browser.`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -251,7 +262,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'run_full_test',
-      description: `Run a complete end-to-end test suite: scan codebase → generate scenarios → execute all → explore pages → generate report. This is the all-in-one command. For more granular control, use the individual tools (scan_codebase, login, explore_page, execute_scenario, generate_report).`,
+      description: `Run a complete end-to-end test suite: scan codebase → generate scenarios → execute all → explore pages → generate report. This is the all-in-one command. Returns a summary listing failed scenarios (with reasons), problems found while exploring, retries that need attention, warnings, and changes made to the app; it is an error result when a scenario failed or a problem was found. For more granular control, use the individual tools (scan_codebase, login, explore_page, execute_scenario, generate_report).`,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -382,7 +393,11 @@ async function handleScanCodebase(args: Record<string, unknown>) {
   session.guidance = await readVibeGuidance(codebasePath)
   session.blocklist = await loadProjectBlocklist(codebasePath, session.guidance)
 
-  session.config = VibeConfigSchema.parse({ url, codebase_path: codebasePath, mode })
+  // Includes auth settings from vibe.config.json (e.g. login field names for the login tool).
+  session.config = VibeConfigSchema.parse({
+    ...await loadRunConfig({ projectRoot: codebasePath, codebasePath, url, mode, defaultHeaded: false, ignoreFileHeaded: true }),
+    url,
+  })
 
   session.memory = new MemoryManager(codebasePath)
   await session.memory.load()
@@ -452,9 +467,12 @@ async function handleLogin(args: Record<string, unknown>) {
   const loginUrl = new URL(loginPath, baseUrl).href
 
   const recs = session.memory?.getRecommendations()
+  // `email` is the login identifier: an email, username, phone number or ID.
   const email = (args.email as string) ?? recs?.saved_credentials?.email
   const password = (args.password as string) ?? recs?.saved_credentials?.password
-  if (!email || !password) throw new Error('No credentials provided and no saved credentials found. Provide email and password.')
+  if (!email || !password) throw new Error('No credentials provided and no saved credentials found. Provide email (or username/phone/ID) and password.')
+  const identityField = (args.identity_field as string | undefined) ?? session.config.auth?.fields?.email
+  const passwordField = (args.password_field as string | undefined) ?? session.config.auth?.fields?.password
 
   await ensureBrowser()
 
@@ -484,16 +502,25 @@ async function handleLogin(args: Record<string, unknown>) {
   await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
-  const emailLoc = page.locator('[type="email"], [name="email"], #email, [placeholder*="email" i]').first()
-  const passLoc = page.locator('[type="password"], [name="password"], #password').first()
-
-  await emailLoc.fill(email, { timeout: 3000 })
-  await passLoc.fill(password, { timeout: 3000 })
-
-  const submitLoc = page.locator('button[type="submit"], input[type="submit"]').first()
-  await submitLoc.click({ timeout: 3000 })
-
-  await page.waitForURL(url => !url.href.includes('login') && !url.href.includes('signin'), { timeout: 10000 }).catch(() => {})
+  // A rejected login is resubmitted on the same page (config.retries times):
+  // some apps only accept the second submission. A retry success is reported.
+  let filled: Awaited<ReturnType<typeof fillLoginForm>>
+  let attempts = 0
+  let firstFailure: string | undefined
+  let stillOnLogin = true
+  const maxAttempts = 1 + (session.config.retries ?? 1)
+  try {
+    while (true) {
+      attempts++
+      filled = await fillLoginForm(page, { identity: email, password }, { identityField, passwordField })
+      stillOnLogin = await waitForLoginOutcome(page, loginUrl)
+      if (!stillOnLogin || attempts >= maxAttempts) break
+      if (attempts === 1) firstFailure = await readLoginError(page) ?? 'stayed on the login page'
+    }
+  } catch (error) {
+    await ctx.close().catch(() => {})
+    throw error
+  }
 
   const tokenData = await page.evaluate(`(() => {
     var storage = {};
@@ -501,8 +528,11 @@ async function handleLogin(args: Record<string, unknown>) {
       var key = localStorage.key(i);
       if (key) storage[key] = localStorage.getItem(key) || '';
     }
-    return { localStorage: storage, cookies: document.cookie };
-  })()`) as { localStorage: Record<string, string>; cookies: string }
+    return { localStorage: storage };
+  })()`) as { localStorage: Record<string, string> }
+  // Read cookies from the browser context: document.cookie cannot see HttpOnly
+  // cookies, which is how most session cookies are set.
+  const cookieNames = [...new Set((await ctx.cookies(page.url())).map(cookie => cookie.name))]
 
   const screenshotPath = path.join(session.screenshotsDir, 'login-result.png')
   await page.screenshot({ path: screenshotPath, fullPage: false })
@@ -510,8 +540,8 @@ async function handleLogin(args: Record<string, unknown>) {
 
   const finalUrl = page.url()
   const tokenCount = Object.keys(tokenData.localStorage).length
-  const onLogin = finalUrl.includes('login') || finalUrl.includes('signin')
-  const loginSuccess = !onLogin || tokenCount > 0
+  // A stored token alone isn't success: apps keep unrelated keys in localStorage.
+  const loginSuccess = !stillOnLogin
 
   // Close the login page — the context stays alive with cookies/storage intact
   await page.close()
@@ -523,13 +553,26 @@ async function handleLogin(args: Record<string, unknown>) {
     await ctx.close()
   }
 
+  if (loginSuccess && attempts > 1) {
+    session.loginFindings.push(`Login tool: login with valid credentials only succeeded on attempt ${attempts} (first attempt: ${firstFailure})`)
+  }
+
   const result = {
     success: loginSuccess,
     final_url: finalUrl,
     final_path: (() => { try { return new URL(finalUrl).pathname } catch { return finalUrl } })(),
+    identity_field: filled.identityDescription,
+    identity_kind: filled.identityKind,
+    multi_step: filled.multiStep,
+    attempts,
+    ...(firstFailure ? { first_attempt_failure: firstFailure } : {}),
+    ...(loginSuccess && attempts > 1
+      ? { finding: `Login with valid credentials only succeeded on attempt ${attempts} (first attempt: ${firstFailure})` }
+      : {}),
     tokens_found: tokenCount,
     token_keys: Object.keys(tokenData.localStorage),
-    has_cookies: tokenData.cookies.length > 0,
+    has_cookies: cookieNames.length > 0,
+    cookie_names: cookieNames,
     api_calls: apiCalls.slice(0, 20),
   }
 
@@ -666,7 +709,7 @@ async function handleExplorePage(args: Record<string, unknown>) {
   const ctx = useAuth ? session.authContext : await getOrCreateUnauthContext()
   if (!ctx) throw new Error(useAuth ? 'No authenticated context. Call login first.' : 'Failed to create browser context.')
 
-  const exploration = await explorePage(ctx, route, session.config.url, session.screenshotsDir, session.blocklist)
+  const exploration = await explorePage(ctx, route, session.config.url, session.screenshotsDir, session.blocklist, { writes: session.config.explore?.writes })
   session.explorations.push(exploration)
 
   const screenshotBase64 = exploration.screenshot_path ? await screenshotToBase64(exploration.screenshot_path) : null
@@ -692,7 +735,12 @@ async function handleExplorePage(args: Record<string, unknown>) {
       response_time_ms: a.responseTime_ms,
       is_error: a.isError,
     })),
-    errors: exploration.errors,
+    // Real problems in the app vs vibe-test's own notes (navigation, discovery).
+    problems: exploration.errors.filter(isExplorerFailure),
+    diagnostics: exploration.errors.filter(error => !isExplorerFailure(error)),
+    ...(exploration.warnings?.length ? { warnings: exploration.warnings } : {}),
+    // Data-changing requests this exploration made — what to clean up.
+    changes_made_to_app: (exploration.changes ?? []).map(describeChange),
     summary: {
       tested: exploration.interactions.filter(i => i.result !== 'skipped').length,
       working: exploration.interactions.filter(i => ['success', 'content_updated', 'dialog_opened', 'navigated', 'toast_shown'].includes(i.result)).length,
@@ -715,7 +763,8 @@ async function handleExplorePage(args: Record<string, unknown>) {
     })
   }
 
-  return { content }
+  // Same rule as a full run: a real problem found on the page fails the call.
+  return { content, isError: result.problems.length > 0 }
 }
 
 // ─── execute_scenario ─────────────────────────────────────────────────────────
@@ -741,7 +790,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
   const ctx = useAuth ? session.authContext : await getOrCreateUnauthContext()
   if (!ctx) throw new Error(useAuth ? 'No authenticated context. Call login first.' : 'Failed to create browser context.')
 
-  const result = await runOneScenario(scenario, ctx, session.config, session.screenshotsDir, session.projectRoot)
+  const result = await runScenarioWithRetry(scenario, ctx, session.config, session.screenshotsDir, session.projectRoot)
   session.results.push(result)
 
   // Collect screenshots from step logs
@@ -774,6 +823,8 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
       has_screenshot: !!log.screenshot_path,
     })),
     api_errors: result.api_errors ?? [],
+    server_errors: result.server_errors ?? [],
+    ...(result.retry ? { retry: result.retry } : {}),
     screenshots_count: stepScreenshots.length + (finalScreenshot ? 1 : 0),
   }
 
@@ -798,6 +849,7 @@ async function handleExecuteScenario(args: Record<string, unknown>) {
     })
   }
 
+  // Same rule as a full run: a scenario that didn't pass fails the call.
   return { content, isError: result.status !== 'pass' }
 }
 
@@ -892,23 +944,46 @@ async function handleGenerateReport(args: Record<string, unknown>) {
   const passed = session.results.filter(r => r.status === 'pass').length
   const failed = session.results.filter(r => r.status === 'fail').length
   const errors = session.results.filter(r => r.status === 'error').length
+  const findings = sessionFindings()
+
+  const text = `**Vibe Test Report Generated**
+- Scenarios: ${session.results.length} (passed ${passed}, failed ${failed}, errors ${errors})
+- Pages explored: ${session.explorations.length}
+- Coverage gaps: ${coverageGaps.length}
+- Report: ${reportPath} (opened in browser)${formatRunFindings(findings)}`
 
   return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        report_path: reportPath,
-        report_opened_in_browser: true,
-        summary: {
-          total_scenarios: session.results.length,
-          passed,
-          failed,
-          errors,
-          pages_explored: session.explorations.length,
-          coverage_gaps_found: coverageGaps.length,
-        },
-      }, null, 2),
-    }],
+    content: [
+      { type: 'text', text },
+      {
+        type: 'text',
+        text: JSON.stringify({
+          report_path: reportPath,
+          report_opened_in_browser: true,
+          summary: {
+            total_scenarios: session.results.length,
+            passed,
+            failed,
+            errors,
+            pages_explored: session.explorations.length,
+            coverage_gaps_found: coverageGaps.length,
+            ...findings,
+          },
+        }, null, 2),
+      },
+    ],
+    isError: runHasFailures(findings),
+  }
+}
+
+/** Findings from everything this session ran (granular tools), in run_full_test's shape. */
+function sessionFindings(): RunFindings {
+  return {
+    failed_scenarios: collectFailedScenarios(session.results),
+    explorer_failures: collectExplorerFailures(session.explorations),
+    explorer_warnings: collectExplorerWarnings(session.explorations),
+    retry_findings: collectRetryFindings(session.results, session.loginFindings),
+    app_changes: collectAppChanges(session.explorations),
   }
 }
 
@@ -1195,7 +1270,7 @@ async function handleRunFullTest(args: Record<string, unknown>) {
         status: 'not-started',
         pages_observed: 0,
         attempted_paths: configured.server.attemptedCandidates.map(candidate => candidate.url),
-        reason: 'No reachable HTML server was detected.',
+        reason: configured.server.failure ?? 'No reachable HTML server was detected.',
       },
       auth: configured.auth,
       next_action: `Start the application at ${configured.server.configuredUrl} or pass its active URL, then retry run_full_test.`,
@@ -1208,12 +1283,18 @@ async function handleRunFullTest(args: Record<string, unknown>) {
       isError: true,
     }
   }
-  const tester = new VibeTester({
+  // Honour vibe.config.json (auth credentials, never_interact, scope, timing);
+  // the detected server URL and the tool arguments win over the file.
+  const runConfig = await loadRunConfig({
+    projectRoot: codebasePath,
+    codebasePath,
     url: configured.server.url,
-    codebase_path: codebasePath,
-    mode: (args.mode as 'fast' | 'deep') ?? 'deep',
-    browser: { headed: (args.headed as boolean) ?? false },
+    mode: args.mode as 'fast' | 'deep' | undefined,
+    headed: args.headed as boolean | undefined,
+    defaultHeaded: false,
+    ignoreFileHeaded: true,
   })
+  const tester = new VibeTester({ ...runConfig, url: configured.server.url })
 
   const result = await tester.run()
 
@@ -1234,20 +1315,29 @@ async function handleRunFullTest(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - API calls observed: ${result.summary.api_calls_observed}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)`
+- Report: ${result.report_path} (opened in browser)${formatRunFindings(result.summary)}`
 
-  return { content: [{ type: 'text', text: summary }], isError: result.summary.failed > 0 || result.summary.errors > 0 }
+  return {
+    content: [{ type: 'text', text: summary }],
+    isError: runHasFailures(result.summary),
+  }
 }
 
 // ─── run_converge ─────────────────────────────────────────────────────────────
 
 async function handleRunConverge(args: Record<string, unknown>) {
-  const tester = new VibeTester({
-    url: args.url as string,
-    codebase_path: args.codebase_path as string | undefined,
-    mode: (args.mode as 'fast' | 'deep') ?? 'deep',
-    browser: { headed: (args.headed as boolean) ?? false },
+  const codebasePath = (args.codebase_path as string | undefined) ?? process.cwd()
+  const runConfig = await loadRunConfig({
+    projectRoot: codebasePath,
+    codebasePath,
+    url: (args.url as string | undefined)?.trim() || undefined,
+    mode: args.mode as 'fast' | 'deep' | undefined,
+    headed: args.headed as boolean | undefined,
+    defaultHeaded: false,
+    ignoreFileHeaded: true,
   })
+  if (!runConfig.url) throw new Error('URL required: pass url or set it in vibe.config.json.')
+  const tester = new VibeTester({ ...runConfig, url: runConfig.url })
 
   const result = await tester.converge({
     max_followup_rounds: (args.max_followup_rounds as number) ?? 4,
@@ -1267,9 +1357,12 @@ async function handleRunConverge(args: Record<string, unknown>) {
 - Elements explored: ${result.summary.elements_explored}
 - Remaining gaps (items): ${result.coverage_gaps.length}
 - Duration: ${(result.summary.duration_ms / 1000).toFixed(1)}s
-- Report: ${result.report_path} (opened in browser)`
+- Report: ${result.report_path} (opened in browser)${formatRunFindings(result.summary)}`
 
-  return { content: [{ type: 'text', text: roundsLine }], isError: result.summary.failed > 0 || result.summary.errors > 0 }
+  return {
+    content: [{ type: 'text', text: roundsLine }],
+    isError: runHasFailures(result.summary),
+  }
 }
 
 // ─── get_context ─────────────────────────────────────────────────────────────
@@ -1405,6 +1498,7 @@ async function handleCleanup() {
   session.unauthContext = null
   session.results = []
   session.explorations = []
+  session.loginFindings = []
   session.productModel = null
   session.config = null
 

@@ -12,6 +12,8 @@ import { readJSON } from '../../utils/file.js'
 
 export const COMMON_DEV_PORTS = [3000, 3001, 4173, 4321, 5173, 5174, 8080] as const
 const MAX_ACTIVE_PORTS = 32
+/** Same-origin redirects followed while probing, e.g. `/` → `/login` on apps that require sign-in. */
+const MAX_SAME_ORIGIN_REDIRECTS = 5
 
 type PackageManifest = {
   scripts?: Record<string, string>
@@ -30,8 +32,12 @@ type NormalizedCandidate = {
 
 export interface ServerDetectorInput {
   codebasePath: string
+  /** URL the user supplied for this run. Authoritative: never replaced by another server. */
   explicitUrl?: string
+  /** URL from the project's vibe.config.json. Authoritative when no explicit URL is given. */
   configuredUrl?: string
+  /** Best guess from project files or framework defaults. Only a discovery hint. */
+  inferredUrl?: string
 }
 
 export type ListenerCommandRunner = (command: string, args: readonly string[]) => Promise<string>
@@ -112,11 +118,33 @@ export async function detectLiveServer(
   const diagnostics: ServerDiscoveryDiagnostic[] = []
   const candidates: Candidate[] = []
 
-  if (input.explicitUrl) {
-    candidates.push(urlCandidate(input.explicitUrl, 'explicit-url', 'URL supplied for this run'))
+  // A URL the user chose is the app under test. If it is unusable, report why
+  // instead of silently testing whatever else happens to be listening locally.
+  const userCandidate = input.explicitUrl
+    ? urlCandidate(input.explicitUrl, 'explicit-url', 'URL supplied for this run')
+    : input.configuredUrl
+      ? urlCandidate(input.configuredUrl, 'configured-url', 'URL found in project configuration')
+      : undefined
+  if (userCandidate) {
+    const probe = await probeCandidate(userCandidate, fetchPage, timeoutMs)
+    attemptedCandidates.push(probe.attempt)
+    if (probe.baseUrl) {
+      return { url: probe.baseUrl, evidence: [userCandidate.evidence], attemptedCandidates, diagnostics }
+    }
+    const origin = userCandidate.evidence.source === 'explicit-url'
+      ? 'The URL supplied for this run'
+      : 'The URL in vibe.config.json'
+    return {
+      evidence: [],
+      attemptedCandidates,
+      diagnostics,
+      failure: `${origin} (${probe.attempt.url}) could not be used: ${probe.attempt.detail ?? probe.attempt.outcome}. ` +
+        'vibe-test does not substitute another local server; start the app at that URL or supply the correct one.',
+    }
   }
-  if (input.configuredUrl) {
-    candidates.push(urlCandidate(input.configuredUrl, 'configured-url', 'URL found in project configuration'))
+
+  if (input.inferredUrl) {
+    candidates.push(urlCandidate(input.inferredUrl, 'inferred-url', 'URL inferred from project files or framework defaults'))
   }
 
   for (const hint of await detectProjectPortHints(input.codebasePath)) {
@@ -156,58 +184,98 @@ export async function detectLiveServer(
   }
 
   for (const candidate of dedupeCandidates(candidates)) {
-    const userSupplied = candidate.evidence.source === 'explicit-url' || candidate.evidence.source === 'configured-url'
-    const normalized = normalizeHttpUrl(candidate.rawUrl, userSupplied)
-    if (!normalized) {
-      attemptedCandidates.push({
-        url: safeDisplayUrl(candidate.rawUrl),
-        source: candidate.evidence.source,
-        outcome: 'rejected',
-        detail: userSupplied
-          ? 'Explicit and configured URLs must use HTTP or HTTPS'
-          : 'Discovered server candidates must use loopback HTTP',
-      })
-      continue
-    }
-
-    try {
-      const response = await fetchPage(normalized.probeUrl, {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(timeoutMs),
-      })
-      const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-      if (!response.ok || (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml'))) {
-        attemptedCandidates.push({
-          url: normalized.displayUrl,
-          source: candidate.evidence.source,
-          outcome: 'non-html',
-          detail: response.ok ? `content-type was ${contentType || 'missing'}` : `HTTP ${response.status}`,
-        })
-        continue
-      }
-
-      attemptedCandidates.push({
-        url: normalized.displayUrl,
-        source: candidate.evidence.source,
-        outcome: 'selected',
-      })
+    const probe = await probeCandidate(candidate, fetchPage, timeoutMs)
+    attemptedCandidates.push(probe.attempt)
+    if (probe.baseUrl) {
       return {
-        url: normalized.baseUrl,
+        url: probe.baseUrl,
         evidence: [candidate.evidence],
         attemptedCandidates,
         diagnostics,
       }
-    } catch (error) {
-      attemptedCandidates.push({
-        url: normalized.displayUrl,
-        source: candidate.evidence.source,
-        outcome: 'unreachable',
-        detail: error instanceof Error ? error.message : String(error),
-      })
     }
   }
 
   return { evidence: [], attemptedCandidates, diagnostics }
+}
+
+function isUserSupplied(source: ServerCandidateSource): boolean {
+  return source === 'explicit-url' || source === 'configured-url'
+}
+
+/**
+ * Probe one candidate for an HTML page. Same-origin redirects are followed
+ * (bounded) so apps that send `/` to a sign-in page still count as running;
+ * redirects to another origin are never followed.
+ */
+async function probeCandidate(
+  candidate: Candidate,
+  fetchPage: typeof globalThis.fetch,
+  timeoutMs: number,
+): Promise<{ attempt: ServerCandidateAttempt; baseUrl?: string }> {
+  const source = candidate.evidence.source
+  const userSupplied = isUserSupplied(source)
+  const normalized = normalizeHttpUrl(candidate.rawUrl, userSupplied)
+  if (!normalized) {
+    return {
+      attempt: {
+        url: safeDisplayUrl(candidate.rawUrl),
+        source,
+        outcome: 'rejected',
+        detail: userSupplied
+          ? 'Explicit and configured URLs must use HTTP or HTTPS'
+          : 'Discovered server candidates must use loopback HTTP',
+      },
+    }
+  }
+
+  const attempt = (outcome: ServerCandidateAttempt['outcome'], detail?: string): ServerCandidateAttempt =>
+    detail === undefined
+      ? { url: normalized.displayUrl, source, outcome }
+      : { url: normalized.displayUrl, source, outcome, detail }
+
+  let probeUrl = normalized.probeUrl
+  try {
+    for (let redirects = 0; ; redirects++) {
+      const response = await fetchPage(probeUrl, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location')
+        if (!location) return { attempt: attempt('non-html', `HTTP ${response.status} without a Location header`) }
+        const target = new URL(location, probeUrl)
+        if (target.origin !== normalized.baseUrl) {
+          return { attempt: attempt('rejected', `HTTP ${response.status} redirects to a different origin (${target.origin})`) }
+        }
+        if (redirects >= MAX_SAME_ORIGIN_REDIRECTS) {
+          return { attempt: attempt('rejected', `more than ${MAX_SAME_ORIGIN_REDIRECTS} redirects`) }
+        }
+        target.username = ''
+        target.password = ''
+        target.search = ''
+        target.hash = ''
+        probeUrl = target.href
+        continue
+      }
+
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+      if (!response.ok || (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml'))) {
+        return {
+          attempt: attempt('non-html', response.ok ? `content-type was ${contentType || 'missing'}` : `HTTP ${response.status}`),
+        }
+      }
+
+      const redirectedTo = redirects > 0 ? new URL(probeUrl).pathname : undefined
+      return {
+        attempt: attempt('selected', redirectedTo ? `followed same-origin redirect to ${redirectedTo}` : undefined),
+        baseUrl: normalized.baseUrl,
+      }
+    }
+  } catch (error) {
+    return { attempt: attempt('unreachable', error instanceof Error ? error.message : String(error)) }
+  }
 }
 
 export async function discoverActiveLoopbackPorts(
@@ -393,8 +461,7 @@ function dedupeEvidence(evidence: ServerEvidence[]): ServerEvidence[] {
 function dedupeCandidates(candidates: Candidate[]): Candidate[] {
   const seen = new Set<string>()
   return candidates.filter(candidate => {
-    const allowRemote = candidate.evidence.source === 'explicit-url' || candidate.evidence.source === 'configured-url'
-    const normalized = normalizeHttpUrl(candidate.rawUrl, allowRemote)
+    const normalized = normalizeHttpUrl(candidate.rawUrl, isUserSupplied(candidate.evidence.source))
     const key = normalized?.displayUrl ?? safeDisplayUrl(candidate.rawUrl)
     if (seen.has(key)) return false
     seen.add(key)

@@ -42,6 +42,8 @@ export function makeContext(): BrowserContext {
       }
       return {
         url: () => url,
+        on: () => {},
+        off: () => {},
         goto: async (next: string) => { url = next },
         locator,
         getByLabel: (label: string) => locator(`label=${label}`),

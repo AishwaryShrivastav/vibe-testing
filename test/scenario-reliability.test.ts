@@ -73,7 +73,10 @@ describe.each(['CLI', 'MCP'] as const)('%s scenario reliability', via => {
     expect(result.step_logs).toHaveLength(2)
     expect(result.step_logs[1].status).toBe('failed')
     expect(result.failure_reason).toMatch(/assertion.*blank/i)
-    expect(fixture.closed).toBe(1)
+    // The failing scenario is retried once (default retries: 1); the failure
+    // stands and every page opened for an attempt is closed.
+    expect(result.retry).toMatchObject({ attempts: 2, passed_on_retry: false })
+    expect(fixture.closed).toBe(2)
   })
   it('checks visible errors beyond a hidden first alert', async () => {
     fixture.elements.set('alert-hidden', { text: 'old error', visible: false })

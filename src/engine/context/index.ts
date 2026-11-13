@@ -1,6 +1,6 @@
 import { ProductModel, Memory } from '../../types/index.js'
 import { VibeConfig, VibeGuidance } from '../../types/config.js'
-import { detectFramework } from './detector.js'
+import { detectFramework, resolveAppRoot } from './detector.js'
 import { parseRoutes } from './router.js'
 import { extractBehaviours } from './extractor.js'
 import { readExistingTests } from './test-reader.js'
@@ -38,11 +38,15 @@ export async function buildProductModel(
   }
 
   const spin1 = logger.spin('Detecting framework...')
-  const framework = await detectFramework(codebasePath)
-  spin1.succeed(`Framework: ${framework}`)
+  // The web app may sit in a subfolder (workspace monorepo, or a frontend
+  // folder inside a Maven/Go/Python repo); routes come from that folder.
+  const appRoot = await resolveAppRoot(codebasePath)
+  const framework = await detectFramework(appRoot)
+  const appNote = appRoot !== codebasePath ? ` (app in ${path.relative(codebasePath, appRoot)}/)` : ''
+  spin1.succeed(`Framework: ${framework}${appNote}`)
 
   const spin2 = logger.spin('Parsing routes...')
-  let routes = await parseRoutes(framework, codebasePath)
+  let routes = await parseRoutes(framework, appRoot)
 
   const { include = ['/**'], exclude = [], max_routes = 30, seed_routes = [] } = config.scope ?? {}
 

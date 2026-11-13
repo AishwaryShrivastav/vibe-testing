@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { generateHtmlReport } from '../src/engine/reporter/html.js'
+import { deriveReportMetrics } from '../src/engine/reporter/metrics.js'
+import type { PageExploration } from '../src/engine/browser/explorer.js'
 import { generateMarkdownReport } from '../src/engine/reporter/markdown.js'
 import type { CoverageMap, ProductModel, Route, TestResult, TestScenario } from '../src/types/index.js'
 import { VibeConfigSchema } from '../src/types/config.js'
@@ -80,5 +82,61 @@ describe('report metrics', () => {
       expect(report).not.toMatch(/700 routes tested/i)
       expect(report).not.toMatch(/routes scanned/i)
     }
+  })
+})
+
+describe('live pages observed', () => {
+  function crawlResult(path: string): TestResult {
+    const base = result(0, 'pass')
+    return { ...base, scenario: { ...base.scenario, id: `live${path}`, route: path, route_origin: 'live-crawl' } }
+  }
+  const model = (routes: Route[]): ProductModel => ({
+    project_name: 'p', url: 'http://localhost:3000', framework: 'nextjs', codebase_path: '/tmp/p',
+    scanned_at: '2026-01-01T00:00:00.000Z', routes, behaviours: [], coverage: {}, gaps: [], scenarios: [],
+  })
+
+  it('counts crawl pages even when the model deduped them into static routes', () => {
+    const metrics = deriveReportMetrics(
+      model([route('/rooms', 'static'), route('/privacy', 'static')]),
+      [crawlResult('/rooms'), crawlResult('/privacy?x=1'), crawlResult('/rooms/')],
+    )
+    expect(metrics.livePagesObserved).toBe(2)
+    expect(metrics.staticRoutesDiscovered).toBe(2)
+  })
+
+  it('adds explored pages without double counting', () => {
+    const exploration = { route: '/rooms', url: 'http://localhost:3000/rooms' } as PageExploration
+    const other = { route: '/admin', url: 'http://localhost:3000/admin' } as PageExploration
+    const metrics = deriveReportMetrics(model([route('/rooms', 'live-crawl')]), [], [exploration, other])
+    expect(metrics.livePagesObserved).toBe(2)
+  })
+})
+
+describe('markdown report findings', () => {
+  it('includes failed scenarios, explorer problems, warnings, retries and app changes', () => {
+    const failed: TestResult = { ...result(1, 'fail'), failure_reason: 'Order total wrong' }
+    const retried: TestResult = { ...result(2, 'pass'), retry: { attempts: 2, passed_on_retry: true, first_failure: 'timeout' } }
+    const exploration = {
+      route: '/products', url: 'http://localhost:3000/products', elements_discovered: 1, elements_by_type: {},
+      interactions: [], api_calls: [], duration_ms: 1,
+      errors: ['Broken value on /products: "Price: NaN"', 'Navigation failed: net::ERR_ABORTED'],
+      warnings: ['Placeholder value on /products: "Category: Unknown"'],
+      changes: [{ action: 'click "Add"', method: 'POST', path: '/api/items', status: 201 }],
+    } as PageExploration
+    const model: ProductModel = {
+      project_name: 'p', url: 'http://localhost:3000', framework: 'nextjs', codebase_path: '/tmp/p',
+      scanned_at: '2026-01-01T00:00:00.000Z', routes: [], behaviours: [], coverage: {}, gaps: [], scenarios: [],
+    }
+    const md = generateMarkdownReport([failed, retried], model, VibeConfigSchema.parse({ url: model.url }), [exploration])
+    expect(md).toContain('### Failed scenarios (1)')
+    expect(md).toContain('Order total wrong')
+    expect(md).toContain('### Problems found while exploring (1)')
+    expect(md).toContain('Price: NaN')
+    expect(md).not.toContain('Navigation failed')
+    expect(md).toContain('Needs attention')
+    expect(md).toContain('Warnings')
+    expect(md).toContain('Category: Unknown')
+    expect(md).toContain('Changes made to the app')
+    expect(md).toContain('POST /api/items')
   })
 })
