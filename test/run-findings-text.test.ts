@@ -74,3 +74,18 @@ describe('isError rule', () => {
     expect(runHasFailures({ retry_findings: ['login retry'], explorer_warnings: ['w'], app_changes: ['c'] })).toBe(false)
   })
 })
+
+describe('failed scenario lines', () => {
+  it('does not repeat a route the scenario name already contains', async () => {
+    const { formatRunFindings } = await import('../src/run-findings-text.js')
+    const text = formatRunFindings({
+      failed_scenarios: [
+        { name: 'Live page health: /reservation/1?a=b', route: '/reservation/1?a=b', status: 'fail', reason: 'Server error 500' },
+        { name: 'Logout ends the session', route: '/products', status: 'fail', reason: 'still signed in' },
+      ],
+    } as never)
+    expect(text).toContain('Live page health: /reservation/1?a=b: Server error 500')
+    expect(text).not.toContain('(/reservation/1?a=b)')
+    expect(text).toContain('Logout ends the session (/products): still signed in')
+  })
+})

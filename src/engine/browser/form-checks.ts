@@ -1,4 +1,5 @@
 import type { Page } from 'playwright'
+import { waitForSettled } from './settle.js'
 import type { ActionBlocklist } from '../../utils/blocklist.js'
 import { fillerValue, submit, tagForms, type FormInfo } from './boundary-probes.js'
 import type { InteractionOutcome } from './explorer.js'
@@ -83,7 +84,7 @@ async function checkForm(page: Page, pageUrl: string, form: FormInfo): Promise<I
   } catch (error) {
     return result('error', `Submit failed: ${(error as Error).message.slice(0, 100)}`)
   }
-  await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
+  await waitForSettled(page, { capMs: 4000 })
   await page.waitForTimeout(400)
 
   const after = await visibleText(page)
@@ -114,7 +115,7 @@ async function tagFormsAndGroups(page: Page): Promise<FormInfo[]> {
 async function reload(page: Page, url: string): Promise<boolean> {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
-    await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {})
+    await waitForSettled(page, { capMs: 4000 })
     return true
   } catch {
     return false

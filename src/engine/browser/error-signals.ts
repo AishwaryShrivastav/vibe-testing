@@ -73,7 +73,7 @@ export function watchServerErrors(page: Page): { signals: ServerErrorSignal[]; s
     }
     signals.push(signal)
     response.text().then(body => {
-      signal.evidence = matchCrashText(stripTags(body)) ?? (stripTags(body).replace(/\s+/g, ' ').trim().slice(0, 200) || `HTTP ${signal.status}`)
+      signal.evidence = evidenceFromBody(body, signal.status)
     }).catch(() => { signal.evidence = `HTTP ${signal.status}` })
   }
 
@@ -82,6 +82,12 @@ export function watchServerErrors(page: Page): { signals: ServerErrorSignal[]; s
     signals,
     stop: () => { page.off('response', onResponse) },
   }
+}
+
+/** Short evidence from a failed response's body: crash text if any, else its first words. */
+export function evidenceFromBody(body: string, status?: number): string {
+  const text = stripTags(body)
+  return matchCrashText(text) ?? (text.replace(/\s+/g, ' ').trim().slice(0, 200) || `HTTP ${status ?? ''}`.trim())
 }
 
 /** Wait for response bodies still being read by a watcher (bounded). */
@@ -108,6 +114,44 @@ export function describeSignal(signal: ServerErrorSignal): string {
   try { where = new URL(signal.url).pathname } catch { /* keep full url */ }
   const head = signal.status ? `Server error ${signal.status} on ${signal.method ?? 'GET'} ${where}` : `Crash text on ${where}`
   return signal.evidence ? `${head}: ${signal.evidence}` : head
+}
+
+function splitUrl(url: string): { path: string; query: string } {
+  try {
+    const parsed = new URL(url)
+    return { path: parsed.pathname, query: parsed.search }
+  } catch { return { path: url, query: '' } }
+}
+
+/**
+ * One line per (method, path, status, evidence): the same failure on one path
+ * reached through different query strings is a single line with a count and
+ * an example query, e.g. "Server error 500 on GET /a (×3, different query
+ * strings, e.g. ?q=…): …". Signals that really differ stay separate lines.
+ */
+export function describeSignalGroups(signals: ServerErrorSignal[]): string[] {
+  const groups = new Map<string, { signal: ServerErrorSignal; queries: string[] }>()
+  for (const signal of signals) {
+    const { path, query } = splitUrl(signal.url)
+    const key = `${signal.method ?? ''} ${path} ${signal.status ?? ''} ${signal.evidence}`
+    const group = groups.get(key)
+    if (group) group.queries.push(query)
+    else groups.set(key, { signal, queries: [query] })
+  }
+  return [...groups.values()].map(({ signal, queries }) => {
+    const line = describeSignal(signal)
+    if (queries.length < 2) return line
+    const distinct = new Set(queries)
+    let note = `×${queries.length}`
+    if (distinct.size > 1) {
+      const example = queries.find(Boolean) ?? ''
+      const shown = example.replace(/=[^&]*/g, '=…').slice(0, 60)
+      note += `, different query strings${example ? `, e.g. ${shown}` : ''}`
+    }
+    const colon = line.indexOf(': ')
+    const head = colon === -1 ? line : line.slice(0, colon)
+    return `${head} (${note})${colon === -1 ? '' : line.slice(colon)}`
+  })
 }
 
 function stripTags(html: string): string {

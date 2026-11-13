@@ -422,6 +422,14 @@ if (process.argv.includes('--mcp')) {
 
 const program = new Command()
 
+/** Validate -m/--mode; undefined keeps the config file's mode. */
+function parseMode(value: string | undefined): 'fast' | 'deep' | 'auto' | 'changed' | undefined {
+  if (value === undefined) return undefined
+  if (value === 'fast' || value === 'deep' || value === 'auto' || value === 'changed') return value
+  logger.error(`Unknown mode "${value}": use fast, deep, auto or changed`)
+  process.exit(1)
+}
+
 program
   .name('vibe-testing')
   .description('Code-aware browser testing for AI coding agents — reads your code, tests your app in a real browser, reports regressions')
@@ -430,13 +438,15 @@ program
 program
   .command('run [url]')
   .description('Run vibe tests against a URL')
-  .option('-m, --mode <mode>', 'fast or deep (default: deep)', 'deep')
+  .option('-m, --mode <mode>', 'fast | deep | auto | changed (default: the config file, else deep)')
+  .option('--since <ref>', 'for auto/changed: compare against this branch, tag or commit (default: the last run)')
   .option('--no-headed', 'run browser headless')
   .option('-c, --config <path>', 'path to vibe.config.json')
   .option('--codebase <path>', 'path to codebase root (default: cwd)')
   .option('--scope <routes...>', 'limit to specific routes e.g. /login /checkout')
   .action(async (urlArg: string | undefined, opts: {
-    mode: string
+    mode?: string
+    since?: string
     headed: boolean
     config?: string
     codebase?: string
@@ -452,7 +462,8 @@ program
       configPath: opts.config,
       codebasePath: opts.codebase,
       url: urlArg,
-      mode: opts.mode as 'fast' | 'deep',
+      mode: parseMode(opts.mode),
+      since: opts.since,
       headed: opts.headed !== false,
       scopeInclude: opts.scope,
     })
@@ -474,7 +485,8 @@ program
 program
   .command('converge [url]')
   .description('Iterative coverage: baseline run, then follow-up rounds from gaps + failures until thresholds (or max rounds)')
-  .option('-m, --mode <mode>', 'fast or deep (default: deep)', 'deep')
+  .option('-m, --mode <mode>', 'fast | deep | auto | changed (default: the config file, else deep)')
+  .option('--since <ref>', 'for auto/changed: compare against this branch, tag or commit (default: the last run)')
   .option('--no-headed', 'run browser headless')
   .option('-c, --config <path>', 'path to vibe.config.json')
   .option('--codebase <path>', 'path to codebase root (default: cwd)')
@@ -482,7 +494,8 @@ program
   .option('--target-pass-rate <r>', 'stop when last batch pass rate reaches this (0-1)', '0.92')
   .option('--max-gaps <n>', 'stop when critical+important gaps <= this', '2')
   .action(async (urlArg: string | undefined, opts: {
-    mode: string
+    mode?: string
+    since?: string
     headed: boolean
     config?: string
     codebase?: string
@@ -500,7 +513,8 @@ program
       configPath: opts.config,
       codebasePath: opts.codebase,
       url: urlArg,
-      mode: opts.mode as 'fast' | 'deep',
+      mode: parseMode(opts.mode),
+      since: opts.since,
       headed: opts.headed !== false,
     })
     if (!config.url) {

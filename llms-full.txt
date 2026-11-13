@@ -20,7 +20,9 @@ npx vibe-testing@latest run https://your-app.com --codebase /path/to/project
 npx vibe-testing@latest converge https://your-app.com
 ```
 
-## Complete Tool Reference (13 Tools)
+## Complete Tool Reference (14 Tools)
+
+Start a new project with `configure` (tool 14), then `scan_codebase`.
 
 ### 1. scan_codebase
 **Must be called first.** Analyzes the project source code:
@@ -36,7 +38,8 @@ npx vibe-testing@latest converge https://your-app.com
 Parameters:
 - `codebase_path` (string, optional): Absolute path to project root. Defaults to cwd.
 - `url` (string, optional): App URL to test against.
-- `mode` (string, optional): "fast" or "deep". Default "deep".
+- `mode` (string, optional): How much to test each page: "deep" (default: every page thoroughly), "fast" (every page lightly), "auto" (pages changed since the last run thoroughly, the rest lightly) or "changed" (only changed pages). See "Test Depth and Modes". Default: `mode` in vibe.config.json, else "deep".
+- `since` (string, optional): For "auto"/"changed": a branch, tag or commit to compare against (e.g. "main") instead of the last vibe-test run.
 
 Returns: JSON with routes, behaviours, coverage map, gaps, generated scenarios, and `route_changes: { new_routes, removed_routes } | null` — `null` on first scan, populated when routes differ from the previous scan. Lets the editor surface "new routes added since last test — want to cover them?"
 
@@ -89,7 +92,13 @@ Parameters:
 - `route` (string): Page route to explore
 - `authenticated` (boolean, optional): Use authenticated context. Default false.
 
-Returns: JSON with interaction results, API calls, timings + screenshot.
+Returns: JSON with interaction results, API calls, timings + screenshot, plus:
+- `problems`: real failures in the app (server errors, console errors, broken values or resources, empty-state actions, created values that never appear, totals that don't add up). These mark the result as an error (`isError: true`).
+- `diagnostics`: vibe-test's own notes (navigation or discovery issues). Not failures.
+- `warnings`: possible missing data, such as "Category: Unknown". Not failures.
+- `changes_made_to_app`: data-changing requests exploration sent (see `explore.writes`).
+
+`problems` and `diagnostics` replace the old `errors` field.
 
 ### 6. execute_scenario
 Runs a specific multi-step test scenario:
@@ -161,7 +170,7 @@ Generates interactive HTML report:
 Parameters:
 - `title` (string, optional): Report title.
 
-Returns: Report path + text summary.
+Returns: Report path + a text summary with the same findings as `run_full_test` (failed scenarios, problems found while exploring, retries that need attention, warnings, changes made to the app), followed by JSON. It is an error result when a scenario failed or exploring found a problem.
 
 ### 11. run_full_test
 All-in-one orchestration: scan_codebase → generate scenarios → execute all → explore pages → generate report. Writes `.vibe/run-snapshot.json` and diffs against the previous run.
@@ -169,10 +178,19 @@ All-in-one orchestration: scan_codebase → generate scenarios → execute all �
 Parameters:
 - `url` (string): App URL
 - `codebase_path` (string, optional): Project root path
-- `mode` (string, optional): "fast" or "deep"
+- `mode` (string, optional): "deep" (default), "fast", "auto" or "changed". See "Test Depth and Modes".
+- `since` (string, optional): For "auto"/"changed": a branch, tag or commit to compare against instead of the last run.
 - `headed` (boolean, optional): Show browser. Default `false` when invoked via the MCP server (so editor sessions aren't disrupted), `true` from the CLI.
 
-Returns: Full results + report path + `snapshot_diff` (see below).
+Returns: a text summary listing, in order:
+1. the test plan (each page's depth and why)
+2. failed scenarios with a one-line reason each
+3. problems found while exploring
+4. "Needs attention": operations that only succeeded on a retry
+5. warnings
+6. changes made to the app
+
+It is an error result when a scenario failed or errored, or exploring found a problem. Retries, warnings and changes never fail a run on their own. The run result's `summary` also carries `failed_scenarios`, `explorer_failures`, `explorer_warnings`, `retry_findings`, `app_changes` and `plan`, plus the report path and `snapshot_diff` (see below).
 
 ### 12. run_converge
 Iterative testing until coverage thresholds are met:
@@ -187,11 +205,46 @@ Parameters:
 - `max_followup_rounds` (number, optional): Max follow-up rounds. Default 4.
 - `target_pass_rate` (number, optional): Stop when pass rate >= this (0-1). Default 0.92.
 - `max_high_severity_gaps` (number, optional): Stop when critical+important gaps <= this. Default 2.
+- `mode` (string, optional): "deep" (default) or "fast". "auto" and "changed" fall back to "deep" here.
 
 Returns: Full results across all rounds + final report + `snapshot_diff` (see below).
 
 ### 13. cleanup
 Closes all open browsers and resets session state. Call when done testing.
+
+### 14. configure
+**Start here on a new project.** Idempotently detects the framework, the running local server and the authentication method, and creates `VIBE.md` and `vibe.config.json` if missing. Existing files are preserved.
+
+## Test Depth and Modes
+
+Each page is tested at one of three depths:
+- **light**: load the page; server errors, console errors, broken values and resources, crash text. No clicks or submissions.
+- **standard**: light, plus tabs, fills, toggles, buttons that don't change data (with the empty-state check), and links checked by request.
+- **thorough**: everything, including data-changing buttons, the in-app journey, totals after actions, create-then-verify, boundary probes, and the logout and cross-user session checks.
+
+`mode` (config, CLI `-m`, MCP `mode`) decides the depth per page:
+
+| `mode` | Pages |
+|---|---|
+| `deep` (default) | Every page thoroughly. |
+| `fast` | Every page lightly. |
+| `auto` | Pages changed since `scope.since` (default: the last run) thoroughly, pages affected through a shared file at standard, all others lightly. The first run (no baseline yet) behaves like `deep`. |
+| `changed` | Only changed and affected pages, thoroughly; nothing else. |
+
+**With source code:** "changed" comes from git. Files changed since the baseline, plus uncommitted and untracked files, are followed through the import graph to the pages that use them:
+- a page's own file or a component it imports → thorough
+- a file most pages use (layout, context, API client) → every page at least standard
+- a style sheet → light
+- a server handler → thorough for the pages that call its endpoint
+
+Without a repository, `auto`/`changed` test every page thoroughly and say why.
+
+**Without source code (black-box):** every page gets a light visit. Pages whose structure changed since the last run (controls, links, forms, headings, API calls; data and counts are ignored) are tested thoroughly.
+
+**In every mode:**
+- Pages built from one template (same route pattern such as `/tutorial/:page`, or the same controls under one parent path) are tested thoroughly once and lightly after that.
+- A page that shows a problem at light or standard depth, or whose scenario failed, is re-tested thoroughly in the same run.
+- The plan (`summary.plan`, the run summary and the report's "Test plan" section) lists every page's depth and the reason. Nothing is skipped silently.
 
 ## Recommended Workflow
 
@@ -310,14 +363,19 @@ Use this to proactively suggest tests for routes the user just added.
 | Key | Type | Default | Notes |
 |-----|------|---------|-------|
 | `url` | string | required | App URL |
-| `mode` | `"fast"` \| `"deep"` | `"deep"` | Scan depth |
-| `routes` | `"auto"` \| `"config"` | `"auto"` | `auto` discovers routes from the codebase; `config` uses only routes listed in config |
+| `mode` | `"deep"` \| `"fast"` \| `"auto"` \| `"changed"` | `"deep"` | Test depth per page; see "Test Depth and Modes" |
+| `routes` | `"auto"` \| `"config"` | `"auto"` | Deprecated and ignored; use `scope` |
 | `auth.strategy` | `"credentials"` \| `"basic"` \| `"skip"` | — | Auth mode |
 | `auth.login_url` | string | `/login` | Login page path |
-| `auth.credentials` | `{ email, password }` | — | Persisted across runs |
+| `auth.credentials` | `{ email, password }` | — | Persisted across runs. `email` is any login identifier (username, phone, ID) |
+| `auth.accounts` | `[{ name?, credentials }]` | — | More accounts on the same login form. With two different accounts, each run checks that the second cannot open the first one's pages |
 | `scope.include` | string[] | `["/**"]` | Route glob include list |
 | `scope.exclude` | string[] | `[]` | Route glob exclude list |
 | `scope.max_routes` | number | `30` | Cap on routes tested per run |
+| `scope.seed_routes` | string[] | `[]` | Concrete URLs for dynamic routes (e.g. `/live/dev-mode-a-now` for `/live/[slug]`) |
+| `scope.since` | string | last run | For `auto`/`changed`: branch, tag or commit to compare against (CLI `--since`) |
+| `retries` | number (0–2) | `1` | Extra attempts for logins, scenarios and page loads. Success on a retry is reported, never hidden |
+| `explore.writes` | `"safe"` \| `"all"` \| `"none"` | `"safe"` | What exploration may change. `safe` creates new records but never overwrites existing values, re-saves edit forms or submits sign-up forms; `all` does; `none` sends nothing that changes data. Every change is listed under "Changes made to the app" |
 | `never_interact` | string[] | `[]` | Text or selectors to skip during exploration |
 | `browser.headed` | boolean | CLI `true`, MCP `false` | Visible vs headless browser |
 | `browser.slowMo` | number | `40` | ms between actions |

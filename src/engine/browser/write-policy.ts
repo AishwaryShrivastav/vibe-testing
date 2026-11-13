@@ -113,6 +113,93 @@ export async function editFormKeys(page: Page): Promise<Set<string>> {
   return new Set(forms.filter(form => editsExistingData(form.fields, `${form.label} ${context}`)).map(form => form.key))
 }
 
+const SAVE_BUTTON = /^(?:save|submit|update|apply|confirm|change)\b/i
+
+/**
+ * Pages built without a <form> (React/Vue divs): why the text inputs outside
+ * any form already hold existing data (so a Save button re-saves it), or
+ * undefined. Read before inputs are filled.
+ */
+export async function looseEditReason(page: Page): Promise<string | undefined> {
+  const fields = await page.evaluate(() => Array.from(document.querySelectorAll('input, textarea'))
+    .filter(el => {
+      const type = (el.getAttribute('type') ?? '').toLowerCase()
+      const rect = el.getBoundingClientRect()
+      return !el.closest('form') && rect.width > 0 && rect.height > 0 &&
+        !['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file', 'range', 'color'].includes(type) &&
+        !(el as HTMLInputElement).readOnly && !(el as HTMLInputElement).disabled
+    })
+    .map(el => ({ value: (el as HTMLInputElement).value })))
+    .catch(() => [] as Array<{ value: string }>)
+  return fields.length === 0 ? undefined : editsExistingData(fields, await pageContext(page))
+}
+
+const SIGNUP_WORDS = /\b(?:sign ?-?up|register|registration|create (?:an? |your )?(?:new )?account|join (?:now|us))\b/i
+const LOGIN_WORDS = /\b(?:log ?-?in|sign ?-?in)\b/i
+
+/**
+ * Tag the visible sign-up / registration forms (data-vibe-signup) and return
+ * how many there are. A form is sign-up when it has a password plus a
+ * confirm-password field, or a password and sign-up wording in its action,
+ * heading, id, submit text or the page path (and no login wording on its
+ * submit button). A form asking for the current password is not sign-up.
+ */
+export async function markSignupForms(page: Page): Promise<number> {
+  return await page.evaluate(`(function (signupSrc, loginSrc) {
+    var signup = new RegExp(signupSrc, 'i'), login = new RegExp(loginSrc, 'i')
+    var confirmHint = /confirm|verify|repeat|re-?enter|retype|again/i
+    var count = 0
+    function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    Array.prototype.forEach.call(document.forms, function (form) {
+      form.removeAttribute('data-vibe-signup')
+      if (!visible(form)) return
+      var passwords = Array.prototype.filter.call(form.querySelectorAll('input[type=password]'), visible)
+      if (passwords.length === 0) return
+      var ident = function (el) { return [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), el.getAttribute('autocomplete'), el.labels && el.labels[0] ? el.labels[0].innerText : ''].join(' ') }
+      if (passwords.some(function (el) { return /current|old|existing/i.test(ident(el)) })) return
+      var submits = Array.prototype.map.call(form.querySelectorAll('button, input[type=submit]'), function (b) { return (b.innerText || b.value || '').trim() }).join(' ')
+      var heading = form.querySelector('h1,h2,h3,legend')
+      var text = [form.getAttribute('action') || '', form.id || '', heading ? heading.innerText : '', submits, location.pathname.replace(/[\/_-]+/g, ' ')].join(' ')
+      var confirm = passwords.length >= 2 && (passwords.some(function (el) { return confirmHint.test(ident(el)) }) || passwords.length === 2)
+      var words = signup.test(text) && !login.test(submits)
+      if (confirm || words) { form.setAttribute('data-vibe-signup', '1'); count++ }
+    })
+    return count
+  })(${JSON.stringify(SIGNUP_WORDS.source)}, ${JSON.stringify(LOGIN_WORDS.source)})`) as number
+}
+
+/**
+ * Why the button phase must not click this submit button under the policy, or
+ * undefined to click: it saves a form that edits existing data (re-saving
+ * unchanged values is a recurring side effect), or it submits a sign-up form
+ * (creates a new account every run). `editForms` comes from editFormKeys and
+ * markSignupForms must have run, both before inputs were filled.
+ */
+export async function submitSkipReason(
+  page: Page,
+  selector: string,
+  text: string,
+  policy: WritePolicy,
+  editForms: Set<string>,
+  /** Why the page's inputs outside any <form> edit existing data (see looseEditReason). */
+  looseEdit?: string,
+): Promise<string | undefined> {
+  if (policy === 'all' || !selector) return undefined
+  const info = await page.locator(selector).first().evaluate(el => {
+    const form = el.closest('form')
+    if (!form) return { key: null, signup: false, loose: true }
+    if ((el as HTMLButtonElement).type !== 'submit') return null
+    return { key: form.getAttribute('data-vibe-form'), signup: form.hasAttribute('data-vibe-signup'), loose: false }
+  }, undefined, { timeout: 1000 }).catch(() => null)
+  if (!info) return undefined
+  if (info.loose && looseEdit && SAVE_BUTTON.test(text.trim())) {
+    return `Skipped — saves inputs that edit existing data (${looseEdit}); set explore.writes to "all" to test it`
+  }
+  if (info.signup) return `Skipped — submits a sign-up form (creates a new account every run); set explore.writes to "all" to test it`
+  if (info.key !== null && editForms.has(info.key)) return `Skipped — saves a form that edits existing data (explore.writes: ${policy}); set explore.writes to "all" to test it`
+  return undefined
+}
+
 /**
  * Why the fill phase must leave this input alone under the policy, or
  * undefined to fill it: it holds an existing value, or it belongs to a form

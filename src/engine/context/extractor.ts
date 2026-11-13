@@ -1,7 +1,7 @@
 import { Route, RouteBehaviour, FormField, Validation, PageFunctionality, PageFeature, PageButton, PageDialog } from '../../types/index.js'
 import { readFile } from '../../utils/file.js'
 
-export async function extractBehaviours(routes: Route[], _mode: 'fast' | 'deep'): Promise<RouteBehaviour[]> {
+export async function extractBehaviours(routes: Route[], _mode: 'fast' | 'deep' | 'auto' | 'changed'): Promise<RouteBehaviour[]> {
   const behaviours: RouteBehaviour[] = []
 
   const pageRoutes = routes.filter(r => r.type === 'page' && r.file_path)

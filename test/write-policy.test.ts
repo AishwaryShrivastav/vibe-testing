@@ -16,9 +16,9 @@ import type { ProductModel } from '../src/types/index.js'
  * values (overwriting them is the damage to avoid), and an "add item" form
  * that creates new records (the functional check to keep).
  */
-interface State { name: string; logo: string; items: string[]; sessionPosts: number; first: string; last: string; start: string }
+interface State { name: string; logo: string; items: string[]; sessionPosts: number; brandingPuts: number; signups: number; logins: number; first: string; last: string; start: string }
 let state: State
-const reset = () => { state = { name: 'Shady Meadows', logo: 'https://cdn.example.test/logo.png', items: [], sessionPosts: 0, first: '', last: 'Doe', start: '2024-01-01' } }
+const reset = () => { state = { name: 'Shady Meadows', logo: 'https://cdn.example.test/logo.png', items: [], sessionPosts: 0, brandingPuts: 0, signups: 0, logins: 0, first: '', last: 'Doe', start: '2024-01-01' } }
 
 const html = (body: string) => `<!doctype html><html><head><title>App</title></head><body>${body}
   <script>fetch('/api/ping', { method: 'POST' })</script></body></html>`
@@ -51,6 +51,9 @@ beforeAll(async () => {
         state.last = form.get('last') ?? state.last
         res.writeHead(303, { location: '/profile' }); res.end(); return
       }
+      if (req.method === 'PUT' && url.pathname === '/api/branding') { state.brandingPuts++; res.writeHead(200); res.end('{}'); return }
+      if (req.method === 'POST' && url.pathname === '/signup') { state.signups++; res.writeHead(303, { location: '/signup' }); res.end(); return }
+      if (req.method === 'POST' && url.pathname === '/sign-in') { state.logins++; res.writeHead(303, { location: '/sign-in' }); res.end(); return }
       if (req.method === 'POST' && url.pathname === '/items') {
         const item = form.get('item')
         if (item) state.items.push(item)
@@ -82,6 +85,35 @@ beforeAll(async () => {
             <input name="first" placeholder="First name" value="${state.first}">
             <input name="last" placeholder="Last name" value="${state.last}">
             <button type="submit">Submit</button>
+          </form>`))
+        return
+      }
+      if (url.pathname === '/branding') {
+        res.end(html(`<h1>B&B details</h1>
+          <div>
+            <input name="name" value="Shady Meadows B&B">
+            <input name="county" value="Dilbery">
+            <button id="save" type="submit">Submit</button>
+          </div>
+          <script>document.getElementById('save').addEventListener('click', () => fetch('/api/branding', { method: 'PUT', body: '{}' }))</script>`))
+        return
+      }
+      if (url.pathname === '/signup') {
+        res.end(html(`<h1>Join</h1>
+          <form method="post" action="/signup">
+            <input name="email" type="email" placeholder="Email">
+            <input name="password" type="password" placeholder="Password">
+            <input name="verify" type="password" placeholder="Confirm password">
+            <button type="submit">Submit</button>
+          </form>`))
+        return
+      }
+      if (url.pathname === '/sign-in') {
+        res.end(html(`<h1>Welcome back</h1>
+          <form method="post" action="/sign-in">
+            <input name="user" placeholder="Username">
+            <input name="password" type="password" placeholder="Password">
+            <button type="submit">Log in</button>
           </form>`))
         return
       }
@@ -131,6 +163,35 @@ describe('write policy: never overwrite existing data by default', () => {
     const probe = exploration.interactions.find(i => i.action === 'boundary probe')
     expect(probe?.result).toBe('skipped')
     expect(probe?.details).toMatch(/form edits existing data \(2 fields already hold existing values\)/)
+  }, 90000)
+
+  it('safe: does not click Save on a form that edits existing data (no re-save of unchanged values)', async () => {
+    const exploration = await explore('/settings')
+    expect((exploration.changes ?? []).filter(c => c.path === '/settings')).toEqual([])
+    const save = exploration.interactions.find(i => i.element === 'Save' && i.action === 'click')
+    expect(save?.result).toBe('skipped')
+    expect(save?.details).toMatch(/saves a form that edits existing data/)
+  }, 90000)
+
+  it('safe: does not click Save on a prefilled page built without a <form>', async () => {
+    const exploration = await explore('/branding')
+    expect(state.brandingPuts).toBe(0)
+    expect(exploration.interactions.find(i => i.element === 'Submit' && i.action === 'click')?.details).toMatch(/saves inputs that edit existing data/)
+    await explore('/branding', 'all')
+    expect(state.brandingPuts).toBeGreaterThan(0)
+  }, 90000)
+
+  it('safe: does not submit a sign-up form, but still submits a login form', async () => {
+    const signup = await explore('/signup')
+    expect(state.signups).toBe(0)
+    expect(signup.interactions.find(i => i.element === 'Submit' && i.action === 'click')?.details).toMatch(/sign-up form/)
+    await explore('/sign-in')
+    expect(state.logins).toBeGreaterThan(0)
+  }, 90000)
+
+  it('all: submits the sign-up form (old behaviour)', async () => {
+    await explore('/signup', 'all')
+    expect(state.signups).toBeGreaterThan(0)
   }, 90000)
 
   it('safe: leaves the blank fields of a partly filled profile form alone too', async () => {

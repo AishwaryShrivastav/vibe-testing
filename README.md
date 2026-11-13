@@ -482,6 +482,10 @@ npx vibe-testing@latest run http://localhost:3000
 npx vibe-testing@latest run https://staging.myapp.com --mode deep
 npx vibe-testing@latest run http://localhost:3000 --codebase /path/to/project --scope /login /dashboard
 
+# After a small change: test what changed thoroughly, everything else lightly
+npx vibe-testing@latest run http://localhost:3000 --mode auto
+npx vibe-testing@latest run http://localhost:3000 --mode changed --since main
+
 # Iterative testing until coverage thresholds
 npx vibe-testing@latest converge http://localhost:3000
 npx vibe-testing@latest converge http://localhost:3000 --max-rounds 6 --target-pass-rate 0.95
@@ -497,7 +501,8 @@ npx vibe-testing@latest reset
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--mode fast\|deep` | `deep` | `fast`: quick scan. `deep`: full feature extraction plus exploration |
+| `--mode fast\|deep\|auto\|changed` | config file, else `deep` | How much to test each page; see [Test depth and modes](#test-depth-and-modes) |
+| `--since <ref>` | last run | For `auto`/`changed`: compare against this branch, tag or commit |
 | `--no-headed` | - | Run browser headless (default: visible) |
 | `--codebase <path>` | cwd | Path to project root |
 | `--scope <routes...>` | all | Test only specific routes |
@@ -590,20 +595,44 @@ Created automatically by `init` with auto-detected URL. Edit as needed:
 | Key | Description |
 |-----|-------------|
 | `url` | App URL, localhost or staging. Auto-detected by `init`. |
-| `mode` | `fast` (heuristic scan) or `deep` (full extraction plus exploration) |
+| `mode` | `deep` (default), `fast`, `auto` or `changed`; see [Test depth and modes](#test-depth-and-modes) |
 | `auth.strategy` | `credentials` (form login), `basic` (HTTP Basic Auth), or `skip` |
 | `auth.login_url` | Explicit login route for non-standard paths keyword matching would miss |
 | `auth.credentials` | Login credentials, used for login and for generated scenarios, persisted across runs |
 | `auth.accounts` | More accounts on the same login form: `[{ "name": "Bob", "credentials": { "email": "bob", "password": "…" } }]`. With two different accounts, each run logs in as both and checks that the second cannot open the first one's pages (e.g. `/orders/42` showing the first user's data). |
 | `never_interact` | Text patterns or CSS selectors to skip during exploration |
 | `explore.writes` | What exploration may change in the app. `safe` (default): creates new records (add/create forms, "add" buttons, probes on blank forms) but never overwrites a value already in a field, and doesn't probe or create-check forms that edit existing data (settings, profile, branding). `all`: also overwrites existing values and tests edit forms. `none`: no data-changing submissions. Every data-changing request exploration made is listed under "Changes made to the app" in the run summary and the report. |
-| `scope.include` | Route patterns to include; default `/**` includes `/` and all nested routes. `*` stays within one segment; a trailing `/**` includes the subtree root and its descendants. Other characters are literal. |
-| `scope.exclude` | Route patterns to exclude from testing |
+| `scope.include` | Route patterns to include; default `/**` includes `/` and all nested routes. `*` stays within one segment; a trailing `/**` includes the subtree root and its descendants. Other characters are literal. Applies to pages from the code and pages found by the live crawl. |
+| `scope.exclude` | Route patterns to exclude from testing (code and crawled pages) |
+| `scope.since` | For mode `auto`/`changed`: the branch, tag or commit "changed" is compared against. Default: the commit of the last run (`.vibe/baseline.json`) plus uncommitted changes. |
 | `scope.max_routes` | Cap how many routes are tested per run |
 | `scope.seed_routes` | Concrete URLs for dynamic-segment routes the parser can't enumerate (e.g. `/live/[slug]` becomes `/live/dev-mode-a-now`). Each seeded route inherits `requires_auth` and the source file from its dynamic parent. |
 | `browser.headed` | `true` = visible browser. CLI default `true`, MCP server default `false` (headless) so editor sessions aren't disrupted by pop-up windows. |
 | `browser.slowMo` | Milliseconds between actions (useful for debugging) |
-| `routes` | `auto` (default) discovers routes from the codebase. `config` uses only routes explicitly listed in config. |
+| `routes` | Deprecated and ignored; use `scope` to choose pages. |
+
+### Test depth and modes
+
+Each page is tested at one of three depths:
+
+| Depth | What runs |
+|-------|-----------|
+| light | Load the page; server errors, console errors, broken values and resources, crash text. No clicks or submissions. |
+| standard | Light, plus tabs, fills, toggles, buttons that don't change data (with the empty-state check), and links checked by request. |
+| thorough | Everything: data-changing buttons, the in-app journey, totals after actions, create-then-verify, boundary probes, and the logout and cross-user session checks. |
+
+`mode` decides the depth per page:
+
+| `mode` | Pages |
+|--------|-------|
+| `deep` (default) | Every page thoroughly. |
+| `fast` | Every page lightly. |
+| `auto` | Pages changed since `scope.since` (default: the last run) thoroughly, pages affected through a shared file at standard, all others lightly. The first run (no baseline yet) behaves like `deep`. |
+| `changed` | Only changed and affected pages, thoroughly; nothing else. |
+
+With source code, "changed" comes from version control: files changed since the baseline (plus uncommitted and untracked files) are followed through the import graph to the pages that use them. A page's own file or a component it imports makes it thorough; a file most pages use (layout, context, API client) makes every page standard; a style sheet asks for a light check; a server handler makes the pages that called its endpoint thorough. Without a repository, `auto`/`changed` test every page thoroughly and say why. Without source code (black-box), every page gets a light visit and pages whose structure changed since the last run (controls, links, forms, headings, API calls; data and counts are ignored) are tested thoroughly.
+
+In every mode, pages built from one template (same route pattern such as `/tutorial/:page`, or the same controls under one parent path) are tested thoroughly once and lightly after that, and any page that shows a problem at light or standard depth, or whose scenario failed, is re-tested thoroughly in the same run. The run summary (`summary.plan`) and the report's "Test plan" section list every page's depth and the reason; nothing is skipped silently.
 
 ---
 

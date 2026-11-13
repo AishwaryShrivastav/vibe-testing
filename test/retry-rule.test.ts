@@ -141,6 +141,43 @@ describe('retry rule: retry once, never hide it', () => {
     expect(result.retry).toBeUndefined()
   }, 60_000)
 
+  const loginScenario = (password: string): TestScenario => ({
+    id: 'login-saved', name: 'Login with saved credentials', route: '/login', priority: 'high',
+    steps: [
+      { action: 'navigate', url: '/login', description: 'Open login' },
+      { action: 'fill', selector: 'input[name="username"]', value: 'admin', description: 'Fill username' },
+      { action: 'fill', selector: 'input[type="password"]', value: password, description: 'Fill password' },
+      { action: 'click', selector: 'button[type="submit"]', description: 'Submit login form' },
+      { action: 'assert', description: 'Login succeeded' },
+    ],
+    expected_outcome: 'Logged in', is_gap: true, generated_by: 'heuristic',
+  })
+
+  async function runLogin(password: string, retries: number) {
+    const ctx = await fx.browser.newContext()
+    try {
+      const config = VibeConfigSchema.parse({ url: fx.baseUrl, retries, browser: { headed: false, slowMo: 0 } })
+      return await runScenarioWithRetry(loginScenario(password), ctx, config, shots, shots)
+    } finally {
+      await ctx.close()
+    }
+  }
+
+  it('resubmits a rejected login submit on the same page and passes with retry info', async () => {
+    const result = await runLogin('1234', 1)
+    expect(result.status).toBe('pass')
+    expect(result.retry).toMatchObject({ attempts: 2, passed_on_retry: true, first_failure: 'Invalid credentials' })
+    expect(collectRetryFindings([result])).toEqual([
+      expect.stringMatching(/^Login with saved credentials \(\/login\): only passed on attempt 2 \(first attempt: Invalid credentials\)/),
+    ])
+  }, 60_000)
+
+  it('still fails a login that is never accepted', async () => {
+    const wrong = await runLogin('wrong', 1)
+    expect(wrong.status).not.toBe('pass')
+    expect(wrong.retry?.passed_on_retry).toBe(false)
+  }, 90_000)
+
   it('merges operation findings with scenario findings without duplicates', () => {
     const passed = { scenario: scenario('/x'), status: 'pass', duration_ms: 1, step_logs: [],
       retry: { attempts: 2, passed_on_retry: true, first_failure: 'boom' } } as TestResult
