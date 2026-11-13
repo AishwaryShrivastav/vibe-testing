@@ -72,6 +72,9 @@ Detection, depth modes and coverage work by [@nrhirani](https://github.com/nrhir
   - Framework dev overlays (TanStack Query and Router devtools, the Next.js dev overlay, Vite error overlay, Vue/Nuxt devtools, Astro dev toolbar) are no longer explored.
   - A login whose form disappears before the URL changes is accepted on the first attempt, and a login form that renders late is waited for.
   - React Router routes declared outside `App`/`router` files are found, including guard tags such as `<PrivateRoute>` and v5 paths like `/(a|b)?`.
+  - A generated scenario whose guessed target isn't on the page is skipped in 4 seconds with the reason, and listed under "Skipped Scenarios". It used to wait 15 seconds and appear under "Bugs Found".
+  - One error seen by several scenarios on a page is reported once.
+  - A short error screen (for example the app's own 404 page) fails with what it shows; it used to read "Could not determine result".
 - **Report footer.** Reads "Tested with vibe-testing" and links to the project.
 - **CI.** The Build & Test job is pinned to `ubuntu-24.04`. Playwright 1.59 can't install its browser dependencies on Ubuntu 26.
 

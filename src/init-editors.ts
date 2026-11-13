@@ -61,7 +61,11 @@ export async function upsertJsonMcpConfig(
     [MCP_SERVER_NAME]: options.withType ? { type: 'stdio', ...MCP_SERVER_ENTRY } : { ...MCP_SERVER_ENTRY },
   }
   await fs.mkdir(path.dirname(filePath), { recursive: true })
-  await fs.writeFile(filePath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+  // Write then rename: an editor reading its config mid-write (Claude Code
+  // keeps live state in ~/.claude.json) must never see half a file.
+  const temporary = `${filePath}.vibe-test-${process.pid}.tmp`
+  await fs.writeFile(temporary, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+  await fs.rename(temporary, filePath)
   return hadServers ? 'updated' : 'created'
 }
 
