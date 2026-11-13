@@ -4,7 +4,11 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
-## [Unreleased]
+## [0.5.0] — 2026-11-13
+
+Detection, depth modes and coverage work by [@nrhirani](https://github.com/nrhirani) (#12, #13, #14).
+
+**Breaking:** `explore_page` returns `problems` and `diagnostics` instead of `errors`, and the `routes` setting is ignored (use `scope`).
 
 ### Added
 
@@ -56,6 +60,12 @@ All notable changes to **vibe-test** are documented here.
   - Search/filter/pagination/upload scenarios guessed from prose.
   - Duplicate reports of one bug.
 - **Report metrics.** "Live pages observed" counts crawled and explored pages.
+- **First run on real apps.** Found by running vibe-test on cypress-realworld-app and shadcn-admin:
+  - shadcn/ui forms are no longer reported as "error visible on page". Healthy labels carry `data-error="false"`, which was read as an error.
+  - Framework dev overlays (TanStack Query and Router devtools, the Next.js dev overlay, Vite error overlay, Vue/Nuxt devtools, Astro dev toolbar) are no longer explored.
+  - A login whose form disappears before the URL changes is accepted on the first attempt, and a login form that renders late is waited for.
+  - React Router routes declared outside `App`/`router` files are found, including guard tags such as `<PrivateRoute>` and v5 paths like `/(a|b)?`.
+- **Report footer.** Reads "Tested with vibe-testing" and links to the project.
 - **CI.** The Build & Test job is pinned to `ubuntu-24.04`. Playwright 1.59 can't install its browser dependencies on Ubuntu 26.
 
 ---

@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "vibe-testing",
   "display_name": "vibe-testing",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "description": "Code-aware browser testing for AI coding agents.",
   "long_description": "Read the app's routes and forms, run browser checks with Playwright, compare runs, and produce an evidence-backed QA report. The server makes no LLM calls and needs no API key.",
   "author": {

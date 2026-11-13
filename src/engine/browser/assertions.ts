@@ -95,7 +95,7 @@ export async function assertPage(page: Page, step: TestStep, baseUrl: string): P
     }
 
     // Compatibility for generated description-only assertions: page health only.
-    const errors = page.locator('[role="alert"], [data-error], .error-message, .toast-error')
+    const errors = page.locator('[role="alert"], [data-error]:not([data-error="false"]), .error-message, .toast-error')
     for (let i = 0; i < await errors.count(); i++) {
       const error = errors.nth(i)
       if (await error.isVisible()) {

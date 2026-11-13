@@ -171,7 +171,7 @@ export class VibeTester {
     logger.success(`Passed: ${passed}`)
     if (failed > 0)  logger.error(`Failed: ${failed}`)
     if (errors > 0)  logger.warn(`Errors: ${errors}`)
-    if (explorerFailures.length > 0) logger.error(`Server errors found while exploring: ${explorerFailures.length}`)
+    if (explorerFailures.length > 0) logger.error(`Problems found while exploring: ${explorerFailures.length}`)
     if (retryFindings.length > 0) logger.warn(`Only succeeded on retry: ${retryFindings.length}`)
     const appChanges = collectAppChanges(explorations)
     if (appChanges.length > 0) logger.dim(`Changes made to the app while exploring: ${appChanges.length} (see report)`)

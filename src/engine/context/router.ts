@@ -309,7 +309,57 @@ async function parseReactSpaRoutes(codebasePath: string): Promise<Route[]> {
     } catch { continue }
   }
 
-  return []
+  // No conventional router file: routes are declared somewhere else in src
+  // (e.g. src/containers/App.tsx plus a nested routes container).
+  return scanReactRouterFiles(codebasePath)
+}
+
+const ROUTER_IMPORT = /from\s+['"](?:react-router(?:-dom)?|wouter|@reach\/router)['"]/
+const GUARDED_ROUTE_TAG = /^(?:Private|Protected|Secure|Auth|Authenticated|Guarded)\w*Route$/
+
+/** `/(a|b)?` (react-router v5 regex paths) → `/`, `/a`, `/b`. Other paths as-is. */
+export function expandRoutePath(routePath: string): string[] {
+  const group = routePath.match(/^(.*?)\(([\w-]+(?:\|[\w-]+)*)\)(\?)?(.*)$/)
+  if (!group) return [routePath]
+  const [, before, alternatives, optional, after] = group
+  const paths = alternatives.split('|').map(option => `${before}${option}${after}`)
+  if (optional) paths.unshift(`${before}${after}`.replace(/\/$/, '') || '/')
+  return paths
+}
+
+/** Routes declared on `<…Route path="/…">` tags, with guard tags marked as signed-in. */
+export function extractRouteTagsFromContent(content: string): Route[] {
+  const routes: Route[] = []
+  const tagPattern = /<(\w*Route)\b([^<>]*?)\bpath=\{?\s*['"`]([^'"`]+)['"`]/g
+  for (const match of content.matchAll(tagPattern)) {
+    for (const routePath of expandRoutePath(match[3])) {
+      if (!routePath.startsWith('/') || routePath.includes('*')) continue
+      routes.push({
+        path: routePath,
+        type: 'page',
+        requires_auth: GUARDED_ROUTE_TAG.test(match[1]),
+        dynamic_segments: extractDynamicSegments(routePath),
+      })
+    }
+  }
+  return routes
+}
+
+async function scanReactRouterFiles(codebasePath: string): Promise<Route[]> {
+  const files = (await glob('src/**/*.{tsx,jsx,ts,js}', codebasePath))
+    .filter(file => !/(\.test\.|\.spec\.|__tests__|\.d\.ts$|\.stories\.)/.test(file))
+    .sort()
+  const byPath = new Map<string, Route>()
+  for (const file of files) {
+    let content: string
+    try { content = await readFile(path.join(codebasePath, file)) } catch { continue }
+    if (!ROUTER_IMPORT.test(content)) continue
+    const routes = extractRouteTagsFromContent(content).filter(route => !byPath.has(route.path))
+    if (routes.length === 0) continue
+    await resolveReactComponentPaths(routes, content, codebasePath, path.dirname(path.join(codebasePath, file)))
+    for (const route of routes) byPath.set(route.path, route)
+  }
+  return [...byPath.values()]
 }
 
 async function resolveReactComponentPaths(

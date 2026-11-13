@@ -19,7 +19,7 @@ export async function verifyResult(
   const currentUrl  = page.url()
 
   const hasErrorMessage = await page.locator(
-    '[role="alert"]:visible:not(:empty), [data-error]:visible:not(:empty), .toast-error:visible:not(:empty)'
+    '[role="alert"]:visible:not(:empty), [data-error]:not([data-error="false"]):visible:not(:empty), .toast-error:visible:not(:empty)'
   ).count().then(n => n > 0).catch(() => false)
 
   const hasSuccessIndicator = await page.locator(

@@ -93,6 +93,18 @@ export function isAuthNavigation(text: string | undefined, href: string | undefi
 
 // ─── Element Discovery ───────────────────────────────────────────────────────
 
+/**
+ * Dev-only overlays injected by frameworks and data libraries (TanStack Query
+ * and Router devtools, Next.js dev overlay, Vite error overlay, Vue/Nuxt
+ * devtools, Astro dev toolbar). Elements inside them are never explored.
+ */
+export const DEV_OVERLAY_SELECTOR = [
+  '[class*="devtools" i]', '[id*="devtools" i]', '[aria-label*="devtool" i]', '[data-testid*="devtools" i]',
+  '.tsqd-parent-container', '[class*="tsqd-"]',
+  'nextjs-portal', '[data-nextjs-toast]', '[data-nextjs-dialog-overlay]', '[data-next-badge-root]', '#__next-build-watcher',
+  'vite-error-overlay', 'astro-dev-toolbar', 'nuxt-devtools-frame',
+].join(', ')
+
 async function discoverElements(page: Page): Promise<DiscoveredElement[]> {
   try {
     const elements = await page.evaluate(`(() => {
@@ -123,6 +135,8 @@ async function discoverElements(page: Page): Promise<DiscoveredElement[]> {
       }
 
       function addElement(el, type) {
+        // Framework dev overlays are not the app: clicking through them is slow and reports noise.
+        if (el.closest(${JSON.stringify(DEV_OVERLAY_SELECTOR)})) return;
         var rect = el.getBoundingClientRect();
         if (rect.height === 0 || rect.width === 0) return;
         var style = window.getComputedStyle(el);

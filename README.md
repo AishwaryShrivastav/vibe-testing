@@ -27,6 +27,35 @@ Then open your editor and say:
 
 > "Scan this codebase and test it against http://localhost:3000"
 
+No source code? Point it at a URL from an empty folder and it tests the app black-box:
+
+```bash
+npx vibe-testing@latest run https://staging.example.com
+```
+
+---
+
+## It finds bugs you didn't write a test for
+
+While it explores, vibe-testing checks for server crashes, console errors, broken values (`NaN`, `[object Object]`, `Invalid Date`), totals that don't match their line items, saved values that never appear, a logout that doesn't end the session, and one user opening another user's pages. No scenarios to write.
+
+Measured on intentionally buggy apps (0.5.0, [details in #13](https://github.com/AishwaryShrivastav/vibe-testing/pull/13)):
+
+| App | Mode | Before | 0.5.0 |
+|---|---|---|---|
+| react-simple-project (7 planted functional bugs) | with source code | 1 of 7 | **7 of 7** |
+| react-simple-project | URL only | 0 of 7 | **7 of 7** |
+| OWASP NodeGoat | with source code | 0 issues | `/contributions` crash, `/allocations` 500s, a redirect to `/undefined` |
+| restful-booker-platform (no planted bugs) | both | 3 pages, 4 false errors | 8+ pages, 1 real bug: `/api/room/:id` returns 500 |
+
+No false findings on these three apps in either mode. Run it against a test environment: exploration creates records and lists every change it made.
+
+Using it on your project? Add the badge:
+
+```markdown
+[![tested with vibe-testing](https://img.shields.io/badge/tested%20with-vibe--testing-7c3aed)](https://github.com/AishwaryShrivastav/vibe-testing)
+```
+
 ---
 
 ## What code-aware testing adds
