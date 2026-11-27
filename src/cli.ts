@@ -579,6 +579,7 @@ program
   .option('--ledger-task <id>', 'task id for ledger lines (required with --ledger)')
   .option('--ledger-stage <id>', 'stage id for ledger lines', 'E4_vibe_test')
   .option('--ledger-by <who>', 'who ran it, for ledger lines', 'agent:vibe-testing')
+  .option('--ledger-path <path>', 'report path or URL to put in ledger lines (default: report.html relative to the ledger file\'s git repository)')
   .option('--sha <sha>', 'commit the run is for (default: git HEAD of --codebase)')
   .option('--strict', 'exit 1 when a selected case has no steps or could not run (default: only failures exit 1)')
   .option('--headed', 'show the browser')
@@ -586,7 +587,7 @@ program
   .action(async (files: string[], opts: {
     url?: string; config?: string; codebase?: string; only?: string[]; priority?: string; viewports?: string; motion?: string
     include?: string[]; storageState?: string; retries?: string; out?: string; json?: string; junit?: string
-    ledger?: string; ledgerTask?: string; ledgerStage: string; ledgerBy: string; sha?: string; strict?: boolean; headed?: boolean; open: boolean
+    ledger?: string; ledgerTask?: string; ledgerStage: string; ledgerBy: string; ledgerPath?: string; sha?: string; strict?: boolean; headed?: boolean; open: boolean
   }) => {
     if (!await requireChromium()) { process.exitCode = 1; return }
     const { parseViewport, parseMotion } = await import('./engine/cases/dsl.js')
@@ -618,7 +619,7 @@ program
       baseUrl: opts.url, only: opts.only, priorities: opts.priority?.split(',').map(p => p.trim()).filter(Boolean),
       viewports, motion, includeTags: opts.include?.map(t => t.toLowerCase()),
       outDir: opts.out, json: opts.json, junit: opts.junit, sha: opts.sha,
-      ledger: opts.ledger ? { file: opts.ledger, task: opts.ledgerTask!, stage: opts.ledgerStage, by: opts.ledgerBy } : undefined,
+      ledger: opts.ledger ? { file: opts.ledger, task: opts.ledgerTask!, stage: opts.ledgerStage, by: opts.ledgerBy, path: opts.ledgerPath } : undefined,
     })
 
     const s = out.run.summary

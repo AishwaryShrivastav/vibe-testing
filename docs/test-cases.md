@@ -100,7 +100,7 @@ Written to `.vibe/cases/` (or `--out`):
 - `report.html`: one row per case with each variant's result and screenshot.
 - `results.json`: cases, variants, steps, verification level and screenshot paths.
 - `--junit <file>`: JUnit XML, one testcase per case and variant, for CI test reporters.
-- `--ledger <file> --ledger-task <id>`: appends one JSON line per case: `{"ts","task","stage","kind":"vibe-run","ref":"TC-..","result":"pass|fail|warn","summary","path","sha","by"}`. Cases that did not run are `warn`, never `pass`. `--ledger-stage` (default `E4_vibe_test`), `--ledger-by` (default `agent:vibe-testing`), `--sha` (default: git HEAD of `--codebase`).
+- `--ledger <file> --ledger-task <id>`: appends one JSON line per case: `{"ts","task","stage","kind":"vibe-run","ref":"TC-..","result":"pass|fail|warn","summary","path","sha","by"}`. Cases that did not run are `warn`, never `pass`. `--ledger-stage` (default `E4_vibe_test`), `--ledger-by` (default `agent:vibe-testing`), `--sha` (default: git HEAD of `--codebase`), `--ledger-path` (default: `report.html` relative to the ledger file's git repository).
 
 Exit code 1 when a case fails or cannot run; with `--strict` also when a selected case needs steps. The report does not open by itself with `--no-open`, or when `CI` or `VIBE_NO_OPEN` is set.
 

@@ -38,6 +38,13 @@ export interface RunCaseFilesOutput {
   warnings: string[]
 }
 
+async function gitRoot(dir: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await promisify(execFile)('git', ['rev-parse', '--show-toplevel'], { cwd: dir })
+    return stdout.trim() || undefined
+  } catch { return undefined }
+}
+
 async function gitSha(dir: string): Promise<string | undefined> {
   try {
     const { stdout } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: dir })
@@ -75,7 +82,8 @@ export async function runCaseFiles(input: RunCaseFilesInput): Promise<RunCaseFil
     // Append-only, like the ledger itself.
     await fs.appendFile(ledgerPath, toLedger(run, {
       task: input.ledger.task, stage: input.ledger.stage ?? 'E4_vibe_test', by: input.ledger.by ?? 'agent:vibe-testing',
-      sha, path: input.ledger.path ?? path.relative(process.cwd(), reportPath),
+      // The ledger's own repository is what its paths are relative to.
+      sha, path: input.ledger.path ?? path.relative(await gitRoot(path.dirname(ledgerPath)) ?? process.cwd(), reportPath).split(path.sep).join('/'),
     }), 'utf8')
   }
   return { run, report_path: reportPath, json_path: jsonPath, junit_path: junitPath, ledger_path: ledgerPath, sha, warnings: files.flatMap(f => f.errors) }
