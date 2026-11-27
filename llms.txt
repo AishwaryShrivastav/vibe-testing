@@ -1,13 +1,13 @@
 # Vibe Test — Code-Aware Browser Testing Agent (MCP Server)
 
 > npm package: `vibe-testing` | CLI command: `vibe-test`
-> An MCP server + CLI for AI-powered browser testing. Gives AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 14 Playwright-based testing tools via Model Context Protocol.
+> An MCP server + CLI for AI-powered browser testing. Gives AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 15 Playwright-based testing tools via Model Context Protocol.
 
 ## What is Vibe Test?
 
 Vibe Test is a browser testing agent that reads your codebase, understands every route/form/component, opens a real Playwright browser, explores every interactive element, and reports what works and what breaks — with screenshots.
 
-It works as an **MCP (Model Context Protocol) server** that gives your code editor 14 testing tools, or as a standalone CLI. No internal LLM — the editor's AI is the brain, vibe-test is the hands.
+It works as an **MCP (Model Context Protocol) server** that gives your code editor 15 testing tools, or as a standalone CLI. No internal LLM — the editor's AI is the brain, vibe-test is the hands.
 
 ## When to Use
 
@@ -44,7 +44,7 @@ npx vibe-testing@latest run http://localhost:3000
 npx vibe-testing@latest converge http://localhost:3000
 ```
 
-## MCP Tools (14)
+## MCP Tools (15)
 
 0. `configure` — Detect framework, running server and authentication; create `VIBE.md` / `vibe.config.json`. **Start here on a new project.**
 1. `scan_codebase` — Analyze project: routes, forms, existing tests, coverage gaps, generated scenarios. Also returns `route_changes` (new/removed routes since last scan). **Call first.**
@@ -60,6 +60,7 @@ npx vibe-testing@latest converge http://localhost:3000
 11. `run_full_test` — All-in-one: scan → execute → explore → report. Lists failed scenarios with reasons and problems found while exploring. `mode`: deep (default), fast, auto (changed pages thorough, rest light) or changed (only changed pages). Includes `snapshot_diff` vs the previous run.
 12. `run_converge` — Iterative testing: keeps running follow-up rounds until coverage thresholds met. Includes `snapshot_diff` vs the previous run.
 13. `cleanup` — Close browsers and reset session
+14. `run_test_cases` — Run test cases written in markdown or JSON (`### TC-<id>` headings with ```vibe step blocks) across viewports and reduced motion; cases with only a prose hint come back as needs_steps. CLI: `vibe-testing cases <files>`.
 
 ## Supported Frameworks
 

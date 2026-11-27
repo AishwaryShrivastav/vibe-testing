@@ -169,7 +169,31 @@ export interface Gap {
   untested_aspects?: string[]
 }
 
-export type StepAction = 'navigate' | 'fill' | 'click' | 'wait' | 'assert' | 'select' | 'upload'
+export type StepAction =
+  | 'navigate' | 'fill' | 'click' | 'wait' | 'assert' | 'select' | 'upload'
+  /** Press a key (value), optionally on selector. */
+  | 'press'
+  /** HTTP request with the page's cookies: method, url, body, headers. Stores the response for expect_status / expect_json. */
+  | 'request'
+  /** Header (selector = name, value) sent with every later request step of this scenario. */
+  | 'header'
+  /** The last request's status: value "200", "2xx", "4xx" or "400|403". */
+  | 'expect_status'
+  /** The last request's JSON body: path, op, value. */
+  | 'expect_json'
+  /** A JavaScript expression run in the page (value) must be truthy. */
+  | 'eval'
+  /** selector is fully inside the viewport without scrolling. */
+  | 'in_viewport'
+  /** The page has no horizontal scroll. */
+  | 'no_horizontal_scroll'
+  /** No animation is running (waits up to timeout; ignore = selector of elements whose animations are allowed). */
+  | 'still'
+  /** axe-core accessibility scan: value = lowest impact that fails (default serious), selector = scope, ignore = rule ids. */
+  | 'a11y'
+
+/** Actions that check something; a scenario with one of these is verified by its checks, not by heuristics. */
+export const CHECK_ACTIONS: readonly StepAction[] = ['assert', 'expect_status', 'expect_json', 'eval', 'in_viewport', 'no_horizontal_scroll', 'still', 'a11y']
 
 export interface TestStep {
   action: StepAction
@@ -177,10 +201,24 @@ export interface TestStep {
   selector?: string
   /** For assert: contained visible text. For upload: one local file path. */
   value?: string
-  /** For assert: exact expected URL, resolved against the configured base URL. */
+  /** For assert: exact expected URL, resolved against the configured base URL. For request: the URL. */
   url?: string
   timeout?: number
   description: string
+  /** request: HTTP method (default GET). */
+  method?: string
+  /** request: body; an object or JSON text is sent as JSON. */
+  body?: unknown
+  /** request: extra headers for this request. */
+  headers?: Record<string, string>
+  /** request: 0 to see a redirect's own status instead of following it. */
+  max_redirects?: number
+  /** expect_json: dotted path, [n] for an index, [*] for every item (all must match). */
+  path?: string
+  /** expect_json: equals (default), not_equals, contains, exists (key present, may be null), absent (key missing), length, matches, gt, gte, lt, lte. */
+  op?: 'equals' | 'not_equals' | 'contains' | 'exists' | 'absent' | 'length' | 'matches' | 'gt' | 'gte' | 'lt' | 'lte'
+  /** still: selector of elements allowed to keep animating. a11y: comma-separated rule ids to skip. */
+  ignore?: string
 }
 
 export interface TestScenario {

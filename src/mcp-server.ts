@@ -196,12 +196,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
                 items: {
                   type: 'object',
                   properties: {
-                    action: { type: 'string', enum: ['navigate', 'fill', 'click', 'wait', 'assert', 'select', 'upload'], description: 'Step action: navigate (go to URL), fill (type into input), click (click element), wait (pause ms), assert (selector must be visible, value checks contained visible text on selector or body, url checks exact URL; supplied checks all apply; without these fields only checks page health), select (dropdown), upload (file input).' },
+                    action: { type: 'string', enum: ['navigate', 'fill', 'click', 'wait', 'assert', 'select', 'upload', 'press', 'request', 'header', 'expect_status', 'expect_json', 'eval', 'in_viewport', 'no_horizontal_scroll', 'still', 'a11y'], description: 'Step action: navigate (go to URL), fill (type into input), click (click element), wait (pause ms), assert (selector must be visible, value checks contained visible text on selector or body, url checks exact URL; supplied checks all apply; without these fields only checks page health), select (dropdown), upload (file input), press (key in value, e.g. Enter or Tab; optional selector), request (HTTP call with the browser session: method, url, body, headers; stores the response), header (selector = header name, value: sent with later request steps), expect_status (value 200, 2xx or 400|403 for the last request), expect_json (path such as items[*].id, op, value on the last JSON response), eval (JavaScript expression in value must be truthy), in_viewport (selector fully visible without scrolling), no_horizontal_scroll, still (no running animations within timeout; ignore = selector allowed to move), a11y (axe-core scan; value = lowest failing impact, default serious; selector = scope; ignore = rule ids).' },
                     selector: { type: 'string', description: 'CSS selector, text=, placeholder=, or label= locator for the target element.' },
                     value: { type: 'string', description: 'Value to fill/select, milliseconds for wait, expected contained visible text for assert, or file path for upload (relative to codebase_path or absolute).' },
                     url: { type: 'string', description: 'URL or route path for navigate, or exact expected URL for assert.' },
                     timeout: { type: 'number', description: 'Step timeout in milliseconds. Default 15000.' },
                     description: { type: 'string', description: 'Human-readable description of what this step does.' },
+                    method: { type: 'string', description: 'request: HTTP method (default GET).' },
+                    body: { description: 'request: body; an object or JSON text is sent as JSON.' },
+                    headers: { type: 'object', additionalProperties: { type: 'string' }, description: 'request: extra headers.' },
+                    max_redirects: { type: 'number', description: 'request: 0 to check a redirect itself (e.g. 303 to /login).' },
+                    path: { type: 'string', description: 'expect_json: path such as data.items[0].id or items[*].origin ($ = whole body).' },
+                    op: { type: 'string', enum: ['equals', 'not_equals', 'contains', 'exists', 'absent', 'length', 'matches', 'gt', 'gte', 'lt', 'lte'], description: 'expect_json comparison (default equals, or exists without value).' },
+                    ignore: { type: 'string', description: 'still: selector of elements allowed to keep animating. a11y: comma-separated axe rule ids to skip.' },
                   },
                   required: ['action', 'description'],
                 },
@@ -336,6 +343,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['codebase_path'],
       },
     },
+    {
+      name: 'run_test_cases',
+      description: `Run test cases written in markdown or JSON files: each "### TC-<id> <title> (P0)" heading with a \`\`\`vibe block of steps is one case (lines like open /login, fill "label=Email" a@b.co, press Enter, see "[role=alert]" "do not match", request POST /api/x {...}, status 200, json items[*].id exists, in-viewport <selector>, still 5000, a11y serious; options @viewports 1440x900 390x844, @motion full reduce, @auth [account], @base <url or folder>). Cases run in every viewport x motion variant. Cases without a vibe block are reported as needs_steps with their natural-language hint so you can write the steps; they never pass. Writes report.html and results.json (optionally JUnit XML and evidence-ledger JSON lines). It is an error result when a case fails or errors.`,
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          files: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Absolute paths of markdown (.md) or JSON case files.' },
+          url: { type: 'string', description: 'Base URL (http(s) or file://). Default: @base in the file, else url in vibe.config.json.' },
+          codebase_path: { type: 'string', description: 'Project root holding vibe.config.json (auth, retries); outputs go to <root>/.vibe/cases. Default: current directory.' },
+          only: { type: 'array', items: { type: 'string' }, description: 'Only these case ids (a trailing * matches a prefix).' },
+          priorities: { type: 'array', items: { type: 'string' }, description: 'Only these priorities, e.g. ["P0"].' },
+          viewports: { type: 'array', items: { type: 'string' }, description: 'Default viewports for cases without @viewports, e.g. ["1440x900", "390x844"].' },
+          motion: { type: 'array', items: { type: 'string', enum: ['full', 'reduce'] }, description: 'Default motion settings for cases without @motion.' },
+          include_tags: { type: 'array', items: { type: 'string' }, description: 'Also run cases tagged live or manual.' },
+          out_dir: { type: 'string', description: 'Output folder (default <codebase_path>/.vibe/cases).' },
+          junit: { type: 'string', description: 'Write JUnit XML to this path.' },
+          ledger: { type: 'string', description: 'Append evidence-ledger lines (kind vibe-run, one per case) to this JSONL file.' },
+          ledger_task: { type: 'string', description: 'Task id for ledger lines (needed with ledger).' },
+          ledger_stage: { type: 'string', description: 'Stage id for ledger lines (default E4_vibe_test).' },
+          headed: { type: 'boolean', default: false, description: 'Show the browser.' },
+        },
+        required: ['files'],
+      },
+    },
   ],
 }))
 
@@ -361,6 +392,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_context': return await handleGetContext(args)
       case 'cleanup': return await handleCleanup()
       case 'configure': return await handleConfigure(args)
+      case 'run_test_cases': return await handleRunTestCases(args)
       default: throw new Error(`Unknown tool: ${name}`)
     }
   } catch (err) {
@@ -373,6 +405,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   }
 })
+
+// ─── run_test_cases ───────────────────────────────────────────────────────────
+
+async function handleRunTestCases(args: Record<string, unknown>) {
+  const files = (args.files as string[] | undefined)?.filter(f => typeof f === 'string' && f.trim())
+  if (!files?.length) throw new Error('files is required: one or more markdown or JSON case files')
+  if (args.ledger && !args.ledger_task) throw new Error('ledger needs ledger_task')
+  const { runCaseFiles } = await import('./engine/cases/index.js')
+  const { parseViewport } = await import('./engine/cases/dsl.js')
+  const projectRoot = (args.codebase_path as string | undefined) ?? process.cwd()
+  const fileConfig = await loadRunConfig({ projectRoot, codebasePath: projectRoot, headed: (args.headed as boolean | undefined) ?? false })
+  const out = await runCaseFiles({
+    files, projectRoot, toolVersion: PKG_VERSION,
+    config: fileConfig,
+    baseUrl: args.url as string | undefined,
+    only: args.only as string[] | undefined,
+    priorities: args.priorities as string[] | undefined,
+    viewports: (args.viewports as string[] | undefined)?.map(parseViewport),
+    motion: args.motion as Array<'full' | 'reduce'> | undefined,
+    includeTags: (args.include_tags as string[] | undefined)?.map(t => t.toLowerCase()),
+    outDir: args.out_dir as string | undefined,
+    junit: args.junit as string | undefined,
+    ledger: args.ledger ? { file: args.ledger as string, task: args.ledger_task as string, stage: args.ledger_stage as string | undefined } : undefined,
+  })
+  const cases = out.run.cases.map(c => ({
+    id: c.id, title: c.title, priority: c.priority, status: c.status,
+    ...(c.reason ? { reason: c.reason } : {}),
+    ...(c.status === 'needs_steps' && c.hint ? { hint: c.hint, where: `${c.file}:${c.line}` } : {}),
+    variants: c.variants.map(v => ({ name: v.name, status: v.status, ...(v.reason && v.status !== 'pass' ? { reason: v.reason.split('\n')[0].slice(0, 300) } : {}), screenshot: v.result?.screenshot_path })),
+  }))
+  const text = JSON.stringify({ summary: out.run.summary, report_path: out.report_path, results_path: out.json_path, junit_path: out.junit_path, ledger_path: out.ledger_path, sha: out.sha, warnings: out.warnings, cases }, null, 2)
+  return { content: [{ type: 'text' as const, text }], isError: out.run.summary.fail > 0 || out.run.summary.error > 0 }
+}
 
 // ─── scan_codebase ────────────────────────────────────────────────────────────
 

@@ -1,7 +1,12 @@
 import type { Locator, Page } from 'playwright'
-import type { TestStep } from '../../types/index.js'
+import { CHECK_ACTIONS, type TestStep } from '../../types/index.js'
 
 export class AssertionFailure extends Error {}
+
+/** A check step other than assert (request status, JSON, eval, viewport, motion, a11y): always explicit proof. */
+function isOtherCheck(step: TestStep): boolean {
+  return step.action !== 'assert' && CHECK_ACTIONS.includes(step.action)
+}
 
 /** Minimum time given to each text read, so a failure can always report what the page showed. */
 const MIN_READ_MS = 1000
@@ -32,11 +37,13 @@ export function stepLocator(page: Page, selector: string): Locator {
 }
 
 export function hasExplicitAssertion(step: TestStep): boolean {
+  if (isOtherCheck(step)) return true
   return step.action === 'assert' && (step.selector !== undefined || step.value !== undefined || step.url !== undefined)
 }
 
 /** Explicit assertions that can be used as outcome-level proof. */
 export function hasStrongExplicitAssertion(step: TestStep): boolean {
+  if (isOtherCheck(step)) return true
   if (step.action !== 'assert') return false
   if (step.url !== undefined && step.url.trim() !== '') return true
   return (

@@ -4,7 +4,7 @@ This is the **vibe-test** source repository. It's an MCP server + CLI for AI-pow
 
 ## What This Project Does
 
-vibe-test gives AI coding assistants (Claude Code, Cursor, Windsurf, etc.) 14 browser testing tools via MCP. When a user asks "test the login flow", the AI uses these tools to:
+vibe-test gives AI coding assistants (Claude Code, Cursor, Windsurf, etc.) 15 browser testing tools via MCP. When a user asks "test the login flow", the AI uses these tools to:
 1. Read the source code (understand real field names, routes, selectors)
 2. Open a real Playwright browser
 3. Execute test steps, take screenshots
@@ -14,8 +14,8 @@ vibe-test gives AI coding assistants (Claude Code, Cursor, Windsurf, etc.) 14 br
 
 ```
 src/
-├── cli.ts              # CLI entry: vibe-test run/converge/init/reset/report + --mcp flag
-├── mcp-server.ts       # MCP server (14 tools via JSON-RPC stdio)
+├── cli.ts              # CLI entry: vibe-test run/converge/cases/init/reset/report + --mcp flag
+├── mcp-server.ts       # MCP server (15 tools via JSON-RPC stdio)
 └── engine/
     ├── index.ts        # VibeTester orchestrator (run + converge, emits snapshot_diff)
     ├── converge.ts     # Iterative coverage loop (baseline + follow-up rounds)
@@ -35,17 +35,19 @@ src/
     │   ├── page-checks.ts / form-checks.ts / totals-check.ts / session-checks.ts / access-checks.ts # functional checks
     │   ├── write-policy.ts # explore.writes gating + change disclosure
     │   ├── depth.ts / fingerprint.ts # light/standard/thorough options; black-box change detection
-    │   └── verifier.ts # Heuristic pass/fail (no LLM)
+    │   ├── verifier.ts # Heuristic pass/fail (no LLM)
+    │   └── extra-steps.ts / session-state.ts # press, request/JSON, eval, in_viewport, still, a11y steps; storage-state and cookie sessions
     ├── memory/         # Persist learning across runs
     │   ├── index.ts    # MemoryManager — selectors, timings, credentials, flaky routes
     │   └── manifest.ts # Route manifest + run snapshot diffing (regression detection)
     ├── reporter/       # Generate HTML (thumbnails + Bugs Found) and Markdown reports
     ├── findings.ts     # Collect failed scenarios, explorer problems, warnings, retries
+    ├── cases/          # Markdown/JSON test cases: parse.ts (headings, hints, overlays), dsl.ts (```vibe steps), run.ts (viewport x motion), reports.ts (HTML, JSON, JUnit, ledger)
     ├── test-plan.ts    # Per-page depth plan for mode fast/deep/auto/changed
     └── coverage-gaps.ts # Post-execution gap analysis
 ```
 
-## MCP Tools (14)
+## MCP Tools (15)
 
 | Tool | Purpose |
 |------|---------|
@@ -62,6 +64,7 @@ src/
 | `run_full_test` | One-shot: scan → execute → explore → report (+ snapshot_diff); `mode` deep/fast/auto/changed |
 | `run_converge` | Iterative testing until thresholds (+ snapshot_diff) |
 | `cleanup` | Close browsers |
+| `run_test_cases` | Run markdown/JSON test cases (```vibe blocks) across viewports x motion; HTML/JSON/JUnit/ledger output |
 
 ## Development
 

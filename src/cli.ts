@@ -459,7 +459,9 @@ program
   .option('-c, --config <path>', 'path to vibe.config.json')
   .option('--codebase <path>', 'path to codebase root (default: cwd)')
   .option('--scope <routes...>', 'limit to specific routes e.g. /login /checkout')
+  .option('--no-open', 'do not open the report (also off when CI or VIBE_NO_OPEN is set)')
   .action(async (urlArg: string | undefined, opts: {
+    open?: boolean
     mode?: string
     since?: string
     headed: boolean
@@ -471,6 +473,7 @@ program
       process.exitCode = 1
       return
     }
+    if (opts.open === false) process.env.VIBE_NO_OPEN = '1'
 
     const config = await loadRunConfig({
       projectRoot: process.cwd(),
@@ -508,7 +511,9 @@ program
   .option('--max-rounds <n>', 'max follow-up rounds after baseline', '4')
   .option('--target-pass-rate <r>', 'stop when last batch pass rate reaches this (0-1)', '0.92')
   .option('--max-gaps <n>', 'stop when critical+important gaps <= this', '2')
+  .option('--no-open', 'do not open the report (also off when CI or VIBE_NO_OPEN is set)')
   .action(async (urlArg: string | undefined, opts: {
+    open?: boolean
     mode?: string
     since?: string
     headed: boolean
@@ -522,6 +527,7 @@ program
       process.exitCode = 1
       return
     }
+    if (opts.open === false) process.env.VIBE_NO_OPEN = '1'
 
     const config = await loadRunConfig({
       projectRoot: process.cwd(),
@@ -551,6 +557,81 @@ program
     if (result.summary.failed > 0 || result.summary.errors > 0 || (result.summary.explorer_failures?.length ?? 0) > 0) {
       process.exit(1)
     }
+  })
+
+program
+  .command('cases <files...>')
+  .description('Run test cases written in markdown (```vibe step blocks under "### TC-..." headings) or JSON; writes report.html, results.json and optional JUnit / evidence-ledger lines')
+  .option('-u, --url <url>', 'base URL (default: @base in the file, else url in vibe.config.json); http(s) or file://')
+  .option('-c, --config <path>', 'path to vibe.config.json (auth, retries, browser)')
+  .option('--codebase <path>', 'project root: config, .vibe output and git SHA (default: cwd)')
+  .option('--only <ids...>', 'only these case ids (TC-FF-01, or a prefix like TC-FF-*)')
+  .option('--priority <list>', 'only these priorities, e.g. P0 or P0,P1')
+  .option('--viewports <list>', 'default viewports when a case does not set @viewports, e.g. 1440x900,390x844')
+  .option('--motion <list>', 'default motion when a case does not set @motion: full, reduce or full,reduce')
+  .option('--include <tags...>', 'also run cases tagged live or manual')
+  .option('--storage-state <file>', 'signed-in Playwright storage state for @auth cases (e.g. saved after Google sign-in)')
+  .option('--retries <n>', 'extra attempts for a failing case (0-2; default: config, else 1)')
+  .option('--out <dir>', 'output folder (default: .vibe/cases)')
+  .option('--json <file>', 'also write results JSON here')
+  .option('--junit <file>', 'write JUnit XML here (for CI)')
+  .option('--ledger <file>', 'append one evidence-ledger line per case (JSON Lines) to this file')
+  .option('--ledger-task <id>', 'task id for ledger lines (required with --ledger)')
+  .option('--ledger-stage <id>', 'stage id for ledger lines', 'E4_vibe_test')
+  .option('--ledger-by <who>', 'who ran it, for ledger lines', 'agent:vibe-testing')
+  .option('--ledger-path <path>', 'report path or URL to put in ledger lines (default: report.html relative to the ledger file\'s git repository)')
+  .option('--sha <sha>', 'commit the run is for (default: git HEAD of --codebase)')
+  .option('--strict', 'exit 1 when a selected case has no steps or could not run (default: only failures exit 1)')
+  .option('--headed', 'show the browser')
+  .option('--no-open', 'do not open the report')
+  .action(async (files: string[], opts: {
+    url?: string; config?: string; codebase?: string; only?: string[]; priority?: string; viewports?: string; motion?: string
+    include?: string[]; storageState?: string; retries?: string; out?: string; json?: string; junit?: string
+    ledger?: string; ledgerTask?: string; ledgerStage: string; ledgerBy: string; ledgerPath?: string; sha?: string; strict?: boolean; headed?: boolean; open: boolean
+  }) => {
+    if (!await requireChromium()) { process.exitCode = 1; return }
+    const { parseViewport, parseMotion } = await import('./engine/cases/dsl.js')
+    const { runCaseFiles } = await import('./engine/cases/index.js')
+    const { openReport } = await import('./utils/open-report.js')
+    if (opts.ledger && !opts.ledgerTask) {
+      logger.error('--ledger needs --ledger-task <task id>')
+      process.exitCode = 1
+      return
+    }
+    const projectRoot = path.resolve(opts.codebase ?? process.cwd())
+    const fileConfig = await loadRunConfig({ projectRoot, configPath: opts.config, codebasePath: projectRoot, headed: !!opts.headed })
+    const auth = opts.storageState ? { ...fileConfig.auth, storage_state: path.resolve(opts.storageState) } : fileConfig.auth
+    const retries = opts.retries !== undefined ? Math.max(0, Math.min(2, Number(opts.retries) || 0)) : fileConfig.retries
+    let viewports: Array<[number, number]> | undefined
+    let motion: Array<'full' | 'reduce'> | undefined
+    try {
+      viewports = opts.viewports?.split(',').map(v => parseViewport(v.trim()))
+      motion = opts.motion?.split(',').map(m => parseMotion(m.trim()))
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err))
+      process.exitCode = 1
+      return
+    }
+
+    const out = await runCaseFiles({
+      files, projectRoot, toolVersion: PKG_VERSION,
+      config: { ...fileConfig, auth: auth as never, ...(retries !== undefined ? { retries } : {}) },
+      baseUrl: opts.url, only: opts.only, priorities: opts.priority?.split(',').map(p => p.trim()).filter(Boolean),
+      viewports, motion, includeTags: opts.include?.map(t => t.toLowerCase()),
+      outDir: opts.out, json: opts.json, junit: opts.junit, sha: opts.sha,
+      ledger: opts.ledger ? { file: opts.ledger, task: opts.ledgerTask!, stage: opts.ledgerStage, by: opts.ledgerBy, path: opts.ledgerPath } : undefined,
+    })
+
+    const s = out.run.summary
+    logger.section('Cases complete')
+    logger.info(`${s.total} case(s): ${s.pass} passed, ${s.fail} failed, ${s.error} errors, ${s.needs_steps} need steps, ${s.skip} skipped`)
+    for (const c of out.run.cases.filter(c => c.status === 'fail' || c.status === 'error')) logger.error(`${c.id} ${c.status}: ${(c.reason ?? '').slice(0, 240)}`)
+    logger.dim(`Report: ${out.report_path}`)
+    logger.dim(`Results: ${out.json_path}`)
+    if (out.junit_path) logger.dim(`JUnit: ${out.junit_path}`)
+    if (out.ledger_path) logger.dim(`Ledger: ${out.ledger_path}`)
+    if (opts.open) openReport(out.report_path)
+    if (s.fail > 0 || s.error > 0 || (opts.strict && s.needs_steps > 0)) process.exitCode = 1
   })
 
 program

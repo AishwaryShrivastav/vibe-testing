@@ -21,6 +21,7 @@ const expectedTools = [
   'get_context',
   'cleanup',
   'configure',
+  'run_test_cases',
 ]
 
 describe('MCPB package', () => {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Vibe Test is a code-aware browser testing agent distributed as an npm package (`vibe-testing`, CLI command: `vibe-test`). It provides an MCP server with 14 tools that let AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) autonomously test web applications using Playwright.
+Vibe Test is a code-aware browser testing agent distributed as an npm package (`vibe-testing`, CLI command: `vibe-test`). It provides an MCP server with 15 tools that let AI code editors (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) autonomously test web applications using Playwright.
 
 The core philosophy: **the editor LLM is the brain, Vibe Test is the hands.** Each tool returns structured JSON data plus screenshots as base64 images, allowing the LLM to see the page and reason about it visually. No internal LLM — pass/fail is determined by heuristics (URL changes, toasts, API errors).
 
@@ -20,7 +20,7 @@ npx vibe-testing@latest run https://your-app.com --codebase /path/to/project
 npx vibe-testing@latest converge https://your-app.com
 ```
 
-## Complete Tool Reference (14 Tools)
+## Complete Tool Reference (15 Tools)
 
 Start a new project with `configure` (tool 14), then `scan_codebase`.
 
@@ -214,6 +214,9 @@ Closes all open browsers and resets session state. Call when done testing.
 
 ### 14. configure
 **Start here on a new project.** Idempotently detects the framework, the running local server and the authentication method, and creates `VIBE.md` and `vibe.config.json` if missing. Existing files are preserved.
+
+### 15. run_test_cases
+Runs test cases written in markdown or JSON: each `### TC-<id> Title (P0)` heading with a fenced `vibe` block of steps is one case. Step lines: `open`, `fill`, `click`, `press`, `select`, `upload`, `wait`, `see`, `visible`, `url`, `in-viewport`, `no-horizontal-scroll`, `still`, `eval`, `a11y`, `header`, `request`, `status`, `json`. Options: `@viewports`, `@motion full reduce`, `@auth [account]`, `@public`, `@base`, `@timeout`, `@tag`, `@skip`. Cases with only a natural-language hint are returned as `needs_steps` with the hint, never as passed. Inputs: `files` (required), `url`, `codebase_path`, `only`, `priorities`, `viewports`, `motion`, `include_tags`, `out_dir`, `junit`, `ledger`, `ledger_task`, `ledger_stage`, `headed`. Writes report.html and results.json. CLI: `vibe-testing cases <files...>`. Reference: docs/test-cases.md.
 
 ## Test Depth and Modes
 

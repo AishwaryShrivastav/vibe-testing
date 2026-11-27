@@ -4,6 +4,19 @@ All notable changes to **vibe-test** are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`vibe-testing cases <files...>` and MCP `run_test_cases`.** Run the test cases a team already wrote in markdown (`### TC-<id> Title (P0)` headings) or JSON. Steps go in a fenced `vibe` block, one command per line (`open`, `fill`, `press`, `see`, `in-viewport`, `still`, `a11y`, `request`, `status`, `json`, ...). Priorities, hints and manual/live markers are read from headings, `priority:` lines and summary tables. A case with only a prose hint is reported as needing steps, never as passed. Steps can live in a separate overlay file with the same ids. Reference: [docs/test-cases.md](docs/test-cases.md).
+- **Viewport and reduced-motion matrix.** `@viewports 1440x900 390x844` and `@motion full reduce` (or `--viewports` / `--motion`) run each case once per combination.
+- **New step actions** (also in `execute_scenario`): `press`, `request` / `header` / `expect_status` / `expect_json` for JSON APIs and MCP endpoints with the browser's session (event-stream bodies are read), `eval`, `in_viewport`, `no_horizontal_scroll`, `still` (no running animations) and `a11y` (axe-core).
+- **Sessions without a login form.** `auth.storage_state` (a Playwright storage-state file, e.g. saved after Google sign-in) and `auth.cookies` (e.g. a fixture-minted session cookie) sign in `run`, `converge` and `@auth` cases. Named `auth.accounts` work per case with `@auth <name>`.
+- **CI outputs.** `cases` writes `report.html` and `results.json`; `--junit` writes JUnit XML; `--ledger` appends one evidence line per case (`kind: vibe-run`, `ref`, `result`, `sha`). Exit code 1 on a failed case, or with `--strict` on a case that needs steps.
+- **`--no-open`** for `run` and `converge`; reports also stay closed when `CI` or `VIBE_NO_OPEN` is set.
+
+---
+
 ## [0.5.0] — 2026-11-13
 
 Detection, depth modes and coverage work by [@nrhirani](https://github.com/nrhirani) (#12, #13, #14).

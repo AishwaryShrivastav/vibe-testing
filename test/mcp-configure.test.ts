@@ -70,12 +70,12 @@ afterAll(async () => {
 })
 
 describe('MCP configuration contract', () => {
-  it('preserves all 13 tool schemas, adds configure, and makes run_full_test URL optional', async () => {
+  it('preserves all 13 tool schemas, adds configure and run_test_cases, and makes run_full_test URL optional', async () => {
     const listed = await client.listTools()
     const names = listed.tools.map(tool => tool.name)
 
-    expect(names).toEqual([...expectedExistingTools, 'configure'])
-    expect(new Set(names).size).toBe(14)
+    expect(names).toEqual([...expectedExistingTools, 'configure', 'run_test_cases'])
+    expect(new Set(names).size).toBe(15)
     const fullTest = listed.tools.find(tool => tool.name === 'run_full_test')!
     expect(fullTest.inputSchema.required ?? []).not.toContain('url')
   })
