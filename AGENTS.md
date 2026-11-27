@@ -11,7 +11,7 @@ npm run build
 npm run build:mcpb
 ```
 
-The MCPB command performs its own package, handshake, and 13-tool checks. Do not commit generated archives from `artifacts/`.
+The MCPB command performs its own package, handshake, and 15-tool checks. Do not commit generated archives from `artifacts/`.
 
 ## Deployment configuration
 

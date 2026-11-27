@@ -18,7 +18,7 @@ import { logger } from '../utils/logger.js'
 import { crawlLiveRoutes } from './browser/live-routes.js'
 import { detectAuthentication } from './context/auth-detector.js'
 import { isRoutePattern } from './context/gap-analyzer.js'
-import { exec } from 'child_process'
+import { openReport } from '../utils/open-report.js'
 import fs from 'fs/promises'
 import path from 'path'
 
@@ -185,8 +185,7 @@ export class VibeTester {
     logger.dim(`Report saved to: ${reportPath}`)
     logger.dim(`Duration: ${(duration / 1000).toFixed(1)}s`)
 
-    const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
-    exec(`${openCmd} "${reportPath}"`, () => {})
+    openReport(reportPath)
 
     return {
       product_model: productModel,
@@ -302,8 +301,7 @@ export class VibeTester {
     logger.success(`Rounds: ${cr.rounds}, final gaps: ${cr.final_gaps.length}, total executions: ${cr.total_results.length}`)
     logger.dim(`Report: ${reportPath}`)
 
-    const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
-    exec(`${openCmd} "${reportPath}"`, () => {})
+    openReport(reportPath)
 
     return {
       product_model: productModel,

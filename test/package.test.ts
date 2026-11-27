@@ -29,7 +29,7 @@ describe('MCP distribution metadata', () => {
     expect(serverJson.packages).toHaveLength(1)
     expect(serverJson.packages[0].identifier).toBe(packageJson.name)
     expect(serverJson.packages[0].version).toBe(packageJson.version)
-    expect(serverJson.description).toContain('14 Playwright tools')
+    expect(serverJson.description).toContain('15 Playwright tools')
   })
 
   it('keeps release identity and canonical links aligned', () => {
