@@ -14,6 +14,8 @@ import { ensureDir } from '../../utils/file.js'
 import path from 'path'
 import fs from 'fs/promises'
 import { assertPage, AssertionFailure, stepLocator } from './assertions.js'
+import { executeExtraStep, isExtraAction } from './extra-steps.js'
+import { addConfiguredCookies, hasStoredSession, storageStatePath } from './session-state.js'
 import { describeSignal, detectCrashText, settleSignals, uniqueSignals, watchServerErrors, type ServerErrorSignal } from './error-signals.js'
 
 export interface ExecutionResult {
@@ -147,9 +149,28 @@ export async function executeScenarios(
     let authEstablished = false
     let authCtx: BrowserContext | null = null
 
-    // Configured credentials (vibe.config.json) come first: they work even when
+    // A stored session (storage state file or cookies, e.g. after an OAuth
+    // sign-in) comes first: no login form is filled.
+    if (hasStoredSession(config.auth)) {
+      try {
+        const ctx = await browser2.newContext({
+          baseURL: config.url,
+          viewport: { width: 1280, height: 800 },
+          storageState: await storageStatePath(config.auth, projectRoot),
+        })
+        ctx.setDefaultTimeout(config.browser?.timeout ?? 30000)
+        await addConfiguredCookies(ctx, config.auth, config.url)
+        authCtx = ctx
+        authEstablished = true
+        logger.success('  Auth from the configured session (storage state / cookies)')
+      } catch (err) {
+        logger.warn(`  Configured session could not be loaded: ${err instanceof Error ? err.message : err}`)
+      }
+    }
+
+    // Configured credentials (vibe.config.json) come next: they work even when
     // no login scenario was generated, e.g. for routes found by the live crawl.
-    if (config.auth?.strategy === 'credentials' && config.auth.credentials) {
+    if (!authEstablished && config.auth?.strategy === 'credentials' && config.auth.credentials) {
       logger.info('Establishing authenticated session from configured credentials...')
       const ctx = await browser2.newContext({
         baseURL: config.url,
@@ -472,7 +493,7 @@ export async function runOneScenario(
   }
 
   // Decide which steps deserve a screenshot: state-changing steps (fill, click, navigate, select, upload)
-  const isScreenshotWorthy = (action: string) => ['fill', 'click', 'navigate', 'select', 'upload'].includes(action)
+  const isScreenshotWorthy = (action: string) => ['fill', 'click', 'navigate', 'select', 'upload', 'press'].includes(action)
 
   try {
     if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) {
@@ -779,6 +800,7 @@ async function executeStep(page: Page, step: TestStep, baseUrl: string, apiError
     case 'assert':
       return assertPage(page, step, baseUrl)
     default:
+      if (isExtraAction(step.action)) return executeExtraStep(page, step, baseUrl, timeout)
       throw new Error(`Unsupported step action: ${String(step.action)}`)
   }
   return undefined

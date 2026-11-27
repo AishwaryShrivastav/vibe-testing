@@ -23,6 +23,28 @@ export const AuthConfigSchema = z.object({
       password: z.string(),
     }),
   })).optional(),
+  /**
+   * A signed-in browser session to reuse instead of filling a login form:
+   * a Playwright storage-state file (cookies + localStorage), e.g. saved after
+   * an OAuth sign-in (Google, GitHub) that a test cannot complete itself.
+   * Relative paths resolve from the codebase root.
+   */
+  storage_state: z.string().optional(),
+  /**
+   * Session cookies to set before signed-in tests, e.g. a signed session
+   * cookie minted by a test fixture. Values may use ${ENV_VAR}. Without
+   * domain/url the cookie is set for the run's URL.
+   */
+  cookies: z.array(z.object({
+    name: z.string(),
+    value: z.string(),
+    domain: z.string().optional(),
+    path: z.string().optional(),
+    url: z.string().optional(),
+    httpOnly: z.boolean().optional(),
+    secure: z.boolean().optional(),
+    sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
+  })).optional(),
 })
 
 export const VibeConfigSchema = z.object({
