@@ -14,7 +14,7 @@
 
 Listed in [Awesome MCP Servers](https://github.com/punkpeye/awesome-mcp-servers/pull/14575). The download badge shows npm's cumulative package downloads; `npx` package fetches contribute to that total.
 
-vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 14 testing tools, or as a standalone CLI.
+vibe-testing reads your codebase so tests use your real routes and field names, runs them in a real Playwright browser, remembers what broke, and tells you what your last change fixed or regressed. It works as an MCP server that gives your editor (Claude Code, Cursor, Windsurf, VS Code Copilot, Roo Code) 15 testing tools, or as a standalone CLI.
 
 The repository is also an [Agent Plugin](https://agent-plugins.org/) with a `release-qa` skill. Compatible agents get both the testing tools and a senior-QA workflow for coverage, evidence, regression checks, and a clear release verdict.
 
@@ -98,7 +98,7 @@ The same diff reaches your editor as `snapshot_diff` on `run_full_test` and `run
 ```
 npx vibe-testing@latest init
         |
-Registers 14 MCP tools in your editor
+Registers 15 MCP tools in your editor
         |
 You ask: "Test the checkout flow"
         |
@@ -282,7 +282,7 @@ Add to `.roo/mcp.json`:
 
 ## MCP tools reference
 
-14 tools available to your AI editor after setup:
+15 tools available to your AI editor after setup:
 
 | Tool | When to call | Returns |
 |------|-------------|---------|
@@ -300,6 +300,7 @@ Add to `.roo/mcp.json`:
 | `run_full_test` | One-shot: scan, execute, explore, report | Full results, `summary.failed_scenarios` (name, route, reason) plus `snapshot_diff` vs last run |
 | `run_converge` | Iterative testing until thresholds | Summary across all rounds (incl. `summary.failed_scenarios`) plus `snapshot_diff` vs last run |
 | `cleanup` | Close browsers, free resources | - |
+| `run_test_cases` | Run test cases your team wrote in markdown or JSON (```vibe step blocks), across viewports and reduced motion | Per-case pass/fail/needs-steps, report, JSON, optional JUnit and evidence-ledger lines. `isError` when a case fails |
 
 `explore_page` replaces the old `errors` field with `problems` (real app failures: server errors, console errors, broken values, functional failures) and `diagnostics` (vibe-test's own notes, such as navigation or discovery issues). It also returns `warnings` (possible missing data such as "Category: Unknown"; not failures) and `changes_made_to_app` (data-changing requests it sent, per `explore.writes`), and sets `isError` when there are `problems`.
 
@@ -361,6 +362,8 @@ Run results (`run_full_test`, `run_converge`, `generate_report`) carry `summary.
 ```
 
 Step actions: `navigate`, `fill`, `click`, `select`, `wait`, `assert`, `upload`
+
+More step actions for authored cases: `press` (key), `request` / `header` / `expect_status` / `expect_json` (HTTP and JSON APIs with the browser session, including MCP endpoints), `eval` (a JavaScript check), `in_viewport` (above the fold), `no_horizontal_scroll`, `still` (no running animations) and `a11y` (axe-core). See [docs/test-cases.md](docs/test-cases.md).
 
 CLI and MCP use the same scenario runner. An `assert` step evaluates every
 supplied condition:
@@ -543,9 +546,15 @@ npx vibe-testing@latest converge http://localhost:3000 --max-rounds 6 --target-p
 # Open last report in browser
 npx vibe-testing@latest report
 
+# Run your own test cases (markdown with ```vibe step blocks), e.g. at two widths with reduced motion
+npx vibe-testing@latest cases docs/test-cases/*.md --url http://localhost:3000 --junit junit.xml
+npx vibe-testing@latest cases design/login/test-cases.md --viewports 1440x900,390x844 --motion full,reduce
+
 # Reset memory and screenshots for a clean run
 npx vibe-testing@latest reset
 ```
+
+`cases` runs test cases written as markdown: a `### TC-<id> Title (P0)` heading plus a fenced `vibe` block of steps (`open`, `fill`, `press`, `see`, `in-viewport`, `still`, `a11y`, `request`, `status`, `json`, ...). Cases with only a prose hint are listed as needing steps, never passed. It writes `report.html` and `results.json`, and with `--junit` / `--ledger` JUnit XML and one evidence line per case. Full reference: [docs/test-cases.md](docs/test-cases.md).
 
 ### `run` options
 
@@ -557,6 +566,7 @@ npx vibe-testing@latest reset
 | `--codebase <path>` | cwd | Path to project root |
 | `--scope <routes...>` | all | Test only specific routes |
 | `-c <path>` | `vibe.config.json` | Config file path |
+| `--no-open` | - | Do not open the report (also off when `CI` or `VIBE_NO_OPEN` is set) |
 
 `run` and `converge` fail with a nonzero exit when no scenarios are discovered
 or an execution batch is empty. MCP `run_full_test` and `run_converge` return
