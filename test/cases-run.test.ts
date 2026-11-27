@@ -232,3 +232,17 @@ describe.runIf(process.env.VIBE_REAL_BROWSER === '1')('markdown test cases in re
     expect(out.run.cases[0].base_url).toMatch(/^file:\/\/.*\/design\/$/)
   }, 60000)
 })
+
+describe('markdown test cases without a browser', () => {
+  it('reports a case as skipped when only a steps overlay says @skip', async () => {
+    const cases = path.join(dir, 'skip-cases.md')
+    const overlay = path.join(dir, 'skip.steps.md')
+    await fs.writeFile(cases, '### TC-K1 Needs a mailbox (P1)\n- vibe: "Open the magic link from the email."\n\n### TC-K2 Has no steps (P2)\n')
+    await fs.writeFile(overlay, '### TC-K1 x\n```vibe\n@skip needs a real mailbox\n```\n')
+    const out = await runCaseFiles({ files: [cases, overlay], projectRoot: dir, toolVersion: 'test', sha: 'abc1234', outDir: path.join(dir, 'skip-out'), config: { retries: 0, browser: { headed: false, slowMo: 0 } } })
+    const byId = Object.fromEntries(out.run.cases.map(c => [c.id, c]))
+    expect(byId['TC-K1']).toMatchObject({ status: 'skip', reason: 'needs a real mailbox', priority: 'P1' })
+    expect(byId['TC-K2'].status).toBe('needs_steps')
+    expect(out.run.summary).toMatchObject({ total: 2, skip: 1, needs_steps: 1 })
+  })
+})

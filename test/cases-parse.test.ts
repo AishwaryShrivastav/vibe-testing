@@ -185,6 +185,15 @@ describe('markdown test cases', () => {
     expect(tc.options.viewports).toEqual([[1440, 900], [390, 844]])
   })
 
+  it('keeps @skip from an overlay that has no steps for the case', () => {
+    const source = parseCaseMarkdown(DESIGN, '/repo/design/login/r2/test-cases.md')
+    const overlay = parseCaseMarkdown('### TC-r2-02 x\n```vibe\n@skip needs a real mailbox\n```\n', '/repo/harness/steps/login.steps.md')
+    const merged = mergeCaseFiles([source, overlay])
+    const tc = merged[0].cases.find(c => c.id === 'TC-r2-02')!
+    expect(tc.options.skip).toBe('needs a real mailbox')
+    expect(merged).toHaveLength(1)
+  })
+
   it('resolves the base URL: explicit, then @base next to the file, then the config URL', () => {
     const tc = { file: '/repo/design/login/r2/test-cases.md', options: {} }
     expect(resolveBase(tc, { base: '.' })).toBe(pathToFileURL('/repo/design/login/r2').href + '/')

@@ -216,7 +216,12 @@ export function mergeCaseFiles(files: CaseFile[]): CaseFile[] {
         if (base && !/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) target.options.base = pathToFileURL(path.resolve(path.dirname(file.file), base)).href
         target.parse_error ??= tc.parse_error
         target.manual = target.manual && tc.manual
-      } else if (tc.parse_error) target.parse_error ??= tc.parse_error
+      } else {
+        if (tc.parse_error) target.parse_error ??= tc.parse_error
+        // An overlay that only says @skip (or @tag) for a case still applies to it.
+        if (tc.options.skip !== undefined) target.options = { ...target.options, skip: tc.options.skip }
+        if (tc.options.tags) target.options = { ...target.options, tags: [...new Set([...(target.options.tags ?? []), ...tc.options.tags])] }
+      }
       target.priority ??= tc.priority
       target.hint ??= tc.hint
       target.tags = [...new Set([...target.tags, ...tc.tags])]

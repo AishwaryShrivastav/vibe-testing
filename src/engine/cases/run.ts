@@ -140,6 +140,11 @@ export async function runCases(files: CaseFile[], config: VibeConfig, opts: Case
           logger.warn(`${tc.id}: could not read its vibe block (${tc.parse_error})`)
           continue
         }
+        if (tc.steps.length === 0 && tc.options.skip) {
+          results.push({ ...base, status: 'skip', reason: tc.options.skip })
+          logger.dim(`${tc.id}: skipped (${tc.options.skip})`)
+          continue
+        }
         if (tc.steps.length === 0) {
           results.push({ ...base, status: tc.manual ? 'skip' : 'needs_steps', reason: tc.manual ? 'manual case' : 'no ```vibe steps yet; the hint alone cannot be run' })
           logger.dim(`${tc.id}: ${tc.manual ? 'manual, not run' : 'needs steps (no vibe block)'}`)
